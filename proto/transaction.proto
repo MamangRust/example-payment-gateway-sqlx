@@ -1,0 +1,282 @@
+syntax = "proto3";
+
+package transaction;
+
+
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "api.proto";
+
+message FindByYearCardNumberTransactionRequest {
+    string card_number = 1;
+    int32 year = 2;
+}
+
+message FindYearTransactionStatus{
+    int32 year = 1;
+}
+
+message FindMonthlyTransactionStatus {
+    int32 year = 1;
+    int32 month = 2;
+}
+
+message FindYearTransactionStatusCardNumber{
+    string card_number = 1;
+    int32 year = 2;
+}
+
+message FindMonthlyTransactionStatusCardNumber {
+    string card_number = 1;
+    int32 year = 2;
+    int32 month = 3;
+}
+
+
+message FindAllTransactionRequest {
+    int32 page = 1;
+    int32 page_size = 2;
+    string search = 3;
+}
+
+message FindAllTransactionCardNumberRequest {
+    string card_number = 1;
+    int32 page = 2;
+    int32 page_size = 3;
+    string search = 4;
+}
+
+message FindByIdTransactionRequest {
+    int32 transaction_id = 1;
+}
+
+message FindByCardNumberTransactionRequest {
+    string card_number = 1;
+}
+
+message FindTransactionByMerchantIdRequest {
+    int32 merchant_id = 1;
+}
+
+message CreateTransactionRequest {
+    string api_key = 1;
+    string card_number = 2;
+    int32 amount = 3;
+    string payment_method = 4;
+    int32 merchant_id = 5;
+    google.protobuf.Timestamp transaction_time = 6;
+}
+
+message UpdateTransactionRequest {
+    int32 transaction_id = 1;
+    string api_key = 2;
+    string card_number = 3;
+    int32 amount = 4;
+    string payment_method = 5;
+    int32 merchant_id = 6;
+    google.protobuf.Timestamp transaction_time = 7;
+}
+
+message TransactionResponse {
+    int32 id = 1;
+    string card_number = 2;
+    string transaction_no = 3;
+    int32 amount = 4;
+    string payment_method = 5;
+    int32 merchant_id = 6;
+    string transaction_time = 7;
+    string created_at = 8;
+    string updated_at = 9;
+}
+
+message TransactionResponseDeleteAt {
+    int32 id = 1;
+    string card_number = 2;
+    string transaction_no = 3;
+    int32 amount = 4;
+    string payment_method = 5;
+    int32 merchant_id = 6;
+    string transaction_time = 7;
+    string created_at = 8;
+    string updated_at = 9;
+    google.protobuf.StringValue deleted_at = 10;
+}
+
+
+message TransactionMonthStatusSuccessResponse {
+    string year = 1;
+    string month = 2;
+    int32 total_success = 3;
+    int32 total_amount = 4;
+}
+
+message TransactionYearStatusSuccessResponse {
+    string year = 1;
+    int32 total_success = 2;
+    int32 total_amount = 4;
+}
+
+message TransactionMonthStatusFailedResponse {
+    string year = 1;
+    string month = 2;
+    int32 total_failed = 3;
+    int32 total_amount = 4;
+}
+
+message TransactionYearStatusFailedResponse {
+    string year = 1;
+    int32 total_failed = 2;
+    int32 total_amount = 4;
+}
+
+
+message TransactionMonthMethodResponse {
+  string month = 1;
+  string payment_method = 2;
+  int32 total_transactions = 3;
+  int32 total_amount = 4;
+}
+
+message TransactionYearMethodResponse {
+  string year = 1;
+  string payment_method = 2;
+  int32 total_transactions = 3;
+  int32 total_amount = 4;
+}
+
+message TransactionMonthAmountResponse {
+  string month = 1;
+  int32 total_amount = 2;
+}
+
+message TransactionYearlyAmountResponse {
+  string year = 1;
+  int32 total_amount = 2;
+}
+
+message ApiResponseTransactionMonthStatusSuccess{
+    string status = 1;
+    string message = 2;
+    repeated TransactionMonthStatusSuccessResponse data = 3;
+}
+
+message ApiResponseTransactionYearStatusSuccess{
+    string status = 1;
+    string message = 2;
+    repeated TransactionYearStatusSuccessResponse data = 3;
+}
+
+
+message ApiResponseTransactionMonthStatusFailed{
+    string status = 1;
+    string message = 2;
+    repeated TransactionMonthStatusFailedResponse data = 3;
+}
+
+message ApiResponseTransactionYearStatusFailed{
+    string status = 1;
+    string message = 2;
+    repeated TransactionYearStatusFailedResponse data = 3;
+}
+
+
+message ApiResponseTransactionMonthMethod{
+    string status = 1;
+    string message = 2;
+    repeated TransactionMonthMethodResponse data = 3;
+}
+
+message ApiResponseTransactionYearMethod{
+    string status = 1;
+    string message = 2;
+    repeated TransactionYearMethodResponse data = 3;
+}
+
+message ApiResponseTransactionMonthAmount{
+    string status = 1;
+    string message = 2;
+    repeated TransactionMonthAmountResponse data = 3;
+}
+
+message ApiResponseTransactionYearAmount{
+    string status = 1;
+    string message = 2;
+    repeated TransactionYearlyAmountResponse data = 3;
+}
+
+message ApiResponseTransaction {
+    string status = 1;
+    string message = 2;
+    TransactionResponse data = 3;
+}
+
+message ApiResponseTransactions {
+    string status = 1;
+    string message = 2;
+    repeated TransactionResponse data = 3;
+}
+
+message ApiResponseTransactionDelete {
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponseTransactionAll {
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponsePaginationTransaction {
+    string status = 1;
+    string message = 2;
+    repeated TransactionResponse data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message ApiResponsePaginationTransactionDeleteAt {
+    string status = 1;
+    string message = 2;
+    repeated TransactionResponseDeleteAt data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+service TransactionService {
+    rpc FindAllTransaction (FindAllTransactionRequest) returns (ApiResponsePaginationTransaction);
+    rpc FindAllTransactionByCardNumber (FindAllTransactionCardNumberRequest) returns (ApiResponsePaginationTransaction);
+
+    rpc FindByIdTransaction (FindByIdTransactionRequest) returns (ApiResponseTransaction);
+
+    rpc FindMonthlyTransactionStatusSuccess(FindMonthlyTransactionStatus)returns(ApiResponseTransactionMonthStatusSuccess){}
+    rpc FindYearlyTransactionStatusSuccess(FindYearTransactionStatus)returns(ApiResponseTransactionYearStatusSuccess){}
+    rpc FindMonthlyTransactionStatusFailed(FindMonthlyTransactionStatus)returns(ApiResponseTransactionMonthStatusFailed){}
+    rpc FindYearlyTransactionStatusFailed(FindYearTransactionStatus)returns(ApiResponseTransactionYearStatusFailed){}
+
+    rpc FindMonthlyTransactionStatusSuccessByCardNumber(FindMonthlyTransactionStatusCardNumber)returns(ApiResponseTransactionMonthStatusSuccess){}
+    rpc FindYearlyTransactionStatusSuccessByCardNumber(FindYearTransactionStatusCardNumber)returns(ApiResponseTransactionYearStatusSuccess){}
+    rpc FindMonthlyTransactionStatusFailedByCardNumber(FindMonthlyTransactionStatusCardNumber)returns(ApiResponseTransactionMonthStatusFailed){}
+    rpc FindYearlyTransactionStatusFailedByCardNumber(FindYearTransactionStatusCardNumber)returns(ApiResponseTransactionYearStatusFailed){}
+
+    rpc FindMonthlyPaymentMethods(FindYearTransactionStatus)returns(ApiResponseTransactionMonthMethod){}
+    rpc FindYearlyPaymentMethods(FindYearTransactionStatus)returns(ApiResponseTransactionYearMethod){}
+    rpc FindMonthlyAmounts(FindYearTransactionStatus)returns(ApiResponseTransactionMonthAmount){}
+    rpc FindYearlyAmounts(FindYearTransactionStatus)returns(ApiResponseTransactionYearAmount){}
+
+    rpc FindMonthlyPaymentMethodsByCardNumber(FindByYearCardNumberTransactionRequest)returns(ApiResponseTransactionMonthMethod){}
+    rpc FindYearlyPaymentMethodsByCardNumber(FindByYearCardNumberTransactionRequest)returns(ApiResponseTransactionYearMethod){}
+    rpc FindMonthlyAmountsByCardNumber(FindByYearCardNumberTransactionRequest)returns(ApiResponseTransactionMonthAmount){}
+    rpc FindYearlyAmountsByCardNumber(FindByYearCardNumberTransactionRequest)returns(ApiResponseTransactionYearAmount){}
+
+
+    rpc FindTransactionByMerchantId (FindTransactionByMerchantIdRequest) returns (ApiResponseTransactions);
+    rpc FindByActiveTransaction (FindAllTransactionRequest) returns (ApiResponsePaginationTransactionDeleteAt);
+    rpc FindByTrashedTransaction (FindAllTransactionRequest) returns (ApiResponsePaginationTransactionDeleteAt);
+    rpc CreateTransaction (CreateTransactionRequest) returns (ApiResponseTransaction);
+    rpc UpdateTransaction (UpdateTransactionRequest) returns (ApiResponseTransaction);
+    rpc TrashedTransaction (FindByIdTransactionRequest) returns (ApiResponseTransaction);
+    rpc RestoreTransaction (FindByIdTransactionRequest) returns (ApiResponseTransaction);
+    rpc DeleteTransactionPermanent (FindByIdTransactionRequest) returns (ApiResponseTransactionDelete);
+
+    rpc RestoreAllTransaction(google.protobuf.Empty) returns (ApiResponseTransactionAll){}
+    rpc DeleteAllTransactionPermanent(google.protobuf.Empty) returns (ApiResponseTransactionAll){}
+}

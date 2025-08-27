@@ -1,0 +1,244 @@
+syntax = "proto3";
+
+package withdraw;
+
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/timestamp.proto";
+import "card.proto";
+import "api.proto";
+import "google/protobuf/empty.proto";
+
+
+
+message FindYearWithdrawStatus{
+    int32 year = 1;
+}
+
+
+message FindMonthlyWithdrawStatus {
+    int32 year = 1;
+    int32 month = 2;
+}
+
+
+message FindYearWithdrawStatusCardNumber{
+    string card_number = 1;
+    int32 year = 2;
+}
+
+
+message FindMonthlyWithdrawStatusCardNumber{
+    string card_number = 1;
+    int32 year = 2;
+    int32 month = 3;
+}
+
+
+
+message FindYearWithdrawCardNumber{
+    string card_number = 1;
+    int32 year = 2;
+}
+
+message FindAllWithdrawRequest {
+    int32 page = 1;
+    int32 page_size = 2;
+    string search = 3;
+}
+
+message FindAllWithdrawByCardNumberRequest {
+    string card_number = 1;
+    int32 page = 2;
+    int32 page_size = 3;
+    string search = 4;
+}
+
+message FindByIdWithdrawRequest {
+    int32 withdraw_id = 1;
+}
+
+// message FindByCardNumberRequest {
+//     string card_number = 1;
+// }
+
+message CreateWithdrawRequest {
+    string card_number = 1;
+    int32 withdraw_amount = 2;
+    google.protobuf.Timestamp withdraw_time = 3;
+}
+
+message UpdateWithdrawRequest {
+    int32 withdraw_id = 1;
+    string card_number = 2;
+    int32 withdraw_amount = 3;
+    google.protobuf.Timestamp withdraw_time = 4;
+}
+
+// response
+
+message WithdrawResponse {
+    int32 withdraw_id = 1;
+    string withdraw_no = 2;
+    string card_number = 3;
+    int32 withdraw_amount = 4;
+    string withdraw_time = 5;
+    string created_at = 6;
+    string updated_at = 7;
+}
+
+message WithdrawResponseDeleteAt {
+    int32 withdraw_id = 1;
+    string withdraw_no = 2;
+    string card_number = 3;
+    int32 withdraw_amount = 4;
+    string withdraw_time = 5;
+    string created_at = 6;
+    string updated_at = 7;
+    google.protobuf.StringValue deleted_at = 8;
+}
+
+message WithdrawMonthStatusSuccessResponse {
+    string year = 1;
+    string month = 2;
+    int32 total_success = 3;
+    int32 total_amount = 4;
+}
+
+message WithdrawYearStatusSuccessResponse {
+    string year = 1;
+    int32 total_success = 2;
+    int32 total_amount = 4;
+}
+
+message WithdrawMonthStatusFailedResponse {
+    string year = 1;
+    string month = 2;
+    int32 total_failed = 3;
+    int32 total_amount = 4;
+}
+
+message WithdrawYearStatusFailedResponse {
+    string year = 1;
+    int32 total_failed = 2;
+    int32 total_amount = 4;
+}
+
+message WithdrawMonthlyAmountResponse {
+  string month = 1;
+  int32 total_amount = 2;
+}
+
+message WithdrawYearlyAmountResponse {
+  string year = 1;
+  int32 total_amount = 2;
+}
+
+
+message ApiResponseWithdrawMonthStatusSuccess{
+    string status = 1;
+    string message = 2;
+    repeated WithdrawMonthStatusSuccessResponse data = 3;
+}
+
+message ApiResponseWithdrawYearStatusSuccess{
+    string status = 1;
+    string message = 2;
+    repeated WithdrawYearStatusSuccessResponse data = 3;
+}
+
+
+message ApiResponseWithdrawMonthStatusFailed{
+    string status = 1;
+    string message = 2;
+    repeated WithdrawMonthStatusFailedResponse data = 3;
+}
+
+message ApiResponseWithdrawYearStatusFailed{
+    string status = 1;
+    string message = 2;
+    repeated WithdrawYearStatusFailedResponse data = 3;
+}
+
+
+message ApiResponseWithdrawMonthAmount{
+    string status = 1;
+    string message = 2;
+    repeated WithdrawMonthlyAmountResponse data = 3;
+}
+
+message ApiResponseWithdrawYearAmount{
+    string status = 1;
+    string message = 2;
+    repeated WithdrawYearlyAmountResponse data = 3;
+}
+
+message ApiResponsesWithdraw {
+    string status = 1;
+    string message = 2;
+    repeated WithdrawResponse data = 3;
+}
+
+message ApiResponseWithdraw{
+    string status = 1;
+    string message = 2;
+    WithdrawResponse data = 3;
+}
+
+message ApiResponseWithdrawDelete {
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponseWithdrawAll {
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponsePaginationWithdraw {
+    string status = 1;
+    string message = 2;
+    repeated WithdrawResponse data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message ApiResponsePaginationWithdrawDeleteAt {
+    string status = 1;
+    string message = 2;
+    repeated WithdrawResponseDeleteAt data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+service WithdrawService {
+    rpc FindAllWithdraw (FindAllWithdrawRequest) returns (ApiResponsePaginationWithdraw);
+    rpc FindAllWithdrawByCardNumber (FindAllWithdrawByCardNumberRequest) returns (ApiResponsePaginationWithdraw);
+    rpc FindByIdWithdraw (FindByIdWithdrawRequest) returns (ApiResponseWithdraw);
+
+    rpc FindMonthlyWithdrawStatusSuccess(FindMonthlyWithdrawStatus)returns(ApiResponseWithdrawMonthStatusSuccess){}
+    rpc FindYearlyWithdrawStatusSuccess(FindYearWithdrawStatus)returns(ApiResponseWithdrawYearStatusSuccess){}
+    rpc FindMonthlyWithdrawStatusFailed(FindMonthlyWithdrawStatus)returns(ApiResponseWithdrawMonthStatusFailed){}
+    rpc FindYearlyWithdrawStatusFailed(FindYearWithdrawStatus)returns(ApiResponseWithdrawYearStatusFailed){}
+
+    rpc FindMonthlyWithdrawStatusSuccessCardNumber(FindMonthlyWithdrawStatusCardNumber)returns(ApiResponseWithdrawMonthStatusSuccess){}
+    rpc FindYearlyWithdrawStatusSuccessCardNumber(FindYearWithdrawStatusCardNumber)returns(ApiResponseWithdrawYearStatusSuccess){}
+    rpc FindMonthlyWithdrawStatusFailedCardNumber(FindMonthlyWithdrawStatusCardNumber)returns(ApiResponseWithdrawMonthStatusFailed){}
+    rpc FindYearlyWithdrawStatusFailedCardNumber(FindYearWithdrawStatusCardNumber)returns(ApiResponseWithdrawYearStatusFailed){}
+
+
+    rpc FindMonthlyWithdraws(FindYearWithdrawStatus)returns(ApiResponseWithdrawMonthAmount){}
+    rpc FindYearlyWithdraws(FindYearWithdrawStatus) returns(ApiResponseWithdrawYearAmount){}
+
+    rpc FindMonthlyWithdrawsByCardNumber(FindYearWithdrawCardNumber)returns(ApiResponseWithdrawMonthAmount){}
+    rpc FindYearlyWithdrawsByCardNumber(FindYearWithdrawCardNumber)returns(ApiResponseWithdrawYearAmount){}
+
+    rpc FindByCardNumber (card.FindByCardNumberRequest) returns (ApiResponsesWithdraw);
+    rpc FindByActive (FindAllWithdrawRequest) returns (ApiResponsePaginationWithdrawDeleteAt);
+    rpc FindByTrashed (FindAllWithdrawRequest) returns (ApiResponsePaginationWithdrawDeleteAt);
+    rpc CreateWithdraw (CreateWithdrawRequest) returns (ApiResponseWithdraw);
+    rpc UpdateWithdraw (UpdateWithdrawRequest) returns (ApiResponseWithdraw);
+    rpc TrashedWithdraw (FindByIdWithdrawRequest) returns (ApiResponseWithdraw);
+    rpc RestoreWithdraw (FindByIdWithdrawRequest) returns (ApiResponseWithdraw);
+    rpc DeleteWithdrawPermanent (FindByIdWithdrawRequest) returns (ApiResponseWithdrawDelete);
+
+    rpc RestoreAllWithdraw(google.protobuf.Empty) returns (ApiResponseWithdrawAll){}
+    rpc DeleteAllWithdrawPermanent(google.protobuf.Empty) returns (ApiResponseWithdrawAll){}
+}

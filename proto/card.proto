@@ -1,0 +1,270 @@
+syntax = "proto3";
+
+package card;
+
+
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+import "api.proto";
+
+message FindAllCardRequest {
+    int32 page = 1;
+    int32 page_size = 2;
+    string search = 3;
+}
+
+message FindByIdCardRequest {
+    int32 card_id = 1;
+}
+
+message CreateCardRequest {
+    int32 user_id = 1;
+    string card_type = 2;
+    google.protobuf.Timestamp expire_date = 3;
+    string cvv = 4;
+    string card_provider = 5;
+}
+
+message UpdateCardRequest {
+    int32 card_id = 1;
+    int32 user_id = 2;
+    string card_type = 3;
+    google.protobuf.Timestamp expire_date = 4;
+    string cvv = 5;
+    string card_provider = 6;
+}
+
+
+message CardResponse {
+    int32 id = 1;
+    int32 user_id = 2;
+    string card_number = 3;
+    string card_type = 4;
+    string expire_date = 5;
+    string cvv = 6;
+    string card_provider = 7;
+    string created_at = 8;
+    string updated_at = 9;
+}
+
+message CardResponseDeleteAt {
+    int32 id = 1;
+    int32 user_id = 2;
+    string card_number = 3;
+    string card_type = 4;
+    string expire_date = 5;
+    string cvv = 6;
+    string card_provider = 7;
+    string created_at = 8;
+    string updated_at = 9;
+    google.protobuf.StringValue deleted_at = 10;
+}
+
+message CardResponseMonthlyBalance{
+    string month = 1;
+    int64 total_balance = 2;
+}
+
+message CardResponseYearlyBalance{
+    string year = 1;
+    int64 total_balance = 2;
+}
+
+message CardResponseMonthlyAmount{
+    string month = 1;
+    int64 total_amount = 2;
+}
+
+message CardResponseYearlyAmount{
+    string year = 1;
+    int64 total_amount = 2;
+}
+
+message CardResponseDashboard {
+  int64 total_balance = 1;
+  int64 total_topup = 2;
+  int64 total_withdraw = 3;
+  int64 total_transaction = 4;
+  int64 total_transfer = 5;
+}
+
+
+message CardResponseDashboardCardNumber {
+  int64 total_balance = 1;
+  int64 total_topup = 2;
+  int64 total_withdraw = 3;
+  int64 total_transaction = 4;
+  int64 total_transfer_send = 5;
+  int64 total_transfer_receiver = 6;
+}
+
+
+message ApiResponseCard {
+    string status = 1;
+    string message = 2;
+    CardResponse data = 3;
+}
+
+message ApiResponseCardDelete{
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponseCardAll{
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponsePaginationCard {
+    string status = 1;
+    string message = 2;
+    repeated CardResponse data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message ApiResponsePaginationCardDeleteAt{
+    string status = 1;
+    string message = 2;
+    repeated CardResponseDeleteAt data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message ApiResponseMonthlyBalance{
+    string status = 1;
+    string message = 2;
+    repeated CardResponseMonthlyBalance data = 3;
+
+}
+
+message ApiResponseYearlyBalance{
+    string status = 1;
+    string message = 2;
+    repeated CardResponseYearlyBalance data = 3;
+}
+
+message ApiResponseMonthlyAmount{
+    string status = 1;
+    string message = 2;
+    repeated CardResponseMonthlyAmount data = 3;
+
+}
+
+message ApiResponseYearlyAmount{
+    string status = 1;
+    string message = 2;
+    repeated CardResponseYearlyAmount data = 3;
+}
+
+message ApiResponseDashboardCard{
+    string status = 1;
+    string message = 2;
+    CardResponseDashboard data =3;
+}
+
+message ApiResponseDashboardCardNumber{
+    string status = 1;
+    string message = 2;
+    CardResponseDashboardCardNumber data =3;
+}
+
+
+message FindByUserIdCardRequest {
+    int32 user_id = 1;
+}
+
+message ApiResponseCards {
+    string status = 1;
+    string message = 2;
+    repeated CardResponse data = 3;
+}
+
+message FindYearBalance{
+    int32 year  = 1;
+}
+
+message FindYearBalanceCardNumber{
+    int32 year  = 1;
+    string card_number = 2;
+}
+
+message FindYearAmount{
+    int32 year  = 1;
+}
+
+message FindYearAmountCardNumber{
+    int32 year  = 1;
+    string card_number = 2;
+}
+
+message FindByActiveCardRequest {
+    int32 saldo_id = 1;
+}
+
+message FindByTrashedCardRequest {}
+
+message FindByCardNumberRequest {
+    string card_number = 1;
+}
+
+
+
+service CardService {
+    rpc FindAllCard (FindAllCardRequest) returns (ApiResponsePaginationCard) {}
+    rpc FindByIdCard (FindByIdCardRequest) returns (ApiResponseCard) {}
+    rpc FindByUserIdCard (FindByUserIdCardRequest) returns (ApiResponseCard);
+    rpc FindByActiveCard (FindAllCardRequest) returns (ApiResponsePaginationCardDeleteAt){}
+    rpc FindByTrashedCard (FindAllCardRequest) returns (ApiResponsePaginationCardDeleteAt){}
+    rpc FindByCardNumber (FindByCardNumberRequest) returns (ApiResponseCard){}
+
+
+    rpc DashboardCard(google.protobuf.Empty)returns (ApiResponseDashboardCard){}
+    rpc DashboardCardNumber(FindByCardNumberRequest) returns(ApiResponseDashboardCardNumber){}
+
+    rpc FindMonthlyBalance(FindYearBalance) returns(ApiResponseMonthlyBalance){}
+    rpc FindYearlyBalance(FindYearBalance) returns(ApiResponseYearlyBalance){}
+
+    rpc FindMonthlyTopupAmount(FindYearAmount) returns(ApiResponseMonthlyAmount){}
+    rpc FindYearlyTopupAmount(FindYearAmount) returns(ApiResponseYearlyAmount){}
+
+    rpc FindMonthlyWithdrawAmount(FindYearAmount) returns(ApiResponseMonthlyAmount){}
+    rpc FindYearlyWithdrawAmount(FindYearAmount) returns(ApiResponseYearlyAmount){}
+
+    rpc FindMonthlyTransactionAmount(FindYearAmount) returns(ApiResponseMonthlyAmount){}
+    rpc FindYearlyTransactionAmount(FindYearAmount) returns(ApiResponseYearlyAmount){}
+
+    rpc FindMonthlyTransferSenderAmount(FindYearAmount) returns(ApiResponseMonthlyAmount){}
+    rpc FindYearlyTransferSenderAmount(FindYearAmount) returns(ApiResponseYearlyAmount){}
+
+    rpc FindMonthlyTransferReceiverAmount(FindYearAmount) returns(ApiResponseMonthlyAmount){}
+    rpc FindYearlyTransferReceiverAmount(FindYearAmount) returns(ApiResponseYearlyAmount){}
+
+    rpc FindMonthlyBalanceByCardNumber(FindYearBalanceCardNumber) returns(ApiResponseMonthlyBalance){}
+    rpc FindYearlyBalanceByCardNumber(FindYearBalanceCardNumber) returns(ApiResponseYearlyBalance){}
+
+    rpc FindMonthlyTopupAmountByCardNumber(FindYearAmountCardNumber) returns(ApiResponseMonthlyAmount){}
+    rpc FindYearlyTopupAmountByCardNumber(FindYearAmountCardNumber) returns(ApiResponseYearlyAmount){}
+
+    rpc FindMonthlyWithdrawAmountByCardNumber(FindYearAmountCardNumber) returns(ApiResponseMonthlyAmount){}
+    rpc FindYearlyWithdrawAmountByCardNumber(FindYearAmountCardNumber) returns(ApiResponseYearlyAmount){}
+
+    rpc FindMonthlyTransactionAmountByCardNumber(FindYearAmountCardNumber) returns(ApiResponseMonthlyAmount){}
+    rpc FindYearlyTransactionAmountByCardNumber(FindYearAmountCardNumber) returns(ApiResponseYearlyAmount){}
+
+    rpc FindMonthlyTransferSenderAmountByCardNumber(FindYearAmountCardNumber) returns(ApiResponseMonthlyAmount){}
+    rpc FindYearlyTransferSenderAmountByCardNumber(FindYearAmountCardNumber) returns(ApiResponseYearlyAmount){}
+
+    rpc FindMonthlyTransferReceiverAmountByCardNumber(FindYearAmountCardNumber) returns(ApiResponseMonthlyAmount){}
+    rpc FindYearlyTransferReceiverAmountByCardNumber(FindYearAmountCardNumber) returns(ApiResponseYearlyAmount){}
+
+    rpc CreateCard (CreateCardRequest) returns (ApiResponseCard) {}
+    rpc UpdateCard (UpdateCardRequest) returns (ApiResponseCard) {}
+
+    rpc TrashedCard (FindByIdCardRequest) returns (ApiResponseCard) {}
+    rpc RestoreCard(FindByIdCardRequest) returns (ApiResponseCard) {}
+    rpc DeleteCardPermanent (FindByIdCardRequest) returns (ApiResponseCardDelete) {}
+
+    rpc RestoreAllCard(google.protobuf.Empty) returns (ApiResponseCardAll){}
+    rpc DeleteAllCardPermanent(google.protobuf.Empty) returns (ApiResponseCardAll){}
+}

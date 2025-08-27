@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package role;
+
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/empty.proto";
+import "api.proto";
+
+
+
+message FindAllRoleRequest {
+    int32 page = 1;
+    int32 page_size = 2;
+    string search = 3;
+}
+
+message FindByIdRoleRequest{
+    int32 role_id = 1;
+}
+
+message FindByIdUserRoleRequest{
+    int32 user_id = 1;
+}
+
+message CreateRoleRequest{
+    string name = 1;
+}
+
+message UpdateRoleRequest{
+    int32 id = 1;
+    string name = 2;
+}
+
+
+message RoleResponse {
+  int32 id = 1;
+  string name = 2;
+  string created_at = 3;
+  string updated_at = 4;
+}
+
+
+
+
+message RoleResponseDeleteAt {
+  int32 id = 1;
+  string name = 2;
+  string created_at = 3;
+  string updated_at = 4;
+  google.protobuf.StringValue deleted_at = 5;
+}
+
+
+message ApiResponseRoleAll{
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponseRoleDelete{
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponseRole{
+    string status = 1;
+    string message = 2;
+    RoleResponse data = 3;
+}
+
+message ApiResponsesRole{
+    string status = 1;
+    string message = 2;
+    repeated RoleResponse data = 3;
+}
+
+message ApiResponsePaginationRole{
+    string status = 1;
+    string message = 2;
+    repeated RoleResponse data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+
+message ApiResponsePaginationRoleDeleteAt{
+    string status = 1;
+    string message = 2;
+    repeated RoleResponseDeleteAt data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+service RoleService{
+    rpc FindAllRole(FindAllRoleRequest) returns(ApiResponsePaginationRole){}
+    rpc FindByIdRole(FindByIdRoleRequest) returns(ApiResponseRole){}
+
+    rpc FindByActive(FindAllRoleRequest) returns(ApiResponsePaginationRoleDeleteAt){}
+    rpc FindByTrashed(FindAllRoleRequest) returns(ApiResponsePaginationRoleDeleteAt){}
+
+    rpc FindByUserId(FindByIdUserRoleRequest) returns(ApiResponsesRole){}
+
+
+    rpc CreateRole(CreateRoleRequest) returns (ApiResponseRole) {}
+    rpc UpdateRole(UpdateRoleRequest) returns (ApiResponseRole) {}
+    rpc TrashedRole(FindByIdRoleRequest) returns (ApiResponseRole) {}
+    rpc RestoreRole(FindByIdRoleRequest) returns (ApiResponseRole) {}
+    rpc DeleteRolePermanent(FindByIdRoleRequest) returns (ApiResponseRoleDelete) {}
+    rpc RestoreAllRole(google.protobuf.Empty) returns (ApiResponseRoleAll){}
+    rpc DeleteAllRolePermanent(google.protobuf.Empty) returns (ApiResponseRoleAll){}
+}

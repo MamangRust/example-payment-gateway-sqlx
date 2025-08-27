@@ -1,0 +1,168 @@
+syntax = "proto3";
+
+package saldo;
+
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/empty.proto";
+import "api.proto";
+import "card.proto";
+
+
+message FindAllSaldoRequest {
+    int32 page = 1;
+    int32 page_size = 2;
+    string search = 3;
+}
+
+message FindMonthlySaldoTotalBalance {
+    int32 year = 1;
+    int32 month = 2;
+}
+
+message FindYearlySaldo{
+    int32 year = 1;
+}
+
+
+message FindByIdSaldoRequest {
+    int32 saldo_id = 1;
+}
+
+message CreateSaldoRequest{
+    string card_number = 1;
+    int32 total_balance = 2;
+}
+
+message UpdateSaldoRequest{
+    int32 saldo_id = 1;
+    string card_number = 2;
+    int32 total_balance = 3;
+}
+
+message SaldoResponse {
+  int32 saldo_id = 1;
+  string card_number = 2;
+  int32 total_balance = 3;
+  string withdraw_time = 4;
+  int32 withdraw_amount = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}
+
+message SaldoResponseDeleteAt {
+  int32 saldo_id = 1;
+  string card_number = 2;
+  int32 total_balance = 3;
+  string withdraw_time = 4;
+  int32 withdraw_amount = 5;
+  string created_at = 6;
+  string updated_at = 7;
+  google.protobuf.StringValue deleted_at = 8;
+}
+
+
+message SaldoMonthTotalBalanceResponse {
+  string month = 1;
+  string year = 2;
+  int32 total_balance = 3;
+}
+
+
+message SaldoYearTotalBalanceResponse {
+  string year = 1;
+  int32 total_balance = 2;
+}
+
+message SaldoMonthBalanceResponse {
+  string month = 1;
+  int32 total_balance = 2;
+}
+
+message SaldoYearBalanceResponse {
+  string year = 1;
+  int32 total_balance = 2;
+}
+
+
+message ApiResponseSaldo {
+    string status = 1;
+    string message = 2;
+    SaldoResponse data = 3;
+}
+
+message ApiResponsesSaldo{
+    string status = 1;
+    string message = 2;
+    repeated SaldoResponse data = 3;
+}
+
+message ApiResponseSaldoDelete{
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponseSaldoAll{
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponseMonthTotalSaldo{
+    string status = 1;
+    string message = 2;
+    repeated SaldoMonthTotalBalanceResponse data = 3;
+}
+
+message ApiResponseYearTotalSaldo{
+    string status = 1;
+    string message = 2;
+    repeated SaldoYearTotalBalanceResponse data = 3;
+}
+
+message ApiResponseMonthSaldoBalances{
+    string status = 1;
+    string message = 2;
+    repeated SaldoMonthBalanceResponse data = 3;
+}
+
+message ApiResponseYearSaldoBalances{
+    string status = 1;
+    string message = 2;
+    repeated SaldoYearBalanceResponse data = 3;
+}
+
+
+message ApiResponsePaginationSaldo {
+    string status = 1;
+    string message = 2;
+    repeated SaldoResponse data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message ApiResponsePaginationSaldoDeleteAt {
+    string status = 1;
+    string message = 2;
+    repeated SaldoResponseDeleteAt data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+service SaldoService{
+   rpc FindAllSaldo(FindAllSaldoRequest) returns (ApiResponsePaginationSaldo) {}
+   rpc FindByIdSaldo(FindByIdSaldoRequest) returns (ApiResponseSaldo) {}
+
+   rpc FindMonthlyTotalSaldoBalance(FindMonthlySaldoTotalBalance)returns(ApiResponseMonthTotalSaldo){}
+   rpc FindYearTotalSaldoBalance(FindYearlySaldo)returns(ApiResponseYearTotalSaldo){}
+   rpc FindMonthlySaldoBalances(FindYearlySaldo)returns(ApiResponseMonthSaldoBalances){}
+   rpc FindYearlySaldoBalances(FindYearlySaldo)returns(ApiResponseYearSaldoBalances){}
+
+   rpc FindByCardNumber(card.FindByCardNumberRequest) returns (ApiResponseSaldo) {}
+   rpc FindByActive(FindAllSaldoRequest) returns (ApiResponsePaginationSaldoDeleteAt) {}
+   rpc FindByTrashed(FindAllSaldoRequest) returns (ApiResponsePaginationSaldoDeleteAt) {}
+   rpc CreateSaldo(CreateSaldoRequest) returns (ApiResponseSaldo) {}
+   rpc UpdateSaldo(UpdateSaldoRequest) returns (ApiResponseSaldo) {}
+   rpc TrashedSaldo(FindByIdSaldoRequest) returns (ApiResponseSaldo) {}
+   rpc RestoreSaldo(FindByIdSaldoRequest) returns (ApiResponseSaldo) {}
+   rpc DeleteSaldoPermanent(FindByIdSaldoRequest) returns (ApiResponseSaldoDelete) {}
+
+   rpc RestoreAllSaldo(google.protobuf.Empty) returns (ApiResponseSaldoAll){}
+   rpc DeleteAllSaldoPermanent(google.protobuf.Empty) returns (ApiResponseSaldoAll){}
+}

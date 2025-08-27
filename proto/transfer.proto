@@ -1,0 +1,241 @@
+syntax = "proto3";
+
+package transfer;
+
+
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/empty.proto";
+import "api.proto";
+
+
+message FindByCardNumberTransferRequest {
+    string card_number = 1;
+    int32 year = 2;
+}
+
+message FindYearTransferStatus{
+    int32 year = 1;
+}
+
+message FindMonthlyTransferStatus {
+    int32 year = 1;
+    int32 month = 2;
+}
+
+
+message FindYearTransferStatusCardNumber{
+    string card_number = 1;
+    int32 year = 2;
+}
+
+message FindMonthlyTransferStatusCardNumber{
+    string card_number = 1;
+    int32 year = 2;
+    int32 month = 3;
+}
+
+
+message FindAllTransferRequest {
+    int32 page = 1;
+    int32 page_size = 2;
+    string search = 3;
+}
+
+message FindByIdTransferRequest {
+    int32 transfer_id = 1;
+}
+
+message FindTransferByTransferFromRequest {
+    string transfer_from = 1;
+}
+
+message FindTransferByTransferToRequest {
+    string transfer_to = 1;
+}
+
+message CreateTransferRequest {
+    string transfer_from = 1;
+    string transfer_to = 2;
+    int32 transfer_amount = 3;
+}
+
+message UpdateTransferRequest {
+    int32 transfer_id = 1;
+    string transfer_from = 2;
+    string transfer_to = 3;
+    int32 transfer_amount = 4;
+}
+
+// response
+
+message TransferResponse {
+    int32 id = 1;
+    string transfer_no = 2;
+    string transfer_from = 3;
+    string transfer_to = 4;
+    int32 transfer_amount = 5;
+    string transfer_time = 6;
+    string created_at = 7;
+    string updated_at = 8;
+}
+
+message TransferResponseDeleteAt {
+    int32 id = 1;
+    string transfer_no = 2;
+    string transfer_from = 3;
+    string transfer_to = 4;
+    int32 transfer_amount = 5;
+    string transfer_time = 6;
+    string created_at = 7;
+    string updated_at = 8;
+    google.protobuf.StringValue deleted_at = 9;
+}
+
+message TransferMonthStatusSuccessResponse {
+    string year = 1;
+    string month = 2;
+    int32 total_success = 3;
+    int32 total_amount = 4;
+}
+
+message TransferYearStatusSuccessResponse {
+    string year = 1;
+    int32 total_success = 2;
+    int32 total_amount = 4;
+}
+
+message TransferMonthStatusFailedResponse {
+    string year = 1;
+    string month = 2;
+    int32 total_failed = 3;
+    int32 total_amount = 4;
+}
+
+message TransferYearStatusFailedResponse {
+    string year = 1;
+    int32 total_failed = 2;
+    int32 total_amount = 4;
+}
+
+
+message TransferMonthAmountResponse {
+  string month = 1;
+  int32 total_amount = 2;
+}
+
+message TransferYearAmountResponse {
+  string year = 1;
+  int32 total_amount = 2;
+}
+
+message ApiResponseTransferMonthStatusSuccess{
+    string status = 1;
+    string message = 2;
+    repeated TransferMonthStatusSuccessResponse data = 3;
+}
+
+message ApiResponseTransferYearStatusSuccess{
+    string status = 1;
+    string message = 2;
+    repeated TransferYearStatusSuccessResponse data = 3;
+}
+
+
+message ApiResponseTransferMonthStatusFailed{
+    string status = 1;
+    string message = 2;
+    repeated TransferMonthStatusFailedResponse data = 3;
+}
+
+message ApiResponseTransferYearStatusFailed{
+    string status = 1;
+    string message = 2;
+    repeated TransferYearStatusFailedResponse data = 3;
+}
+
+
+message ApiResponseTransferMonthAmount{
+    string status = 1;
+    string message = 2;
+    repeated TransferMonthAmountResponse data = 3;
+}
+
+message ApiResponseTransferYearAmount{
+    string status = 1;
+    string message = 2;
+    repeated TransferYearAmountResponse data = 3;
+}
+
+message ApiResponseTransfer {
+    string status = 1;
+    string message = 2;
+    TransferResponse data = 3;
+}
+
+message ApiResponseTransfers{
+    string status = 1;
+    string message = 2;
+    repeated TransferResponse data = 3;
+}
+
+message ApiResponseTransferDelete {
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponseTransferAll {
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponsePaginationTransfer {
+    string status = 1;
+    string message = 2;
+    repeated TransferResponse data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message ApiResponsePaginationTransferDeleteAt {
+    string status = 1;
+    string message = 2;
+    repeated TransferResponseDeleteAt data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+service TransferService {
+    rpc FindAllTransfer (FindAllTransferRequest) returns (ApiResponsePaginationTransfer);
+    rpc FindByIdTransfer (FindByIdTransferRequest) returns (ApiResponseTransfer);
+
+    rpc FindMonthlyTransferStatusSuccess(FindMonthlyTransferStatus)returns(ApiResponseTransferMonthStatusSuccess){}
+    rpc FindYearlyTransferStatusSuccess(FindYearTransferStatus)returns(ApiResponseTransferYearStatusSuccess){}
+    rpc FindMonthlyTransferStatusFailed(FindMonthlyTransferStatus)returns(ApiResponseTransferMonthStatusFailed){}
+    rpc FindYearlyTransferStatusFailed(FindYearTransferStatus)returns(ApiResponseTransferYearStatusFailed){}
+
+    rpc FindMonthlyTransferStatusSuccessByCardNumber(FindMonthlyTransferStatusCardNumber)returns(ApiResponseTransferMonthStatusSuccess){}
+    rpc FindYearlyTransferStatusSuccessByCardNumber(FindYearTransferStatusCardNumber)returns(ApiResponseTransferYearStatusSuccess){}
+    rpc FindMonthlyTransferStatusFailedByCardNumber(FindMonthlyTransferStatusCardNumber)returns(ApiResponseTransferMonthStatusFailed){}
+    rpc FindYearlyTransferStatusFailedByCardNumber(FindYearTransferStatusCardNumber)returns(ApiResponseTransferYearStatusFailed){}
+
+
+    rpc FindMonthlyTransferAmounts(FindYearTransferStatus)returns(ApiResponseTransferMonthAmount){}
+    rpc FindYearlyTransferAmounts(FindYearTransferStatus)returns(ApiResponseTransferYearAmount){}
+
+    rpc FindMonthlyTransferAmountsBySenderCardNumber(FindByCardNumberTransferRequest)returns(ApiResponseTransferMonthAmount){}
+    rpc FindMonthlyTransferAmountsByReceiverCardNumber(FindByCardNumberTransferRequest)returns(ApiResponseTransferMonthAmount){}
+
+    rpc FindYearlyTransferAmountsBySenderCardNumber(FindByCardNumberTransferRequest)returns(ApiResponseTransferYearAmount){}
+    rpc FindYearlyTransferAmountsByReceiverCardNumber(FindByCardNumberTransferRequest)returns(ApiResponseTransferYearAmount){}
+
+    rpc FindTransferByTransferFrom (FindTransferByTransferFromRequest) returns (ApiResponseTransfers);
+    rpc FindTransferByTransferTo (FindTransferByTransferToRequest) returns (ApiResponseTransfers);
+    rpc FindByActiveTransfer (FindAllTransferRequest) returns (ApiResponsePaginationTransferDeleteAt);
+    rpc FindByTrashedTransfer (FindAllTransferRequest) returns (ApiResponsePaginationTransferDeleteAt);
+    rpc CreateTransfer (CreateTransferRequest) returns (ApiResponseTransfer);
+    rpc UpdateTransfer (UpdateTransferRequest) returns (ApiResponseTransfer);
+    rpc TrashedTransfer (FindByIdTransferRequest) returns (ApiResponseTransfer);
+    rpc RestoreTransfer (FindByIdTransferRequest) returns (ApiResponseTransfer);
+    rpc DeleteTransferPermanent (FindByIdTransferRequest) returns (ApiResponseTransferDelete);
+
+    rpc RestoreAllTransfer(google.protobuf.Empty) returns (ApiResponseTransferAll){}
+    rpc DeleteAllTransferPermanent(google.protobuf.Empty) returns (ApiResponseTransferAll){}
+}

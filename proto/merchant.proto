@@ -1,0 +1,271 @@
+syntax = "proto3";
+
+package merchant;
+
+import "google/protobuf/wrappers.proto";
+import "api.proto";
+import "google/protobuf/empty.proto";
+
+
+message CreateMerchantRequest {
+    string name = 1;
+    int32 user_id = 2;
+}
+
+message UpdateMerchantRequest {
+    int32 merchant_id = 1;
+    string name = 2;
+    int32 user_id = 3;
+    string status = 4;
+}
+
+message MerchantResponse {
+    int32 id = 1;
+    string name = 2;
+    string api_key = 3;
+    string status = 4;
+    int32 user_id = 5;
+    string created_at = 6;
+    string updated_at = 7;
+}
+
+message MerchantResponseDeleteAt{
+    int32 id = 1;
+    string name = 2;
+    string api_key = 3;
+    string status = 4;
+    int32 user_id = 5;
+    string created_at = 6;
+    string updated_at = 7;
+    google.protobuf.StringValue deleted_at = 8;
+}
+
+message MerchantTransactionResponse {
+    int32 id = 1;
+    string card_number = 2;
+    int32 amount = 3;
+    string payment_method = 4;
+    int32 merchant_id = 5;
+    string merchant_name = 6;
+    string transaction_time = 7;
+    string created_at = 8;
+    string updated_at = 9;
+    google.protobuf.StringValue deleted_at = 10;
+}
+
+message MerchantResponseMonthlyPaymentMethod {
+    string month = 1;
+    string payment_method = 2;
+    int64 total_amount = 3;
+}
+
+message MerchantResponseYearlyPaymentMethod {
+    string year = 1;
+    string payment_method = 2;
+    int64 total_amount = 3;
+}
+
+message MerchantResponseMonthlyAmount {
+    string month = 1;
+    int64 total_amount = 2;
+}
+
+message MerchantResponseYearlyAmount {
+    string year = 1;
+    int64 total_amount = 2;
+}
+
+message MerchantResponseMonthlyTotalAmount {
+    string month = 1;
+    string year = 2;
+    int64 total_amount = 3;
+}
+
+message MerchantResponseYearlyTotalAmount {
+    string year = 1;
+    int64 total_amount = 2;
+}
+
+
+message ApiResponseMerchantMonthlyPaymentMethod {
+    string status = 1;
+    string message = 2;
+    repeated MerchantResponseMonthlyPaymentMethod data = 3;
+}
+
+message ApiResponseMerchantYearlyPaymentMethod {
+    string status = 1;
+    string message = 2;
+    repeated MerchantResponseYearlyPaymentMethod data = 3;
+}
+
+message ApiResponseMerchantMonthlyAmount {
+    string status = 1;
+    string message = 2;
+    repeated MerchantResponseMonthlyAmount data = 3;
+}
+
+message ApiResponseMerchantYearlyAmount {
+    string status = 1;
+    string message = 2;
+    repeated MerchantResponseYearlyAmount data = 3;
+}
+
+
+message ApiResponseMerchantMonthlyTotalAmount {
+    string status = 1;
+    string message = 2;
+    repeated MerchantResponseMonthlyTotalAmount data = 3;
+}
+
+message ApiResponseMerchantYearlyTotalAmount {
+    string status = 1;
+    string message = 2;
+    repeated MerchantResponseYearlyTotalAmount data = 3;
+}
+
+
+
+message ApiResponsesMerchant {
+    string status = 1;
+    string message = 2;
+    repeated MerchantResponse data = 3;
+}
+
+message ApiResponseMerchant {
+    string status = 1;
+    string message = 2;
+    MerchantResponse data = 3;
+}
+
+message ApiResponseMerchantDelete {
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponseMerchantAll {
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponsePaginationMerchant {
+    string status = 1;
+    string message = 2;
+    repeated MerchantResponse data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message ApiResponsePaginationMerchantDeleteAt{
+    string status = 1;
+    string message = 2;
+    repeated MerchantResponseDeleteAt data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message ApiResponsePaginationMerchantTransaction{
+    string status = 1;
+    string message = 2;
+    repeated MerchantTransactionResponse data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message FindAllMerchantRequest {
+    int32 page = 1;
+    int32 page_size = 2;
+    string search = 3;
+}
+
+message FindAllMerchantTransaction{
+    int32 page = 1;
+    int32 page_size = 2;
+    string search = 3;
+    int32 merchant_id = 4;
+}
+
+message FindAllMerchantApikey{
+    int32 page = 1;
+    int32 page_size = 2;
+    string search = 3;
+    string api_key = 4;
+}
+
+message FindByIdMerchantRequest {
+    int32 merchant_id = 1;
+}
+
+message FindByApiKeyRequest {
+    string api_key = 1;
+}
+
+message FindByMerchantUserIdRequest {
+    int32 user_id = 1;
+}
+
+message TrashedMerchantRequest {
+    int32 merchant_id = 1;
+}
+
+message RestoreMerchantRequest {
+    int32 merchant_id = 1;
+}
+
+
+message FindYearMerchant{
+    int32 year  = 1;
+}
+
+message FindYearMerchantById{
+    int32 year  = 1;
+    int32 merchant_id = 2;
+}
+
+message FindYearMerchantByApikey{
+    int32 year  = 1;
+    string api_key = 2;
+}
+
+service MerchantService {
+    rpc FindAllMerchant (FindAllMerchantRequest) returns (ApiResponsePaginationMerchant) {}
+    rpc FindByIdMerchant (FindByIdMerchantRequest) returns (ApiResponseMerchant) {}
+    rpc FindByApiKey (FindByApiKeyRequest) returns (ApiResponseMerchant) {}
+
+    rpc FindAllTransactionMerchant(FindAllMerchantRequest) returns(ApiResponsePaginationMerchantTransaction){}
+    
+    rpc FindMonthlyPaymentMethodsMerchant(FindYearMerchant) returns(ApiResponseMerchantMonthlyPaymentMethod){}
+    rpc FindYearlyPaymentMethodMerchant(FindYearMerchant) returns(ApiResponseMerchantYearlyPaymentMethod){}
+    rpc FindMonthlyAmountMerchant(FindYearMerchant) returns(ApiResponseMerchantMonthlyAmount){}
+    rpc FindYearlyAmountMerchant(FindYearMerchant) returns(ApiResponseMerchantYearlyAmount){}
+    
+    rpc FindMonthlyTotalAmountMerchant(FindYearMerchant) returns(ApiResponseMerchantMonthlyTotalAmount){}
+    rpc FindYearlyTotalAmountMerchant(FindYearMerchant) returns(ApiResponseMerchantYearlyTotalAmount){}
+    
+    rpc FindAllTransactionByMerchant(FindAllMerchantTransaction) returns(ApiResponsePaginationMerchantTransaction){}
+    rpc FindMonthlyPaymentMethodByMerchants(FindYearMerchantById) returns(ApiResponseMerchantMonthlyPaymentMethod){}
+    rpc FindYearlyPaymentMethodByMerchants(FindYearMerchantById)returns(ApiResponseMerchantYearlyPaymentMethod){}
+    rpc FindMonthlyAmountByMerchants(FindYearMerchantById)returns(ApiResponseMerchantMonthlyAmount){}
+    rpc FindYearlyAmountByMerchants(FindYearMerchantById)returns(ApiResponseMerchantYearlyAmount){}
+    rpc FindMonthlyTotalAmountByMerchants(FindYearMerchantById)returns(ApiResponseMerchantMonthlyTotalAmount){}
+    rpc FindYearlyTotalAmountByMerchants(FindYearMerchantById)returns(ApiResponseMerchantYearlyTotalAmount){}
+
+
+    rpc FindAllTransactionByApikey(FindAllMerchantApikey) returns(ApiResponsePaginationMerchantTransaction){}
+    rpc FindMonthlyPaymentMethodByApikey(FindYearMerchantByApikey) returns(ApiResponseMerchantMonthlyPaymentMethod){}
+    rpc FindYearlyPaymentMethodByApikey(FindYearMerchantByApikey)returns(ApiResponseMerchantYearlyPaymentMethod){}
+    rpc FindMonthlyAmountByApikey(FindYearMerchantByApikey)returns(ApiResponseMerchantMonthlyAmount){}
+    rpc FindYearlyAmountByApikey(FindYearMerchantByApikey)returns(ApiResponseMerchantYearlyAmount){}
+    rpc FindMonthlyTotalAmountByApikey(FindYearMerchantByApikey)returns(ApiResponseMerchantMonthlyTotalAmount){}
+    rpc FindYearlyTotalAmountByApikey(FindYearMerchantByApikey)returns(ApiResponseMerchantYearlyTotalAmount){}
+
+
+
+    rpc FindByMerchantUserId (FindByMerchantUserIdRequest) returns (ApiResponsesMerchant) {}
+    rpc FindByActive (FindAllMerchantRequest) returns (ApiResponsePaginationMerchantDeleteAt) {}
+    rpc FindByTrashed (FindAllMerchantRequest) returns (ApiResponsePaginationMerchantDeleteAt) {}
+    rpc CreateMerchant (CreateMerchantRequest) returns (ApiResponseMerchant) {}
+    rpc UpdateMerchant (UpdateMerchantRequest) returns (ApiResponseMerchant) {}
+    rpc TrashedMerchant (FindByIdMerchantRequest) returns (ApiResponseMerchant) {}
+    rpc RestoreMerchant (FindByIdMerchantRequest) returns (ApiResponseMerchant) {}
+    rpc DeleteMerchantPermanent (FindByIdMerchantRequest) returns (ApiResponseMerchantDelete) {}
+    rpc RestoreAllMerchant(google.protobuf.Empty) returns (ApiResponseMerchantAll){}
+    rpc DeleteAllMerchantPermanent(google.protobuf.Empty) returns (ApiResponseMerchantAll){}
+}

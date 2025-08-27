@@ -1,0 +1,281 @@
+syntax = "proto3";
+
+package topup;
+
+
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/empty.proto";
+import "api.proto";
+
+message FindAllTopupRequest {
+    int32 page = 1;
+    int32 page_size = 2;
+    string search = 3;
+}
+
+message FindAllTopupByCardNumberRequest{
+    string card_number = 1;
+    int32 page = 2;
+    int32 page_size = 3;
+    string search = 4;
+}
+
+message FindByIdTopupRequest {
+    int32 topup_id = 1;
+}
+
+message FindMonthlyTopupStatus {
+    int32 year = 1;
+    int32 month = 2;
+}
+
+message FindYearTopupStatus{
+    int32 year = 1;
+}
+
+message FindMonthlyTopupStatusCardNumber {
+    string card_number = 1;
+    int32 year = 2;
+    int32 month = 3;
+}
+
+message FindYearTopupStatusCardNumber{
+    string card_number = 1;
+    int32 year = 2;
+}
+
+
+message FindByCardNumberTopupRequest {
+    string card_number = 1;
+    int32 year = 2;
+}
+
+
+message FindYearTopupCardNumber{
+    string card_number = 1;
+    int32 year = 2;
+}
+
+message CreateTopupRequest {
+    string card_number = 1;
+    string topup_no = 2;
+    int32 topup_amount = 3;
+    string topup_method = 4;
+}
+
+message UpdateTopupRequest {
+    int32 topup_id = 1;
+    string card_number = 2;
+    int32 topup_amount = 3;
+    string topup_method = 4;
+}
+
+message TopupResponse {
+    int32 id = 1;
+    string card_number = 2;
+    string topup_no = 3;
+    int32 topup_amount = 4;
+    string topup_method = 5;
+    string topup_time = 6;
+    string created_at = 7;
+    string updated_at = 8;
+}
+
+message TopupResponseDeleteAt {
+    int32 id = 1;
+    string card_number = 2;
+    string topup_no = 3;
+    int32 topup_amount = 4;
+    string topup_method = 5;
+    string topup_time = 6;
+    string created_at = 7;
+    string updated_at = 8;
+    google.protobuf.StringValue deleted_at = 9;
+}
+
+
+message TopupMonthStatusSuccessResponse {
+    string year = 1;
+    string month = 2;
+    int32 total_success = 3;
+    int32 total_amount = 4;
+}
+
+message TopupYearStatusSuccessResponse {
+    string year = 1;
+    int32 total_success = 2;
+    int32 total_amount = 4;
+}
+
+message TopupMonthStatusFailedResponse {
+    string year = 1;
+    string month = 2;
+    int32 total_failed = 3;
+    int32 total_amount = 4;
+}
+
+message TopupYearStatusFailedResponse {
+    string year = 1;
+    int32 total_failed = 2;
+    int32 total_amount = 4;
+}
+
+message TopupMonthMethodResponse {
+  string month = 1;
+  string topup_method = 2;
+  int32 total_topups = 3;
+  int32 total_amount = 4;
+}
+
+message TopupYearlyMethodResponse {
+  string year = 1;
+  string topup_method = 2;
+  int32 total_topups = 3;
+  int32 total_amount = 4;
+}
+
+
+message TopupMonthAmountResponse {
+  string month = 1;
+  int32 total_amount = 2;
+}
+
+message TopupYearlyAmountResponse {
+  string year = 1;
+  int32 total_amount = 2;
+}
+
+
+message ApiResponseTopupMonthStatusSuccess{
+    string status = 1;
+    string message = 2;
+    repeated TopupMonthStatusSuccessResponse data = 3;
+}
+
+message ApiResponseTopupYearStatusSuccess{
+    string status = 1;
+    string message = 2;
+    repeated TopupYearStatusSuccessResponse data = 3;
+}
+
+
+message ApiResponseTopupMonthStatusFailed{
+    string status = 1;
+    string message = 2;
+    repeated TopupMonthStatusFailedResponse data = 3;
+}
+
+message ApiResponseTopupYearStatusFailed{
+    string status = 1;
+    string message = 2;
+    repeated TopupYearStatusFailedResponse data = 3;
+}
+
+
+
+message ApiResponseTopupMonthMethod{
+    string status = 1;
+    string message = 2;
+    repeated TopupMonthMethodResponse data = 3;
+}
+
+message ApiResponseTopupYearMethod{
+    string status = 1;
+    string message = 2;
+    repeated TopupYearlyMethodResponse data = 3;
+}
+
+message ApiResponseTopupMonthAmount{
+    string status = 1;
+    string message = 2;
+    repeated TopupMonthAmountResponse data = 3;
+}
+
+message ApiResponseTopupYearAmount{
+    string status = 1;
+    string message = 2;
+    repeated TopupYearlyAmountResponse data = 3;
+}
+
+message ApiResponseTopup {
+    string status = 1;
+    string message = 2;
+    TopupResponse data = 3;
+}
+
+message ApiResponseTopupDeleteAt{
+    string status = 1;
+    string message = 2;
+    TopupResponseDeleteAt data = 3;
+}
+
+
+message ApiResponsesTopup{
+    string status = 1;
+    string message = 2;
+    repeated TopupResponse data = 3;
+}
+
+message ApiResponsePaginationTopup {
+    string status = 1;
+    string message = 2;
+    repeated TopupResponse data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message ApiResponsePaginationTopupDeleteAt {
+    string status = 1;
+    string message = 2;
+    repeated TopupResponseDeleteAt data = 3;
+    api.PaginationMeta pagination = 4;
+}
+
+message ApiResponseTopupDelete {
+    string status = 1;
+    string message = 2;
+}
+
+message ApiResponseTopupAll {
+    string status = 1;
+    string message = 2;
+}
+
+service TopupService {
+    rpc FindAllTopup (FindAllTopupRequest) returns (ApiResponsePaginationTopup);
+    rpc FindAllTopupByCardNumber (FindAllTopupByCardNumberRequest) returns (ApiResponsePaginationTopup);
+
+    rpc FindByIdTopup (FindByIdTopupRequest) returns (ApiResponseTopup);
+
+    rpc FindMonthlyTopupStatusSuccess(FindMonthlyTopupStatus)returns(ApiResponseTopupMonthStatusSuccess){}
+    rpc FindYearlyTopupStatusSuccess(FindYearTopupStatus)returns(ApiResponseTopupYearStatusSuccess){}
+    rpc FindMonthlyTopupStatusFailed(FindMonthlyTopupStatus)returns(ApiResponseTopupMonthStatusFailed){}
+    rpc FindYearlyTopupStatusFailed(FindYearTopupStatus)returns(ApiResponseTopupYearStatusFailed){}
+
+    rpc FindMonthlyTopupStatusSuccessByCardNumber(FindMonthlyTopupStatusCardNumber)returns(ApiResponseTopupMonthStatusSuccess){}
+    rpc FindYearlyTopupStatusSuccessByCardNumber(FindYearTopupStatusCardNumber)returns(ApiResponseTopupYearStatusSuccess){}
+    rpc FindMonthlyTopupStatusFailedByCardNumber(FindMonthlyTopupStatusCardNumber)returns(ApiResponseTopupMonthStatusFailed){}
+    rpc FindYearlyTopupStatusFailedByCardNumber(FindYearTopupStatusCardNumber)returns(ApiResponseTopupYearStatusFailed){}
+
+
+    rpc FindMonthlyTopupMethods(FindYearTopupStatus)returns(ApiResponseTopupMonthMethod){}
+    rpc FindYearlyTopupMethods(FindYearTopupStatus)returns(ApiResponseTopupYearMethod){}
+    rpc FindMonthlyTopupAmounts(FindYearTopupStatus)returns(ApiResponseTopupMonthAmount){}
+    rpc FindYearlyTopupAmounts(FindYearTopupStatus)returns(ApiResponseTopupYearAmount){}
+
+    rpc FindMonthlyTopupMethodsByCardNumber(FindYearTopupCardNumber)returns(ApiResponseTopupMonthMethod){}
+    rpc FindYearlyTopupMethodsByCardNumber(FindYearTopupCardNumber)returns(ApiResponseTopupYearMethod){}
+    rpc FindMonthlyTopupAmountsByCardNumber(FindYearTopupCardNumber)returns(ApiResponseTopupMonthAmount){}
+    rpc FindYearlyTopupAmountsByCardNumber(FindYearTopupCardNumber)returns(ApiResponseTopupYearAmount){}
+
+    rpc FindByCardNumberTopup (FindByCardNumberTopupRequest) returns (ApiResponseTopup);
+    rpc FindByActive (FindAllTopupRequest) returns (ApiResponsePaginationTopupDeleteAt);
+    rpc FindByTrashed (FindAllTopupRequest) returns (ApiResponsePaginationTopupDeleteAt);
+    rpc CreateTopup (CreateTopupRequest) returns (ApiResponseTopup);
+    rpc UpdateTopup (UpdateTopupRequest) returns (ApiResponseTopup);
+    rpc TrashedTopup (FindByIdTopupRequest) returns (ApiResponseTopupDeleteAt);
+    rpc RestoreTopup (FindByIdTopupRequest) returns (ApiResponseTopupDeleteAt);
+    rpc DeleteTopupPermanent (FindByIdTopupRequest) returns (ApiResponseTopupDelete);
+
+    rpc RestoreAllTopup(google.protobuf.Empty) returns (ApiResponseTopupAll){}
+    rpc DeleteAllTopupPermanent(google.protobuf.Empty) returns (ApiResponseTopupAll){}
+}
