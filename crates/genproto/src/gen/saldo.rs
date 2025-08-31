@@ -83,29 +83,29 @@ pub struct SaldoMonthTotalBalanceResponse {
     pub month: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub year: ::prost::alloc::string::String,
-    #[prost(int32, tag = "3")]
-    pub total_balance: i32,
+    #[prost(int64, tag = "3")]
+    pub total_balance: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SaldoYearTotalBalanceResponse {
     #[prost(string, tag = "1")]
     pub year: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_balance: i32,
+    #[prost(int64, tag = "2")]
+    pub total_balance: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SaldoMonthBalanceResponse {
     #[prost(string, tag = "1")]
     pub month: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_balance: i32,
+    #[prost(int64, tag = "2")]
+    pub total_balance: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SaldoYearBalanceResponse {
     #[prost(string, tag = "1")]
     pub year: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_balance: i32,
+    #[prost(int64, tag = "2")]
+    pub total_balance: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ApiResponseSaldo {

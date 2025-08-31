@@ -75,8 +75,8 @@ pub struct CreateTransactionRequest {
     pub api_key: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub card_number: ::prost::alloc::string::String,
-    #[prost(int32, tag = "3")]
-    pub amount: i32,
+    #[prost(int64, tag = "3")]
+    pub amount: i64,
     #[prost(string, tag = "4")]
     pub payment_method: ::prost::alloc::string::String,
     #[prost(int32, tag = "5")]
@@ -109,8 +109,8 @@ pub struct TransactionResponse {
     pub card_number: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub transaction_no: ::prost::alloc::string::String,
-    #[prost(int32, tag = "4")]
-    pub amount: i32,
+    #[prost(int64, tag = "4")]
+    pub amount: i64,
     #[prost(string, tag = "5")]
     pub payment_method: ::prost::alloc::string::String,
     #[prost(int32, tag = "6")]
@@ -130,8 +130,8 @@ pub struct TransactionResponseDeleteAt {
     pub card_number: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub transaction_no: ::prost::alloc::string::String,
-    #[prost(int32, tag = "4")]
-    pub amount: i32,
+    #[prost(int64, tag = "4")]
+    pub amount: i64,
     #[prost(string, tag = "5")]
     pub payment_method: ::prost::alloc::string::String,
     #[prost(int32, tag = "6")]
@@ -153,8 +153,8 @@ pub struct TransactionMonthStatusSuccessResponse {
     pub month: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_success: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransactionYearStatusSuccessResponse {
@@ -162,8 +162,8 @@ pub struct TransactionYearStatusSuccessResponse {
     pub year: ::prost::alloc::string::String,
     #[prost(int32, tag = "2")]
     pub total_success: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransactionMonthStatusFailedResponse {
@@ -173,8 +173,8 @@ pub struct TransactionMonthStatusFailedResponse {
     pub month: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_failed: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransactionYearStatusFailedResponse {
@@ -182,8 +182,8 @@ pub struct TransactionYearStatusFailedResponse {
     pub year: ::prost::alloc::string::String,
     #[prost(int32, tag = "2")]
     pub total_failed: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransactionMonthMethodResponse {
@@ -193,8 +193,8 @@ pub struct TransactionMonthMethodResponse {
     pub payment_method: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_transactions: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransactionYearMethodResponse {
@@ -204,22 +204,22 @@ pub struct TransactionYearMethodResponse {
     pub payment_method: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_transactions: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransactionMonthAmountResponse {
     #[prost(string, tag = "1")]
     pub month: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "2")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransactionYearlyAmountResponse {
     #[prost(string, tag = "1")]
     pub year: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "2")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApiResponseTransactionMonthStatusSuccess {

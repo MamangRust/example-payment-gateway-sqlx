@@ -121,11 +121,11 @@ pub struct CardResponseYearAmount {
 impl From<CardModel> for CardResponse {
     fn from(model: CardModel) -> Self {
         Self {
-            id: model.id,
+            id: model.card_id,
             user_id: model.user_id,
             card_number: model.card_number,
             card_type: model.card_type,
-            expire_date: model.expire_date,
+            expire_date: model.expire_date.to_string(),
             cvv: model.cvv,
             card_provider: model.card_provider,
             created_at: model.created_at.map(|dt| dt.to_string()),
@@ -137,11 +137,11 @@ impl From<CardModel> for CardResponse {
 impl From<CardModel> for CardResponseDeleteAt {
     fn from(model: CardModel) -> Self {
         Self {
-            id: model.id,
+            id: model.card_id,
             user_id: model.user_id,
             card_number: model.card_number,
             card_type: model.card_type,
-            expire_date: model.expire_date,
+            expire_date: model.expire_date.to_string(),
             cvv: model.cvv,
             card_provider: model.card_provider,
             created_at: model.created_at.map(|dt| dt.to_string()),

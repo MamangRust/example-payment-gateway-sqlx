@@ -96,8 +96,8 @@ pub struct TopupResponse {
     pub card_number: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub topup_no: ::prost::alloc::string::String,
-    #[prost(int32, tag = "4")]
-    pub topup_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub topup_amount: i64,
     #[prost(string, tag = "5")]
     pub topup_method: ::prost::alloc::string::String,
     #[prost(string, tag = "6")]
@@ -115,8 +115,8 @@ pub struct TopupResponseDeleteAt {
     pub card_number: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub topup_no: ::prost::alloc::string::String,
-    #[prost(int32, tag = "4")]
-    pub topup_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub topup_amount: i64,
     #[prost(string, tag = "5")]
     pub topup_method: ::prost::alloc::string::String,
     #[prost(string, tag = "6")]
@@ -136,8 +136,8 @@ pub struct TopupMonthStatusSuccessResponse {
     pub month: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_success: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TopupYearStatusSuccessResponse {
@@ -145,8 +145,8 @@ pub struct TopupYearStatusSuccessResponse {
     pub year: ::prost::alloc::string::String,
     #[prost(int32, tag = "2")]
     pub total_success: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TopupMonthStatusFailedResponse {
@@ -156,8 +156,8 @@ pub struct TopupMonthStatusFailedResponse {
     pub month: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_failed: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TopupYearStatusFailedResponse {
@@ -165,8 +165,8 @@ pub struct TopupYearStatusFailedResponse {
     pub year: ::prost::alloc::string::String,
     #[prost(int32, tag = "2")]
     pub total_failed: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TopupMonthMethodResponse {
@@ -176,8 +176,8 @@ pub struct TopupMonthMethodResponse {
     pub topup_method: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_topups: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TopupYearlyMethodResponse {
@@ -187,22 +187,22 @@ pub struct TopupYearlyMethodResponse {
     pub topup_method: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_topups: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TopupMonthAmountResponse {
     #[prost(string, tag = "1")]
     pub month: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "2")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TopupYearlyAmountResponse {
     #[prost(string, tag = "1")]
     pub year: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "2")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApiResponseTopupMonthStatusSuccess {

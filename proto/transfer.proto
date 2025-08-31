@@ -73,7 +73,7 @@ message TransferResponse {
     string transfer_no = 2;
     string transfer_from = 3;
     string transfer_to = 4;
-    int32 transfer_amount = 5;
+    int64 transfer_amount = 5;
     string transfer_time = 6;
     string created_at = 7;
     string updated_at = 8;
@@ -84,7 +84,7 @@ message TransferResponseDeleteAt {
     string transfer_no = 2;
     string transfer_from = 3;
     string transfer_to = 4;
-    int32 transfer_amount = 5;
+    int64 transfer_amount = 5;
     string transfer_time = 6;
     string created_at = 7;
     string updated_at = 8;
@@ -95,37 +95,37 @@ message TransferMonthStatusSuccessResponse {
     string year = 1;
     string month = 2;
     int32 total_success = 3;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message TransferYearStatusSuccessResponse {
     string year = 1;
     int32 total_success = 2;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message TransferMonthStatusFailedResponse {
     string year = 1;
     string month = 2;
     int32 total_failed = 3;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message TransferYearStatusFailedResponse {
     string year = 1;
     int32 total_failed = 2;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 
 message TransferMonthAmountResponse {
   string month = 1;
-  int32 total_amount = 2;
+  int64 total_amount = 2;
 }
 
 message TransferYearAmountResponse {
   string year = 1;
-  int32 total_amount = 2;
+  int64 total_amount = 2;
 }
 
 message ApiResponseTransferMonthStatusSuccess{

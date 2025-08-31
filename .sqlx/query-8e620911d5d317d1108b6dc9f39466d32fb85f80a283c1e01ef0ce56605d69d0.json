@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH last_five_years AS (\n                SELECT\n                    EXTRACT(YEAR FROM s.created_at)::TEXT AS year, \n                    COALESCE(SUM(s.total_balance), 0)::bigint AS total_balance\n                FROM\n                    saldos s\n                JOIN\n                    cards c ON s.card_number = c.card_number\n                WHERE\n                    s.deleted_at IS NULL \n                    AND c.deleted_at IS NULL\n                    AND c.card_number = $2\n                    AND EXTRACT(YEAR FROM s.created_at) >= $1 - 4\n                    AND EXTRACT(YEAR FROM s.created_at) <= $1\n                GROUP BY\n                    EXTRACT(YEAR FROM s.created_at)\n            )\n            SELECT\n                year AS \"year!\",\n                total_balance AS \"total_balance!\"\n            FROM\n                last_five_years\n            ORDER BY\n                year  \n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "year!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_balance!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "8e620911d5d317d1108b6dc9f39466d32fb85f80a283c1e01ef0ce56605d69d0"
+}

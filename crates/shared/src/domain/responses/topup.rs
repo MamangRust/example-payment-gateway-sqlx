@@ -25,7 +25,7 @@ pub struct TopupResponse {
     pub id: i32,
     pub card_number: String,
     pub topup_no: String,
-    pub topup_amount: i32,
+    pub topup_amount: i64,
     pub topup_method: String,
     pub topup_time: String,
     #[serde(rename = "created_at")]
@@ -39,7 +39,7 @@ pub struct TopupResponseDeleteAt {
     pub id: i32,
     pub card_number: String,
     pub topup_no: String,
-    pub topup_amount: i32,
+    pub topup_amount: i64,
     pub topup_method: String,
     pub topup_time: String,
     #[serde(rename = "created_at")]
@@ -54,21 +54,21 @@ pub struct TopupResponseDeleteAt {
 pub struct TopupResponseMonthStatusSuccess {
     pub year: String,
     pub month: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub total_success: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TopupResponseYearStatusSuccess {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub total_success: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TopupResponseMonthStatusFailed {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub month: String,
     pub total_failed: i32,
 }
@@ -76,7 +76,7 @@ pub struct TopupResponseMonthStatusFailed {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TopupResponseYearStatusFailed {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub total_failed: i32,
 }
 
@@ -85,7 +85,7 @@ pub struct TopupMonthMethodResponse {
     pub month: String,
     pub topup_method: String,
     pub total_topups: i32,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -93,19 +93,19 @@ pub struct TopupYearlyMethodResponse {
     pub year: String,
     pub topup_method: String,
     pub total_topups: i32,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TopupMonthAmountResponse {
     pub month: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TopupYearlyAmountResponse {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 // model to response

@@ -31,8 +31,8 @@ pub struct RoleResponseDeleteAt {
 impl From<RoleModel> for RoleResponse {
     fn from(value: RoleModel) -> Self {
         RoleResponse {
-            id: value.id,
-            name: value.name,
+            id: value.role_id,
+            name: value.role_name,
             created_at: value.created_at.map(|dt| dt.to_string()),
             updated_at: value.updated_at.map(|dt| dt.to_string()),
         }
@@ -42,8 +42,8 @@ impl From<RoleModel> for RoleResponse {
 impl From<RoleModel> for RoleResponseDeleteAt {
     fn from(value: RoleModel) -> Self {
         RoleResponseDeleteAt {
-            id: value.id,
-            name: value.name,
+            id: value.role_id,
+            name: value.role_name,
             created_at: value.created_at.map(|dt| dt.to_string()),
             updated_at: value.updated_at.map(|dt| dt.to_string()),
             deleted_at: value.deleted_at.map(|dt| dt.to_string()),

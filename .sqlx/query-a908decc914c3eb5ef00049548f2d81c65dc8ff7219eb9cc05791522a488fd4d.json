@@ -1,0 +1,72 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                m.merchant_id,\n                m.name,\n                m.api_key,\n                m.user_id,\n                m.status,\n                m.created_at,\n                m.updated_at,\n                m.deleted_at,\n                COUNT(*) OVER() AS total_count\n            FROM merchants m\n            WHERE deleted_at IS NULL\n              AND ($1::TEXT IS NULL OR \n                   m.name ILIKE '%' || $1 || '%' OR \n                   m.api_key ILIKE '%' || $1 || '%' OR \n                   m.status ILIKE '%' || $1 || '%')\n            ORDER BY m.merchant_id\n            LIMIT $2 OFFSET $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "merchant_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "api_key",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "user_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 7,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 8,
+        "name": "total_count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "a908decc914c3eb5ef00049548f2d81c65dc8ff7219eb9cc05791522a488fd4d"
+}

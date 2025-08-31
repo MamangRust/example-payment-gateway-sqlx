@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE cards\n            SET\n                card_type = COALESCE($2, card_type),\n                expire_date = COALESCE($3, expire_date),\n                cvv = COALESCE($4, cvv),\n                card_provider = COALESCE($5, card_provider),\n                updated_at = NOW()\n            WHERE\n                card_id = $1\n                AND deleted_at IS NULL\n            RETURNING \n                card_id,\n                user_id,\n                card_number,\n                card_type,\n                expire_date,\n                cvv,\n                card_provider,\n                created_at,\n                updated_at,\n                deleted_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "card_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "card_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "expire_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 5,
+        "name": "cvv",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "card_provider",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 9,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Varchar",
+        "Date",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5e97ecacafff68b5ae57b510ef4556b1c6d361d2b27179e2302b1a036e29d546"
+}

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH years AS (\n                SELECT generate_series($1 - 4, $1) AS year\n            )\n            SELECT\n                y.year::text AS \"year!\",\n                COALESCE(SUM(t.amount), 0)::bigint AS \"total_amount!\"\n            FROM\n                years y\n            LEFT JOIN\n                transactions t ON EXTRACT(YEAR FROM t.transaction_time) = y.year\n                AND t.deleted_at IS NULL\n            LEFT JOIN\n                merchants m ON t.merchant_id = m.merchant_id\n                AND m.deleted_at IS NULL\n                AND m.merchant_id = $2\n            GROUP BY\n                y.year\n            ORDER BY\n                y.year DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "year!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_amount!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "85334e85cdaa6152cb3ce8732bec54d6604304d455c249915039cd9318387f89"
+}

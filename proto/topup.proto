@@ -74,7 +74,7 @@ message TopupResponse {
     int32 id = 1;
     string card_number = 2;
     string topup_no = 3;
-    int32 topup_amount = 4;
+    int64 topup_amount = 4;
     string topup_method = 5;
     string topup_time = 6;
     string created_at = 7;
@@ -85,7 +85,7 @@ message TopupResponseDeleteAt {
     int32 id = 1;
     string card_number = 2;
     string topup_no = 3;
-    int32 topup_amount = 4;
+    int64 topup_amount = 4;
     string topup_method = 5;
     string topup_time = 6;
     string created_at = 7;
@@ -98,51 +98,51 @@ message TopupMonthStatusSuccessResponse {
     string year = 1;
     string month = 2;
     int32 total_success = 3;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message TopupYearStatusSuccessResponse {
     string year = 1;
     int32 total_success = 2;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message TopupMonthStatusFailedResponse {
     string year = 1;
     string month = 2;
     int32 total_failed = 3;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message TopupYearStatusFailedResponse {
     string year = 1;
     int32 total_failed = 2;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message TopupMonthMethodResponse {
   string month = 1;
   string topup_method = 2;
   int32 total_topups = 3;
-  int32 total_amount = 4;
+  int64 total_amount = 4;
 }
 
 message TopupYearlyMethodResponse {
   string year = 1;
   string topup_method = 2;
   int32 total_topups = 3;
-  int32 total_amount = 4;
+  int64 total_amount = 4;
 }
 
 
 message TopupMonthAmountResponse {
   string month = 1;
-  int32 total_amount = 2;
+  int64 total_amount = 2;
 }
 
 message TopupYearlyAmountResponse {
   string year = 1;
-  int32 total_amount = 2;
+  int64 total_amount = 2;
 }
 
 

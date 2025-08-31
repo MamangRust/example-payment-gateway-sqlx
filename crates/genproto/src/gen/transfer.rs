@@ -88,8 +88,8 @@ pub struct TransferResponse {
     pub transfer_from: ::prost::alloc::string::String,
     #[prost(string, tag = "4")]
     pub transfer_to: ::prost::alloc::string::String,
-    #[prost(int32, tag = "5")]
-    pub transfer_amount: i32,
+    #[prost(int64, tag = "5")]
+    pub transfer_amount: i64,
     #[prost(string, tag = "6")]
     pub transfer_time: ::prost::alloc::string::String,
     #[prost(string, tag = "7")]
@@ -107,8 +107,8 @@ pub struct TransferResponseDeleteAt {
     pub transfer_from: ::prost::alloc::string::String,
     #[prost(string, tag = "4")]
     pub transfer_to: ::prost::alloc::string::String,
-    #[prost(int32, tag = "5")]
-    pub transfer_amount: i32,
+    #[prost(int64, tag = "5")]
+    pub transfer_amount: i64,
     #[prost(string, tag = "6")]
     pub transfer_time: ::prost::alloc::string::String,
     #[prost(string, tag = "7")]
@@ -126,8 +126,8 @@ pub struct TransferMonthStatusSuccessResponse {
     pub month: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_success: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransferYearStatusSuccessResponse {
@@ -135,8 +135,8 @@ pub struct TransferYearStatusSuccessResponse {
     pub year: ::prost::alloc::string::String,
     #[prost(int32, tag = "2")]
     pub total_success: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransferMonthStatusFailedResponse {
@@ -146,8 +146,8 @@ pub struct TransferMonthStatusFailedResponse {
     pub month: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_failed: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransferYearStatusFailedResponse {
@@ -155,22 +155,22 @@ pub struct TransferYearStatusFailedResponse {
     pub year: ::prost::alloc::string::String,
     #[prost(int32, tag = "2")]
     pub total_failed: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransferMonthAmountResponse {
     #[prost(string, tag = "1")]
     pub month: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "2")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TransferYearAmountResponse {
     #[prost(string, tag = "1")]
     pub year: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "2")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApiResponseTransferMonthStatusSuccess {

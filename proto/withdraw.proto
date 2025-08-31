@@ -63,14 +63,14 @@ message FindByIdWithdrawRequest {
 
 message CreateWithdrawRequest {
     string card_number = 1;
-    int32 withdraw_amount = 2;
+    int64 withdraw_amount = 2;
     google.protobuf.Timestamp withdraw_time = 3;
 }
 
 message UpdateWithdrawRequest {
     int32 withdraw_id = 1;
     string card_number = 2;
-    int32 withdraw_amount = 3;
+    int64 withdraw_amount = 3;
     google.protobuf.Timestamp withdraw_time = 4;
 }
 
@@ -80,7 +80,7 @@ message WithdrawResponse {
     int32 withdraw_id = 1;
     string withdraw_no = 2;
     string card_number = 3;
-    int32 withdraw_amount = 4;
+    int64 withdraw_amount = 4;
     string withdraw_time = 5;
     string created_at = 6;
     string updated_at = 7;
@@ -90,7 +90,7 @@ message WithdrawResponseDeleteAt {
     int32 withdraw_id = 1;
     string withdraw_no = 2;
     string card_number = 3;
-    int32 withdraw_amount = 4;
+    int64 withdraw_amount = 4;
     string withdraw_time = 5;
     string created_at = 6;
     string updated_at = 7;
@@ -101,36 +101,36 @@ message WithdrawMonthStatusSuccessResponse {
     string year = 1;
     string month = 2;
     int32 total_success = 3;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message WithdrawYearStatusSuccessResponse {
     string year = 1;
     int32 total_success = 2;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message WithdrawMonthStatusFailedResponse {
     string year = 1;
     string month = 2;
     int32 total_failed = 3;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message WithdrawYearStatusFailedResponse {
     string year = 1;
     int32 total_failed = 2;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message WithdrawMonthlyAmountResponse {
   string month = 1;
-  int32 total_amount = 2;
+  int64 total_amount = 2;
 }
 
 message WithdrawYearlyAmountResponse {
   string year = 1;
-  int32 total_amount = 2;
+  int64 total_amount = 2;
 }
 
 

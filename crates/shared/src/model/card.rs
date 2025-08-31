@@ -1,14 +1,14 @@
-use chrono::NaiveDateTime;
+use chrono::{NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct CardModel {
-    pub id: i32,
+    pub card_id: i32,
     pub user_id: i32,
     pub card_number: String,
     pub card_type: String,
-    pub expire_date: String,
+    pub expire_date: NaiveDate,
     pub cvv: String,
     pub card_provider: String,
     pub created_at: Option<NaiveDateTime>,

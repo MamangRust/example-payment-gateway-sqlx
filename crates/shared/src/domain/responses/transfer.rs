@@ -25,7 +25,7 @@ pub struct TransferResponse {
     pub transfer_no: String,
     pub transfer_from: String,
     pub transfer_to: String,
-    pub transfer_amount: i32,
+    pub transfer_amount: i64,
     pub transfer_time: String,
     #[serde(rename = "created_at")]
     pub created_at: Option<String>,
@@ -39,7 +39,7 @@ pub struct TransferResponseDeleteAt {
     pub transfer_no: String,
     pub transfer_from: String,
     pub transfer_to: String,
-    pub transfer_amount: i32,
+    pub transfer_amount: i64,
     pub transfer_time: String,
     #[serde(rename = "created_at")]
     pub created_at: Option<String>,
@@ -53,21 +53,21 @@ pub struct TransferResponseDeleteAt {
 pub struct TransferResponseMonthStatusSuccess {
     pub year: String,
     pub month: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub total_success: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TransferResponseYearStatusSuccess {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub total_success: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TransferResponseMonthStatusFailed {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub month: String,
     pub total_failed: i32,
 }
@@ -75,20 +75,20 @@ pub struct TransferResponseMonthStatusFailed {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TransferResponseYearStatusFailed {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub total_failed: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TransferMonthAmountResponse {
     pub month: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TransferYearAmountResponse {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 // model to response

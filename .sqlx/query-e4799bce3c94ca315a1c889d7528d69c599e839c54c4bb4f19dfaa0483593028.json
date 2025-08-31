@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH monthly_data AS (\n                SELECT\n                    EXTRACT(YEAR FROM s.created_at)::integer AS year,\n                    EXTRACT(MONTH FROM s.created_at)::integer AS month,\n                    COALESCE(SUM(s.total_balance), 0)::integer AS total_balance\n                FROM saldos s\n                WHERE s.deleted_at IS NULL\n                AND (\n                    (s.created_at >= $1 AND s.created_at <= $2)\n                    OR (s.created_at >= $3 AND s.created_at <= $4)\n                )\n                GROUP BY EXTRACT(YEAR FROM s.created_at), EXTRACT(MONTH FROM s.created_at)\n            ), formatted_data AS (\n                SELECT year::text, TO_CHAR(TO_DATE(month::text, 'MM'), 'Mon') AS month, total_balance::integer\n                FROM monthly_data\n                UNION ALL\n                SELECT EXTRACT(YEAR FROM $1)::text, TO_CHAR($1, 'Mon'), 0::integer\n                WHERE NOT EXISTS (SELECT 1 FROM monthly_data WHERE year = EXTRACT(YEAR FROM $1)::integer AND month = EXTRACT(MONTH FROM $1)::integer)\n                UNION ALL\n                SELECT EXTRACT(YEAR FROM $3)::text, TO_CHAR($3, 'Mon'), 0::integer\n                WHERE NOT EXISTS (SELECT 1 FROM monthly_data WHERE year = EXTRACT(YEAR FROM $3)::integer AND month = EXTRACT(MONTH FROM $3)::integer)\n            )\n            SELECT \n                year as \"year!\",\n                month as \"month!\",\n                total_balance as \"total_balance!\" \n            FROM formatted_data\n            ORDER BY year DESC, TO_DATE(month, 'Mon') DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "year!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "month!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_balance!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamp",
+        "Timestamp",
+        "Timestamp",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "e4799bce3c94ca315a1c889d7528d69c599e839c54c4bb4f19dfaa0483593028"
+}

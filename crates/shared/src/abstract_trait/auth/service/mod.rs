@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     domain::{
-        requests::{AuthRequest, RegisterRequest},
+        requests::auth::{AuthRequest, RegisterRequest},
         responses::{ApiResponse, TokenResponse, UserResponse},
     },
     errors::ServiceError,
@@ -20,5 +20,8 @@ pub trait AuthServiceTrait {
     ) -> Result<ApiResponse<UserResponse>, ServiceError>;
     async fn login_user(&self, input: &AuthRequest) -> Result<ApiResponse<String>, ServiceError>;
     async fn get_me(&self, id: i32) -> Result<ApiResponse<UserResponse>, ServiceError>;
-    async fn refresh_token(&self, token: &str) -> Result<ApiResponse<TokenResponse>, ServiceError>;
+    async fn refresh_token(
+        &self,
+        token: String,
+    ) -> Result<ApiResponse<TokenResponse>, ServiceError>;
 }

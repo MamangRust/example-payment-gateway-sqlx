@@ -9,3 +9,6 @@ pub fn parse_datetime(value: &str) -> Option<String> {
             .ok()
     }
 }
+pub fn parse_expiration_datetime(input: &str) -> Result<NaiveDateTime, chrono::ParseError> {
+    NaiveDateTime::parse_from_str(input, "%Y-%m-%d %H:%M:%S")
+}

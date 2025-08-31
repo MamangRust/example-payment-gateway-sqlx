@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE cards\n            SET deleted_at = NULL\n            WHERE card_id = $1 AND deleted_at IS NOT NULL\n            RETURNING \n                card_id,\n                user_id,\n                card_number,\n                card_type,\n                expire_date,\n                cvv,\n                card_provider,\n                created_at,\n                updated_at,\n                deleted_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "card_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "card_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "expire_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 5,
+        "name": "cvv",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "card_provider",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 9,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "bef5839e87be7dfe65263260aed6556b87884a52f37dbd67486e661fb5446e49"
+}

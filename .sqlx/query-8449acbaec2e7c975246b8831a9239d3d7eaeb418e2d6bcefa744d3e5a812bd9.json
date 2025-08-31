@@ -1,0 +1,72 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                saldo_id, \n                card_number, \n                total_balance,\n                withdraw_amount, \n                withdraw_time,\n                created_at, \n                updated_at, \n                deleted_at, \n                COUNT(*) OVER() AS total_count\n            FROM saldos\n            WHERE deleted_at IS NULL\n              AND ($1::TEXT IS NULL OR card_number ILIKE '%' || $1 || '%')\n            ORDER BY saldo_id\n            LIMIT $2 OFFSET $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "saldo_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_balance",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "withdraw_amount",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "withdraw_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 7,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 8,
+        "name": "total_count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "8449acbaec2e7c975246b8831a9239d3d7eaeb418e2d6bcefa744d3e5a812bd9"
+}

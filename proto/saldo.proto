@@ -64,23 +64,23 @@ message SaldoResponseDeleteAt {
 message SaldoMonthTotalBalanceResponse {
   string month = 1;
   string year = 2;
-  int32 total_balance = 3;
+  int64 total_balance = 3;
 }
 
 
 message SaldoYearTotalBalanceResponse {
   string year = 1;
-  int32 total_balance = 2;
+  int64 total_balance = 2;
 }
 
 message SaldoMonthBalanceResponse {
   string month = 1;
-  int32 total_balance = 2;
+  int64 total_balance = 2;
 }
 
 message SaldoYearBalanceResponse {
   string year = 1;
-  int32 total_balance = 2;
+  int64 total_balance = 2;
 }
 
 

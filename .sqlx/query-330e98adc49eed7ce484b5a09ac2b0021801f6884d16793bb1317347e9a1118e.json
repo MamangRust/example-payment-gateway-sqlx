@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH months AS (\n                SELECT generate_series(\n                    date_trunc('year', $1::timestamp),\n                    date_trunc('year', $1::timestamp) + interval '1 year' - interval '1 day',\n                    interval '1 month'\n                ) AS month\n            )\n            SELECT\n                TO_CHAR(m.month, 'Mon') AS \"month!\",\n                COALESCE(SUM(w.withdraw_amount), 0)::int AS \"total_amount!\"\n            FROM\n                months m\n            LEFT JOIN\n                withdraws w ON EXTRACT(MONTH FROM w.withdraw_time) = EXTRACT(MONTH FROM m.month)\n                AND EXTRACT(YEAR FROM w.withdraw_time) = EXTRACT(YEAR FROM m.month)\n                AND w.deleted_at IS NULL\n            LEFT JOIN\n                cards c ON w.card_number = c.card_number\n                AND c.deleted_at IS NULL\n                AND w.card_number = $2\n            GROUP BY\n                m.month\n            ORDER BY\n                m.month\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "month!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_amount!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamp",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "330e98adc49eed7ce484b5a09ac2b0021801f6884d16793bb1317347e9a1118e"
+}

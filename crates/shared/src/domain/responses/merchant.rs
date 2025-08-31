@@ -69,46 +69,46 @@ pub struct MerchantTransactionResponse {
 pub struct MerchantResponseMonthlyPaymentMethod {
     pub month: String,
     pub payment_method: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct MerchantResponseYearlyPaymentMethod {
     pub year: String,
     pub payment_method: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct MerchantResponseMonthlyAmount {
     pub month: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct MerchantResponseYearlyAmount {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct MerchantResponseMonthlyTotalAmount {
     pub year: String,
     pub month: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct MerchantResponseYearlyTotalAmount {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 // model to response
 impl From<MerchantModel> for MerchantResponse {
     fn from(model: MerchantModel) -> Self {
         Self {
-            id: model.id,
+            id: model.merchant_id,
             name: model.name,
             user_id: model.user_id,
             api_key: model.api_key,
@@ -122,7 +122,7 @@ impl From<MerchantModel> for MerchantResponse {
 impl From<MerchantModel> for MerchantResponseDeleteAt {
     fn from(model: MerchantModel) -> Self {
         Self {
-            id: model.id,
+            id: model.merchant_id,
             name: model.name,
             user_id: model.user_id,
             api_key: model.api_key,
@@ -143,7 +143,7 @@ impl From<MerchantTransactionsModel> for MerchantTransactionResponse {
             payment_method: model.payment_method,
             merchant_id: model.merchant_id,
             merchant_name: model.merchant_name,
-            transaction_time: model.transaction_time.to_rfc3339(),
+            transaction_time: model.transaction_time.to_string(),
             created_at: model.created_at.map(|dt| dt.to_string()),
             updated_at: model.updated_at.map(|dt| dt.to_string()),
             deleted_at: model.deleted_at.map(|dt| dt.to_string()),
@@ -364,7 +364,7 @@ impl From<MerchantResponseMonthlyPaymentMethodProto> for MerchantResponseMonthly
         Self {
             month: p.month,
             payment_method: p.payment_method,
-            total_amount: p.total_amount as i32,
+            total_amount: p.total_amount,
         }
     }
 }
@@ -374,7 +374,7 @@ impl From<MerchantResponseYearlyPaymentMethodProto> for MerchantResponseYearlyPa
         Self {
             year: p.year,
             payment_method: p.payment_method,
-            total_amount: p.total_amount as i32,
+            total_amount: p.total_amount,
         }
     }
 }
@@ -383,7 +383,7 @@ impl From<MerchantResponseMonthlyAmountProto> for MerchantResponseMonthlyAmount 
     fn from(p: MerchantResponseMonthlyAmountProto) -> Self {
         Self {
             month: p.month,
-            total_amount: p.total_amount as i32,
+            total_amount: p.total_amount,
         }
     }
 }
@@ -392,7 +392,7 @@ impl From<MerchantResponseYearlyAmountProto> for MerchantResponseYearlyAmount {
     fn from(p: MerchantResponseYearlyAmountProto) -> Self {
         Self {
             year: p.year,
-            total_amount: p.total_amount as i32,
+            total_amount: p.total_amount,
         }
     }
 }
@@ -402,7 +402,7 @@ impl From<MerchantMonthlyTotalAmountProto> for MerchantResponseMonthlyTotalAmoun
         Self {
             year: p.year,
             month: p.month,
-            total_amount: p.total_amount as i32,
+            total_amount: p.total_amount,
         }
     }
 }
@@ -411,7 +411,7 @@ impl From<MerchantResponseYearlyTotalAmountProto> for MerchantResponseYearlyTota
     fn from(p: MerchantResponseYearlyTotalAmountProto) -> Self {
         Self {
             year: p.year,
-            total_amount: p.total_amount as i32,
+            total_amount: p.total_amount,
         }
     }
 }

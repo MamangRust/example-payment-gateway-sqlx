@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE saldos\n            SET deleted_at = NULL\n            WHERE saldo_id = $1 AND deleted_at IS NOT NULL\n            RETURNING\n                saldo_id,\n                card_number,\n                total_balance,\n                withdraw_amount,\n                withdraw_time,\n                created_at,\n                updated_at,\n                deleted_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "saldo_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_balance",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "withdraw_amount",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "withdraw_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 7,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "161e58f84262f130d9f4cf0563c8b23b187a0f44c23794a1b016a9a34a56b21d"
+}

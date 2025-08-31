@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH months AS (\n                SELECT generate_series(\n                    date_trunc('year', $1::timestamp),\n                    date_trunc('year', $1::timestamp) + interval '1 year' - interval '1 day',\n                    interval '1 month'\n                ) AS month\n            )\n            SELECT\n                TO_CHAR(m.month, 'Mon') AS \"month!\",\n                COALESCE(SUM(s.total_balance), 0)::bigint AS \"total_balance!\"\n            FROM\n                months m\n            LEFT JOIN\n                saldos s ON EXTRACT(MONTH FROM s.created_at) = EXTRACT(MONTH FROM m.month)\n                AND EXTRACT(YEAR FROM s.created_at) = EXTRACT(YEAR FROM m.month)\n                AND s.deleted_at IS NULL\n            GROUP BY\n                m.month\n            ORDER BY\n                m.month\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "month!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_balance!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "d945e8d8cda754e00282e66a5b21317a556cb5baa48a601c0e9b4f354bf21fa0"
+}

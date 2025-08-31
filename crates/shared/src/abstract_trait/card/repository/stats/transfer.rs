@@ -11,6 +11,20 @@ pub type DynCardStatsTransferRepository = Arc<dyn CardStatsTransferRepositoryTra
 
 #[async_trait]
 pub trait CardStatsTransferRepositoryTrait {
-    async fn get_monthly_amount(&self, year: i32) -> Result<Vec<CardMonthAmount>, RepositoryError>;
-    async fn get_yearly_amount(&self, year: i32) -> Result<Vec<CardYearAmount>, RepositoryError>;
+    async fn get_monthly_amount_sender(
+        &self,
+        year: i32,
+    ) -> Result<Vec<CardMonthAmount>, RepositoryError>;
+    async fn get_yearly_amount_sender(
+        &self,
+        year: i32,
+    ) -> Result<Vec<CardYearAmount>, RepositoryError>;
+    async fn get_monthly_amount_receiver(
+        &self,
+        year: i32,
+    ) -> Result<Vec<CardMonthAmount>, RepositoryError>;
+    async fn get_yearly_amount_receiver(
+        &self,
+        year: i32,
+    ) -> Result<Vec<CardYearAmount>, RepositoryError>;
 }

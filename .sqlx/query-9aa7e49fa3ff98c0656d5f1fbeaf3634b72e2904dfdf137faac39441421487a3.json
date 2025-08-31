@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH last_five_years AS (\n                SELECT\n                    EXTRACT(YEAR FROM t.transaction_time)::TEXT AS year,\n                    COALESCE(SUM(t.amount), 0)::bigint AS total_amount\n                FROM\n                    transactions t\n                JOIN\n                    merchants m ON t.merchant_id = m.merchant_id\n                WHERE\n                    t.deleted_at IS NULL\n                    AND m.deleted_at IS NULL\n                    AND m.merchant_id = $2\n                    AND EXTRACT(YEAR FROM t.transaction_time) >= $1 - 4\n                    AND EXTRACT(YEAR FROM t.transaction_time) <= $1\n                GROUP BY\n                    EXTRACT(YEAR FROM t.transaction_time)\n            )\n            SELECT\n                year AS \"year!\",\n                total_amount AS \"total_amount!\"\n            FROM\n                last_five_years\n            ORDER BY\n                year\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "year!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_amount!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "9aa7e49fa3ff98c0656d5f1fbeaf3634b72e2904dfdf137faac39441421487a3"
+}

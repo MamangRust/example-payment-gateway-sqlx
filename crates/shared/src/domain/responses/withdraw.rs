@@ -27,7 +27,7 @@ pub struct WithdrawResponse {
     #[serde(rename = "card_number")]
     pub card_number: String,
     #[serde(rename = "withdraw_amount")]
-    pub withdraw_amount: i32,
+    pub withdraw_amount: i64,
     #[serde(rename = "withdraw_time")]
     pub withdraw_time: String,
     #[serde(rename = "created_at")]
@@ -44,7 +44,7 @@ pub struct WithdrawResponseDeleteAt {
     #[serde(rename = "card_number")]
     pub card_number: String,
     #[serde(rename = "withdraw_amount")]
-    pub withdraw_amount: i32,
+    pub withdraw_amount: i64,
     #[serde(rename = "withdraw_time")]
     pub withdraw_time: String,
     #[serde(rename = "created_at")]
@@ -60,7 +60,7 @@ pub struct WithdrawResponseMonthStatusSuccess {
     pub year: String,
     pub month: String,
     #[serde(rename = "total_amount")]
-    pub total_amount: i32,
+    pub total_amount: i64,
     #[serde(rename = "total_success")]
     pub total_success: i32,
 }
@@ -69,7 +69,7 @@ pub struct WithdrawResponseMonthStatusSuccess {
 pub struct WithdrawResponseYearStatusSuccess {
     pub year: String,
     #[serde(rename = "total_amount")]
-    pub total_amount: i32,
+    pub total_amount: i64,
     #[serde(rename = "total_success")]
     pub total_success: i32,
 }
@@ -78,7 +78,7 @@ pub struct WithdrawResponseYearStatusSuccess {
 pub struct WithdrawResponseMonthStatusFailed {
     pub year: String,
     #[serde(rename = "total_amount")]
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub month: String,
     #[serde(rename = "total_failed")]
     pub total_failed: i32,
@@ -88,7 +88,7 @@ pub struct WithdrawResponseMonthStatusFailed {
 pub struct WithdrawResponseYearStatusFailed {
     pub year: String,
     #[serde(rename = "total_amount")]
-    pub total_amount: i32,
+    pub total_amount: i64,
     #[serde(rename = "total_failed")]
     pub total_failed: i32,
 }
@@ -97,14 +97,14 @@ pub struct WithdrawResponseYearStatusFailed {
 pub struct WithdrawMonthlyAmountResponse {
     pub month: String,
     #[serde(rename = "total_amount")]
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct WithdrawYearlyAmountResponse {
     pub year: String,
     #[serde(rename = "total_amount")]
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 // model to response

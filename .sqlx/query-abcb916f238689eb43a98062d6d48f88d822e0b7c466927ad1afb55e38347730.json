@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH months AS (\n                SELECT generate_series(\n                    date_trunc('year', $1::timestamp),\n                    date_trunc('year', $1::timestamp) + interval '1 year' - interval '1 day',\n                    interval '1 month'\n                ) AS month\n            )\n            SELECT\n                TO_CHAR(m.month, 'Mon') AS \"month!\",\n                COALESCE(SUM(t.amount), 0)::int AS \"total_amount!\"\n            FROM\n                months m\n            LEFT JOIN\n                transactions t ON EXTRACT(MONTH FROM t.transaction_time) = EXTRACT(MONTH FROM m.month)\n                AND EXTRACT(YEAR FROM t.transaction_time) = EXTRACT(YEAR FROM m.month)\n                AND t.deleted_at IS NULL\n            LEFT JOIN\n                merchants mch ON t.merchant_id = mch.merchant_id\n                AND mch.deleted_at IS NULL\n            GROUP BY\n                m.month\n            ORDER BY\n                m.month\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "month!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_amount!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "abcb916f238689eb43a98062d6d48f88d822e0b7c466927ad1afb55e38347730"
+}

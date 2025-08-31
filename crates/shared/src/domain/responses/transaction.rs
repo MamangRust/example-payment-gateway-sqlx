@@ -27,7 +27,7 @@ pub struct TransactionResponse {
     pub id: i32,
     pub transaction_no: String,
     pub card_number: String,
-    pub amount: i32,
+    pub amount: i64,
     pub payment_method: String,
     pub merchant_id: i32,
     pub transaction_time: String,
@@ -42,7 +42,7 @@ pub struct TransactionResponseDeleteAt {
     pub id: i32,
     pub transaction_no: String,
     pub card_number: String,
-    pub amount: i32,
+    pub amount: i64,
     pub payment_method: String,
     pub merchant_id: i32,
     pub transaction_time: String,
@@ -58,21 +58,21 @@ pub struct TransactionResponseDeleteAt {
 pub struct TransactionResponseMonthStatusSuccess {
     pub year: String,
     pub month: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub total_success: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TransactionResponseYearStatusSuccess {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub total_success: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TransactionResponseMonthStatusFailed {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub month: String,
     pub total_failed: i32,
 }
@@ -80,7 +80,7 @@ pub struct TransactionResponseMonthStatusFailed {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TransactionResponseYearStatusFailed {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
     pub total_failed: i32,
 }
 
@@ -89,7 +89,7 @@ pub struct TransactionMonthMethodResponse {
     pub month: String,
     pub payment_method: String,
     pub total_transactions: i32,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -97,19 +97,19 @@ pub struct TransactionYearMethodResponse {
     pub year: String,
     pub payment_method: String,
     pub total_transactions: i32,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TransactionMonthAmountResponse {
     pub month: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TransactionYearlyAmountResponse {
     pub year: String,
-    pub total_amount: i32,
+    pub total_amount: i64,
 }
 
 // model to response

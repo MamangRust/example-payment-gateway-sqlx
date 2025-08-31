@@ -1,4 +1,5 @@
 use crate::{
+    domain::requests::card::MonthYearCardNumberCard,
     errors::RepositoryError,
     model::card::{CardMonthBalance, CardYearlyBalance},
 };
@@ -14,10 +15,10 @@ pub type DynCardStatsBalanceByCardRepository =
 pub trait CardStatsBalanceByCardRepositoryTrait {
     async fn get_monthly_balance(
         &self,
-        year: i32,
+        req: &MonthYearCardNumberCard,
     ) -> Result<Vec<CardMonthBalance>, RepositoryError>;
     async fn get_yearly_balance(
         &self,
-        year: i32,
+        req: &MonthYearCardNumberCard,
     ) -> Result<Vec<CardYearlyBalance>, RepositoryError>;
 }

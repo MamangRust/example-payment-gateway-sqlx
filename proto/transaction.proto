@@ -62,7 +62,7 @@ message FindTransactionByMerchantIdRequest {
 message CreateTransactionRequest {
     string api_key = 1;
     string card_number = 2;
-    int32 amount = 3;
+    int64 amount = 3;
     string payment_method = 4;
     int32 merchant_id = 5;
     google.protobuf.Timestamp transaction_time = 6;
@@ -82,7 +82,7 @@ message TransactionResponse {
     int32 id = 1;
     string card_number = 2;
     string transaction_no = 3;
-    int32 amount = 4;
+    int64 amount = 4;
     string payment_method = 5;
     int32 merchant_id = 6;
     string transaction_time = 7;
@@ -94,7 +94,7 @@ message TransactionResponseDeleteAt {
     int32 id = 1;
     string card_number = 2;
     string transaction_no = 3;
-    int32 amount = 4;
+    int64 amount = 4;
     string payment_method = 5;
     int32 merchant_id = 6;
     string transaction_time = 7;
@@ -108,26 +108,26 @@ message TransactionMonthStatusSuccessResponse {
     string year = 1;
     string month = 2;
     int32 total_success = 3;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message TransactionYearStatusSuccessResponse {
     string year = 1;
     int32 total_success = 2;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message TransactionMonthStatusFailedResponse {
     string year = 1;
     string month = 2;
     int32 total_failed = 3;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 message TransactionYearStatusFailedResponse {
     string year = 1;
     int32 total_failed = 2;
-    int32 total_amount = 4;
+    int64 total_amount = 4;
 }
 
 
@@ -135,24 +135,24 @@ message TransactionMonthMethodResponse {
   string month = 1;
   string payment_method = 2;
   int32 total_transactions = 3;
-  int32 total_amount = 4;
+  int64 total_amount = 4;
 }
 
 message TransactionYearMethodResponse {
   string year = 1;
   string payment_method = 2;
   int32 total_transactions = 3;
-  int32 total_amount = 4;
+  int64 total_amount = 4;
 }
 
 message TransactionMonthAmountResponse {
   string month = 1;
-  int32 total_amount = 2;
+  int64 total_amount = 2;
 }
 
 message TransactionYearlyAmountResponse {
   string year = 1;
-  int32 total_amount = 2;
+  int64 total_amount = 2;
 }
 
 message ApiResponseTransactionMonthStatusSuccess{

@@ -63,8 +63,8 @@ pub struct FindByIdWithdrawRequest {
 pub struct CreateWithdrawRequest {
     #[prost(string, tag = "1")]
     pub card_number: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub withdraw_amount: i32,
+    #[prost(int64, tag = "2")]
+    pub withdraw_amount: i64,
     #[prost(message, optional, tag = "3")]
     pub withdraw_time: ::core::option::Option<::prost_types::Timestamp>,
 }
@@ -74,8 +74,8 @@ pub struct UpdateWithdrawRequest {
     pub withdraw_id: i32,
     #[prost(string, tag = "2")]
     pub card_number: ::prost::alloc::string::String,
-    #[prost(int32, tag = "3")]
-    pub withdraw_amount: i32,
+    #[prost(int64, tag = "3")]
+    pub withdraw_amount: i64,
     #[prost(message, optional, tag = "4")]
     pub withdraw_time: ::core::option::Option<::prost_types::Timestamp>,
 }
@@ -87,8 +87,8 @@ pub struct WithdrawResponse {
     pub withdraw_no: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub card_number: ::prost::alloc::string::String,
-    #[prost(int32, tag = "4")]
-    pub withdraw_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub withdraw_amount: i64,
     #[prost(string, tag = "5")]
     pub withdraw_time: ::prost::alloc::string::String,
     #[prost(string, tag = "6")]
@@ -104,8 +104,8 @@ pub struct WithdrawResponseDeleteAt {
     pub withdraw_no: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub card_number: ::prost::alloc::string::String,
-    #[prost(int32, tag = "4")]
-    pub withdraw_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub withdraw_amount: i64,
     #[prost(string, tag = "5")]
     pub withdraw_time: ::prost::alloc::string::String,
     #[prost(string, tag = "6")]
@@ -123,8 +123,8 @@ pub struct WithdrawMonthStatusSuccessResponse {
     pub month: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_success: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WithdrawYearStatusSuccessResponse {
@@ -132,8 +132,8 @@ pub struct WithdrawYearStatusSuccessResponse {
     pub year: ::prost::alloc::string::String,
     #[prost(int32, tag = "2")]
     pub total_success: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WithdrawMonthStatusFailedResponse {
@@ -143,8 +143,8 @@ pub struct WithdrawMonthStatusFailedResponse {
     pub month: ::prost::alloc::string::String,
     #[prost(int32, tag = "3")]
     pub total_failed: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WithdrawYearStatusFailedResponse {
@@ -152,22 +152,22 @@ pub struct WithdrawYearStatusFailedResponse {
     pub year: ::prost::alloc::string::String,
     #[prost(int32, tag = "2")]
     pub total_failed: i32,
-    #[prost(int32, tag = "4")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "4")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WithdrawMonthlyAmountResponse {
     #[prost(string, tag = "1")]
     pub month: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "2")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WithdrawYearlyAmountResponse {
     #[prost(string, tag = "1")]
     pub year: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub total_amount: i32,
+    #[prost(int64, tag = "2")]
+    pub total_amount: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApiResponseWithdrawMonthStatusSuccess {

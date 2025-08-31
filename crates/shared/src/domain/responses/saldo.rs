@@ -21,7 +21,7 @@ pub struct SaldoResponse {
     pub card_number: String,
     pub total_balance: i32,
     pub withdraw_amount: i32,
-    pub withdraw_time: String,
+    pub withdraw_time: Option<String>,
     #[serde(rename = "created_at")]
     pub created_at: Option<String>,
     #[serde(rename = "updated_at")]
@@ -34,7 +34,7 @@ pub struct SaldoResponseDeleteAt {
     pub card_number: String,
     pub total_balance: i32,
     pub withdraw_amount: i32,
-    pub withdraw_time: String,
+    pub withdraw_time: Option<String>,
     #[serde(rename = "created_at")]
     pub created_at: Option<String>,
     #[serde(rename = "updated_at")]
@@ -47,36 +47,36 @@ pub struct SaldoResponseDeleteAt {
 pub struct SaldoMonthTotalBalanceResponse {
     pub month: String,
     pub year: String,
-    pub total_balance: i32,
+    pub total_balance: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SaldoYearTotalBalanceResponse {
     pub year: String,
-    pub total_balance: i32,
+    pub total_balance: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SaldoMonthBalanceResponse {
     pub month: String,
-    pub total_balance: i32,
+    pub total_balance: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SaldoYearBalanceResponse {
     pub year: String,
-    pub total_balance: i32,
+    pub total_balance: i64,
 }
 
 // model to response
 impl From<SaldoModel> for SaldoResponse {
     fn from(model: SaldoModel) -> Self {
         Self {
-            id: model.id,
+            id: model.saldo_id,
             card_number: model.card_number,
             total_balance: model.total_balance,
-            withdraw_amount: model.withdraw_amount,
-            withdraw_time: model.withdraw_time.to_string(),
+            withdraw_amount: model.withdraw_amount.unwrap_or(0),
+            withdraw_time: model.withdraw_time.map(|dt| dt.to_string()),
             created_at: model.created_at.map(|dt| dt.to_string()),
             updated_at: model.updated_at.map(|dt| dt.to_string()),
         }
@@ -86,11 +86,11 @@ impl From<SaldoModel> for SaldoResponse {
 impl From<SaldoModel> for SaldoResponseDeleteAt {
     fn from(model: SaldoModel) -> Self {
         Self {
-            id: model.id,
+            id: model.saldo_id,
             card_number: model.card_number,
             total_balance: model.total_balance,
-            withdraw_amount: model.withdraw_amount,
-            withdraw_time: model.withdraw_time.to_string(),
+            withdraw_amount: model.withdraw_amount.unwrap_or(0),
+            withdraw_time: model.withdraw_time.map(|dt| dt.to_string()),
             created_at: model.created_at.map(|dt| dt.to_string()),
             updated_at: model.updated_at.map(|dt| dt.to_string()),
             deleted_at: model.deleted_at.map(|dt| dt.to_string()),
@@ -143,7 +143,7 @@ impl From<SaldoResponse> for SaldoResponseProto {
             card_number: r.card_number,
             total_balance: r.total_balance,
             withdraw_amount: r.withdraw_amount,
-            withdraw_time: r.withdraw_time,
+            withdraw_time: r.withdraw_time.unwrap_or_default(),
             created_at: r.created_at.unwrap_or_default(),
             updated_at: r.updated_at.unwrap_or_default(),
         }
@@ -157,7 +157,7 @@ impl From<SaldoResponseDeleteAt> for SaldoResponseDeleteAtProto {
             card_number: r.card_number,
             total_balance: r.total_balance,
             withdraw_amount: r.withdraw_amount,
-            withdraw_time: r.withdraw_time,
+            withdraw_time: r.withdraw_time.unwrap_or_default(),
             created_at: r.created_at.unwrap_or_default(),
             updated_at: r.updated_at.unwrap_or_default(),
             deleted_at: Some(r.deleted_at.unwrap_or_default()),
@@ -210,7 +210,7 @@ impl From<SaldoResponseProto> for SaldoResponse {
             card_number: p.card_number,
             total_balance: p.total_balance,
             withdraw_amount: p.withdraw_amount,
-            withdraw_time: p.withdraw_time,
+            withdraw_time: parse_datetime(&p.withdraw_time),
             created_at: parse_datetime(&p.created_at),
             updated_at: parse_datetime(&p.updated_at),
         }
@@ -224,7 +224,7 @@ impl From<SaldoResponseDeleteAtProto> for SaldoResponseDeleteAt {
             card_number: p.card_number,
             total_balance: p.total_balance,
             withdraw_amount: p.withdraw_amount,
-            withdraw_time: p.withdraw_time,
+            withdraw_time: parse_datetime(&p.withdraw_time),
             created_at: parse_datetime(&p.created_at),
             updated_at: parse_datetime(&p.updated_at),
             deleted_at: p.deleted_at.as_deref().and_then(parse_datetime),

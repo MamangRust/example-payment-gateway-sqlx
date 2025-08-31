@@ -1,5 +1,5 @@
 use crate::{
-    domain::requests::{
+    domain::requests::merchant::{
         FindAllMerchantTransactions, FindAllMerchantTransactionsByApiKey,
         FindAllMerchantTransactionsById,
     },
@@ -17,15 +17,15 @@ pub type DynMerchantTransactionRepository =
 pub trait MerchantTransactionRepositoryTrait {
     async fn find_all_transactiions(
         &self,
-        request: FindAllMerchantTransactions,
-    ) -> Result<Vec<MerchantTransactionsModel>, RepositoryError>;
+        req: &FindAllMerchantTransactions,
+    ) -> Result<(Vec<MerchantTransactionsModel>, i64), RepositoryError>;
 
     async fn find_all_transactiions_by_api_key(
         &self,
-        request: FindAllMerchantTransactionsByApiKey,
-    ) -> Result<Vec<MerchantTransactionsModel>, RepositoryError>;
+        req: &FindAllMerchantTransactionsByApiKey,
+    ) -> Result<(Vec<MerchantTransactionsModel>, i64), RepositoryError>;
     async fn find_all_transactiions_by_id(
         &self,
-        request: FindAllMerchantTransactionsById,
-    ) -> Result<Vec<MerchantTransactionsModel>, RepositoryError>;
+        req: &FindAllMerchantTransactionsById,
+    ) -> Result<(Vec<MerchantTransactionsModel>, i64), RepositoryError>;
 }

@@ -129,7 +129,7 @@ pub struct CreateMerchantRequest {
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct UpdateMerchantRequest {
-    pub merchant_id: Option<i32>,
+    pub merchant_id: i32,
 
     #[validate(length(min = 1))]
     pub name: String,

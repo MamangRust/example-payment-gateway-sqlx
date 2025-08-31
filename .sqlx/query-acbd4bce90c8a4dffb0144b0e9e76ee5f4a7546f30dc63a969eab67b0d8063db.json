@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH last_five_years AS (\n                SELECT\n                    EXTRACT(YEAR FROM w.withdraw_time)::TEXT AS year,\n                    COALESCE(SUM(w.withdraw_amount), 0)::bigint AS total_amount\n                FROM\n                    withdraws w\n                JOIN\n                    cards c ON w.card_number = c.card_number\n                WHERE\n                    w.deleted_at IS NULL\n                    AND c.deleted_at IS NULL\n                    AND EXTRACT(YEAR FROM w.withdraw_time) >= $1 - 4\n                    AND EXTRACT(YEAR FROM w.withdraw_time) <= $1\n                GROUP BY\n                    EXTRACT(YEAR FROM w.withdraw_time)\n            )\n            SELECT\n                year AS \"year!\",\n                total_amount AS \"total_amount!\"\n            FROM\n                last_five_years\n            ORDER BY\n                year\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "year!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_amount!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "acbd4bce90c8a4dffb0144b0e9e76ee5f4a7546f30dc63a969eab67b0d8063db"
+}

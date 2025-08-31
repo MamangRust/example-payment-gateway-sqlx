@@ -1,8 +1,7 @@
 use crate::{
-    domain::responses::{
-        MerchantResponseMonthlyPaymentMethod, MerchantResponseYearlyPaymentMethod,
-    },
+    domain::requests::merchant::MonthYearPaymentMethodApiKey,
     errors::RepositoryError,
+    model::merchant::{MerchantMonthlyPaymentMethod, MerchantYearlyPaymentMethod},
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -15,10 +14,10 @@ pub type DynMerchantStatsMethodByApiKeyRepository =
 pub trait MerchantStatsMethodByApiKeyRepositoryTrait {
     async fn get_monthly_method(
         &self,
-        year: i32,
-    ) -> Result<Vec<MerchantResponseMonthlyPaymentMethod>, RepositoryError>;
+        req: &MonthYearPaymentMethodApiKey,
+    ) -> Result<Vec<MerchantMonthlyPaymentMethod>, RepositoryError>;
     async fn get_yearly_method(
         &self,
-        year: i32,
-    ) -> Result<Vec<MerchantResponseYearlyPaymentMethod>, RepositoryError>;
+        req: &MonthYearPaymentMethodApiKey,
+    ) -> Result<Vec<MerchantYearlyPaymentMethod>, RepositoryError>;
 }

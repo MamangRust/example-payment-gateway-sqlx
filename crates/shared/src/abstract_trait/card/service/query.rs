@@ -1,14 +1,15 @@
 use crate::{
     domain::{
-        requests::FindAllCards,
+        requests::card::FindAllCards,
         responses::{ApiResponse, ApiResponsePagination, CardResponse, CardResponseDeleteAt},
     },
-    errors::{RepositoryError, ServiceError},
-    model::card::CardModel,
+    errors::ServiceError,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
+
+pub type DynCardQueryService = Arc<dyn CardQueryServiceTrait + Send + Sync>;
 
 #[async_trait]
 pub trait CardQueryServiceTrait {
@@ -29,4 +30,8 @@ pub trait CardQueryServiceTrait {
         &self,
         user_id: i32,
     ) -> Result<ApiResponse<Vec<CardResponse>>, ServiceError>;
+    async fn find_by_card_number(
+        &self,
+        card_number: String,
+    ) -> Result<ApiResponse<CardResponse>, ServiceError>;
 }

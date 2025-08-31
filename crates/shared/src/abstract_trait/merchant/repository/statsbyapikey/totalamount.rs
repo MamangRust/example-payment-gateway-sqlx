@@ -1,6 +1,7 @@
 use crate::{
-    domain::responses::{MerchantResponseMonthlyTotalAmount, MerchantResponseYearlyTotalAmount},
+    domain::requests::merchant::MonthYearTotalAmountApiKey,
     errors::RepositoryError,
+    model::merchant::{MerchantMonthlyTotalAmount, MerchantYearlyTotalAmount},
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -13,10 +14,10 @@ pub type DynMerchantStatsTotalAmountByApiKeyRepository =
 pub trait MerchantStatsTotalAmountByApiKeyRepositoryTrait {
     async fn get_monthly_total_amount(
         &self,
-        year: i32,
-    ) -> Result<Vec<MerchantResponseMonthlyTotalAmount>, RepositoryError>;
+        req: &MonthYearTotalAmountApiKey,
+    ) -> Result<Vec<MerchantMonthlyTotalAmount>, RepositoryError>;
     async fn get_yearly_total_amount(
         &self,
-        year: i32,
-    ) -> Result<Vec<MerchantResponseYearlyTotalAmount>, RepositoryError>;
+        year: &MonthYearTotalAmountApiKey,
+    ) -> Result<Vec<MerchantYearlyTotalAmount>, RepositoryError>;
 }
