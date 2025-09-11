@@ -7,7 +7,8 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{Days, NaiveDate};
+use chrono::{Datelike, Days, NaiveDate};
+use sqlx::Row;
 
 use tracing::error;
 
@@ -19,6 +20,15 @@ impl SaldoTotalBalanceRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
@@ -27,96 +37,110 @@ impl SaldoTotalBalanceRepositoryTrait for SaldoTotalBalanceRepository {
         &self,
         req: &MonthTotalSaldoBalance,
     ) -> Result<Vec<SaldoMonthTotalBalance>, RepositoryError> {
+        let mut conn = self.get_conn().await?;
+
         let year = req.year;
         let month = req.month as u32;
 
-        if month < 1 || month > 12 {
-            return Err(RepositoryError::Custom(
-                "Bulan harus antara 1 dan 12".to_string(),
-            ));
-        }
+        let current_date = NaiveDate::from_ymd_opt(year, month, 1)
+            .ok_or_else(|| RepositoryError::Custom("❌ Invalid current date".to_string()))?;
 
-        let current_month_start = NaiveDate::from_ymd_opt(year, month, 1)
-            .ok_or(RepositoryError::Custom("Tanggal tidak valid".to_string()))?;
-
-        let next_month_start = if month == 12 {
-            NaiveDate::from_ymd_opt(year + 1, 1, 1)
-        } else {
-            NaiveDate::from_ymd_opt(year, month + 1, 1)
-        }
-        .ok_or(RepositoryError::Custom("Tanggal tidak valid".to_string()))?;
-
-        let last_day_current_month = next_month_start
+        let prev_date = current_date
             .checked_sub_days(Days::new(1))
-            .ok_or(RepositoryError::Custom("Tanggal tidak valid".to_string()))?;
+            .and_then(|d| NaiveDate::from_ymd_opt(d.year(), d.month(), 1))
+            .unwrap_or_else(|| NaiveDate::from_ymd_opt(year - 1, 12, 1).unwrap());
 
-        let prev_month_start = if month == 1 {
-            NaiveDate::from_ymd_opt(year - 1, 12, 1)
-        } else {
-            NaiveDate::from_ymd_opt(year, month - 1, 1)
-        }
-        .ok_or(RepositoryError::Custom("Tanggal tidak valid".to_string()))?;
+        let last_day_current = current_date
+            .checked_add_months(chrono::Months::new(1))
+            .and_then(|d| d.checked_sub_days(Days::new(1)))
+            .unwrap_or(current_date);
 
-        let last_day_prev_month = current_month_start
-            .checked_sub_days(Days::new(1))
-            .ok_or(RepositoryError::Custom("Tanggal tidak valid".to_string()))?;
+        let last_day_prev = prev_date
+            .checked_add_months(chrono::Months::new(1))
+            .and_then(|d| d.checked_sub_days(Days::new(1)))
+            .unwrap_or(prev_date);
 
-        let start_current = current_month_start.and_hms_opt(0, 0, 0).unwrap();
-        let end_current = last_day_current_month.and_hms_opt(23, 59, 59).unwrap();
-        let start_prev = prev_month_start.and_hms_opt(0, 0, 0).unwrap();
-        let end_prev = last_day_prev_month.and_hms_opt(23, 59, 59).unwrap();
-
-        let rows = sqlx::query!(
-            r#"
+        let sql = r#"
             WITH monthly_data AS (
                 SELECT
                     EXTRACT(YEAR FROM s.created_at)::integer AS year,
                     EXTRACT(MONTH FROM s.created_at)::integer AS month,
-                    COALESCE(SUM(s.total_balance), 0)::integer AS total_balance
-                FROM saldos s
-                WHERE s.deleted_at IS NULL
-                AND (
-                    (s.created_at >= $1 AND s.created_at <= $2)
-                    OR (s.created_at >= $3 AND s.created_at <= $4)
-                )
-                GROUP BY EXTRACT(YEAR FROM s.created_at), EXTRACT(MONTH FROM s.created_at)
+                    COALESCE(SUM(s.total_balance), 0) AS total_balance
+                FROM
+                    saldos s
+                WHERE
+                    s.deleted_at IS NULL
+                    AND (
+                        (s.created_at >= $1::timestamp AND s.created_at <= $2::timestamp)
+                        OR (s.created_at >= $3::timestamp AND s.created_at <= $4::timestamp)
+                    )
+                GROUP BY
+                    EXTRACT(YEAR FROM s.created_at),
+                    EXTRACT(MONTH FROM s.created_at)
             ), formatted_data AS (
-                SELECT year::text, TO_CHAR(TO_DATE(month::text, 'MM'), 'Mon') AS month, total_balance::integer
-                FROM monthly_data
-                UNION ALL
-                SELECT EXTRACT(YEAR FROM $1)::text, TO_CHAR($1, 'Mon'), 0::integer
-                WHERE NOT EXISTS (SELECT 1 FROM monthly_data WHERE year = EXTRACT(YEAR FROM $1)::integer AND month = EXTRACT(MONTH FROM $1)::integer)
-                UNION ALL
-                SELECT EXTRACT(YEAR FROM $3)::text, TO_CHAR($3, 'Mon'), 0::integer
-                WHERE NOT EXISTS (SELECT 1 FROM monthly_data WHERE year = EXTRACT(YEAR FROM $3)::integer AND month = EXTRACT(MONTH FROM $3)::integer)
-            )
-            SELECT 
-                year as "year!",
-                month as "month!",
-                total_balance as "total_balance!" 
-            FROM formatted_data
-            ORDER BY year DESC, TO_DATE(month, 'Mon') DESC
-            "#,
-            start_current,
-            end_current,
-            start_prev,
-            end_prev
-        )
-        .fetch_all(&self.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch monthly saldo balance: {:?}", e);
-            RepositoryError::Sqlx(e.into())
-        })?;
+                SELECT
+                    year::text,
+                    TO_CHAR(TO_DATE(month::text, 'MM'), 'Mon') AS month,
+                    total_balance::integer
+                FROM
+                    monthly_data
 
-        let result: Vec<SaldoMonthTotalBalance> = rows
-            .into_iter()
-            .map(|r| SaldoMonthTotalBalance {
-                year: r.year,
-                month: r.month,
-                total_balance: r.total_balance as i64,
-            })
-            .collect();
+                UNION ALL
+
+                SELECT
+                    EXTRACT(YEAR FROM $1::timestamp)::text AS year,
+                    TO_CHAR($1::timestamp, 'Mon') AS month,
+                    0::integer AS total_balance
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM monthly_data
+                    WHERE year = EXTRACT(YEAR FROM $1::timestamp)::integer
+                    AND month = EXTRACT(MONTH FROM $1::timestamp)::integer
+                )
+
+                UNION ALL
+
+                SELECT
+                    EXTRACT(YEAR FROM $3::timestamp)::text AS year,
+                    TO_CHAR($3::timestamp, 'Mon') AS month,
+                    0::integer AS total_balance
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM monthly_data
+                    WHERE year = EXTRACT(YEAR FROM $3::timestamp)::integer
+                    AND month = EXTRACT(MONTH FROM $3::timestamp)::integer
+                )
+            )
+            SELECT * FROM formatted_data
+            ORDER BY
+                year DESC,
+                TO_DATE(month, 'Mon') DESC;
+        "#;
+
+        let rows = sqlx::query(sql)
+            .bind(prev_date)
+            .bind(last_day_prev)
+            .bind(current_date)
+            .bind(last_day_current)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("❌ Database error in get_month_total_balance: {e:?}");
+                RepositoryError::Sqlx(e)
+            })?;
+
+        let mut result = Vec::with_capacity(rows.len());
+        for row in rows {
+            let year: String = row.try_get("year")?;
+            let month: String = row.try_get("month")?;
+            let total_balance: i64 = row.try_get("total_balance")?;
+
+            result.push(SaldoMonthTotalBalance {
+                year,
+                month,
+                total_balance,
+            });
+        }
 
         Ok(result)
     }
@@ -125,71 +149,76 @@ impl SaldoTotalBalanceRepositoryTrait for SaldoTotalBalanceRepository {
         &self,
         year: i32,
     ) -> Result<Vec<SaldoYearTotalBalance>, RepositoryError> {
-        let prev_year = year - 1;
+        let mut conn = self.get_conn().await?;
 
-        let rows = sqlx::query!(
-            r#"
-        WITH yearly_data AS (
-            SELECT
-                (EXTRACT(YEAR FROM s.created_at))::INT AS year,
-                CAST(COALESCE(SUM(s.total_balance), 0) AS BIGINT) AS total_balance
-            FROM
-                saldos s
-            WHERE
-                s.deleted_at IS NULL
-                AND (
-                    (EXTRACT(YEAR FROM s.created_at))::INT = $1
-                    OR (EXTRACT(YEAR FROM s.created_at))::INT = $2
+        let sql = r#"
+            WITH yearly_data AS (
+                SELECT
+                    EXTRACT(YEAR FROM s.created_at)::integer AS year,
+                    COALESCE(SUM(s.total_balance), 0)::integer AS total_balance
+                FROM
+                    saldos s
+                WHERE
+                    s.deleted_at IS NULL
+                    AND (
+                        EXTRACT(YEAR FROM s.created_at) = $1::integer
+                        OR EXTRACT(YEAR FROM s.created_at) = $1::integer - 1
+                    )
+                GROUP BY
+                    EXTRACT(YEAR FROM s.created_at)
+            ), formatted_data AS (
+                SELECT
+                    year::text,
+                    total_balance::integer
+                FROM
+                    yearly_data
+
+                UNION ALL
+
+                SELECT
+                    $1::text AS year,
+                    0::integer AS total_balance
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM yearly_data
+                    WHERE year = $1::integer
                 )
-            GROUP BY
-                (EXTRACT(YEAR FROM s.created_at))::INT
-        ), formatted_data AS (
-            SELECT
-                year::TEXT,
-                total_balance
-            FROM
-                yearly_data
 
-            UNION ALL
+                UNION ALL
 
-            SELECT
-                $1::TEXT AS year,
-                0::BIGINT AS total_balance
-            WHERE NOT EXISTS (
-                SELECT 1 FROM yearly_data WHERE year = $1
+                SELECT
+                    ($1::integer - 1)::text AS year,
+                    0::integer AS total_balance
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM yearly_data
+                    WHERE year = $1::integer - 1
+                )
             )
+            SELECT * FROM formatted_data
+            ORDER BY year DESC;
+        "#;
 
-            UNION ALL
+        let rows = sqlx::query(sql)
+            .bind(year)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("❌ Database error in get_year_total_balance: {e:?}");
+                RepositoryError::Sqlx(e)
+            })?;
 
-            SELECT
-                $2::TEXT AS year,
-                0::BIGINT AS total_balance
-            WHERE NOT EXISTS (
-                SELECT 1 FROM yearly_data WHERE year = $2
-            )
-        )
-        SELECT 
-            COALESCE(year::TEXT, '') AS year, 
-            COALESCE(total_balance, 0) AS total_balance
-        FROM formatted_data
-        ORDER BY year DESC
-        "#,
-            year,
-            prev_year
-        )
-        .fetch_all(&self.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch yearly saldo balance: {:?}", e);
-            RepositoryError::Sqlx(e.into())
-        })?
-        .into_iter()
-        .map(|row| SaldoYearTotalBalance {
-            year: row.year.unwrap_or_default(),
-            total_balance: row.total_balance.unwrap_or(0),
-        })
-        .collect();
+        let mut result = Vec::with_capacity(rows.len());
+        for row in rows {
+            let year_str: String = row.try_get("year")?;
+            let total_balance: i64 = row.try_get("total_balance")?;
 
-        Ok(rows)
+            result.push(SaldoYearTotalBalance {
+                year: year_str,
+                total_balance,
+            });
+        }
+
+        Ok(result)
     }
 }

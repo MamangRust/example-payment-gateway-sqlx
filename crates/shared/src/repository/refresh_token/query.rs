@@ -3,6 +3,7 @@ use crate::{
     errors::RepositoryError, model::refresh_token::RefreshTokenModel,
 };
 use async_trait::async_trait;
+use tracing::error;
 
 pub struct RefreshTokenQueryRepository {
     db: ConnectionPool,
@@ -12,6 +13,15 @@ impl RefreshTokenQueryRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
@@ -20,7 +30,7 @@ impl RefreshTokenQueryRepositoryTrait for RefreshTokenQueryRepository {
         &self,
         user_id: i32,
     ) -> Result<Option<RefreshTokenModel>, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query_as!(
             RefreshTokenModel,
@@ -44,7 +54,7 @@ impl RefreshTokenQueryRepositoryTrait for RefreshTokenQueryRepository {
         &self,
         token: String,
     ) -> Result<Option<RefreshTokenModel>, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query_as!(
             RefreshTokenModel,

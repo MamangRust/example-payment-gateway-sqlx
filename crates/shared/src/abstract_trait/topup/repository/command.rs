@@ -21,5 +21,5 @@ pub trait TopupCommandRepositoryTrait {
     async fn restore(&self, topup_id: i32) -> Result<TopupModel, RepositoryError>;
     async fn delete_permanent(&self, topup_id: i32) -> Result<bool, RepositoryError>;
     async fn restore_all(&self) -> Result<bool, RepositoryError>;
-    async fn delete_all_permanent(&self) -> Result<bool, RepositoryError>;
+    async fn delete_all(&self) -> Result<bool, RepositoryError>;
 }

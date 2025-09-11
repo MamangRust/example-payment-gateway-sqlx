@@ -22,8 +22,8 @@ pub trait CardCommandGrpcClientTrait {
         req: &UpdateCardRequest,
     ) -> Result<ApiResponse<CardResponse>, AppErrorHttp>;
     async fn trash(&self, id: i32) -> Result<ApiResponse<CardResponseDeleteAt>, AppErrorHttp>;
-    async fn restore(&self, id: i32) -> Result<ApiResponse<CardResponse>, AppErrorHttp>;
-    async fn delete(&self, id: i32) -> Result<ApiResponse<()>, AppErrorHttp>;
-    async fn restore_all(&self) -> Result<ApiResponse<()>, AppErrorHttp>;
-    async fn delete_all(&self) -> Result<ApiResponse<()>, AppErrorHttp>;
+    async fn restore(&self, id: i32) -> Result<ApiResponse<CardResponseDeleteAt>, AppErrorHttp>;
+    async fn delete(&self, id: i32) -> Result<ApiResponse<bool>, AppErrorHttp>;
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp>;
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp>;
 }

@@ -10,7 +10,7 @@ pub type DynCardDashboardService = Arc<dyn CardDashboardServiceTrait + Send + Sy
 
 #[async_trait]
 pub trait CardDashboardServiceTrait {
-    async fn get_dashboard(&self) -> Result<ApiResponse<Vec<DashboardCard>>, ServiceError>;
+    async fn get_dashboard(&self) -> Result<ApiResponse<DashboardCard>, ServiceError>;
     async fn get_dashboard_bycard(
         &self,
         card_number: String,

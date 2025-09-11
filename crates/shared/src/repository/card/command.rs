@@ -1,5 +1,5 @@
 use crate::{
-    abstract_trait::card::repository::CardCommandRepositoryTrait,
+    abstract_trait::card::repository::command::CardCommandRepositoryTrait,
     config::ConnectionPool,
     domain::requests::card::{CreateCardRequest, UpdateCardRequest},
     errors::RepositoryError,
@@ -8,6 +8,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
+use tracing::error;
 
 pub struct CardCommandRepository {
     db: ConnectionPool,
@@ -17,15 +18,24 @@ impl CardCommandRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
 impl CardCommandRepositoryTrait for CardCommandRepository {
     async fn create(&self, request: &CreateCardRequest) -> Result<CardModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let card_number = random_card_number()
-            .map_err(|_| RepositoryError::Custom("error ketika gen card_number".to_string()))?;
+            .map_err(|_| RepositoryError::Custom("❌ error ketika gen card_number".to_string()))?;
 
         let card = sqlx::query_as!(
             CardModel,
@@ -62,13 +72,16 @@ impl CardCommandRepositoryTrait for CardCommandRepository {
         )
         .fetch_one(&mut *conn)
         .await
-        .map_err(RepositoryError::from)?;
+        .map_err(|e| {
+            error!("❌ Failed to create card: {e:?}");
+            RepositoryError::Sqlx(e)
+        })?;
 
         Ok(card)
     }
 
     async fn update(&self, request: &UpdateCardRequest) -> Result<CardModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let card = sqlx::query_as!(
             CardModel,
@@ -103,16 +116,16 @@ impl CardCommandRepositoryTrait for CardCommandRepository {
         )
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => RepositoryError::NotFound,
-            _ => RepositoryError::Sqlx(e.into()),
+        .map_err(|e| {
+            error!("❌ Failed to create update: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         Ok(card)
     }
 
     async fn trash(&self, id: i32) -> Result<CardModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let card = sqlx::query_as!(
             CardModel,
@@ -136,16 +149,16 @@ impl CardCommandRepositoryTrait for CardCommandRepository {
         )
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => RepositoryError::NotFound,
-            _ => RepositoryError::Sqlx(e.into()),
+        .map_err(|e| {
+            error!("❌ Failed to trash card: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         Ok(card)
     }
 
     async fn restore(&self, id: i32) -> Result<CardModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let card = sqlx::query_as!(
             CardModel,
@@ -169,48 +182,36 @@ impl CardCommandRepositoryTrait for CardCommandRepository {
         )
         .fetch_one(&mut *conn)
         .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => RepositoryError::NotFound,
-            _ => RepositoryError::Sqlx(e.into()),
+        .map_err(|e| {
+            error!("❌ Failed to restore card: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         Ok(card)
     }
 
-    async fn delete_permanent(&self, id: i32) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+    async fn delete_permanent(&self, id: i32) -> Result<bool, RepositoryError> {
+        let mut conn = self.get_conn().await?;
 
-        let card = sqlx::query_as!(
-            CardModel,
+        let result = sqlx::query!(
             r#"
             DELETE FROM cards
             WHERE card_id = $1 AND deleted_at IS NOT NULL
-            RETURNING 
-                card_id,
-                user_id,
-                card_number,
-                card_type,
-                expire_date,
-                cvv,
-                card_provider,
-                created_at,
-                updated_at,
-                deleted_at
             "#,
             id
         )
-        .fetch_one(&mut *conn)
+        .execute(&mut *conn)
         .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => RepositoryError::NotFound,
-            _ => RepositoryError::Sqlx(e.into()),
+        .map_err(|e| {
+            error!("❌ Failed to permanently delete card ID {id}: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
-    async fn restore_all(&self) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+    async fn restore_all(&self) -> Result<bool, RepositoryError> {
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query!(
             r#"
@@ -221,15 +222,18 @@ impl CardCommandRepositoryTrait for CardCommandRepository {
         )
         .execute(&mut *conn)
         .await
-        .map_err(RepositoryError::from)?;
+        .map_err(|e| {
+            error!("❌ Failed to restore all merchant: {e:?}");
+            RepositoryError::Sqlx(e)
+        })?;
 
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
-    async fn delete_all(&self) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+    async fn delete_all(&self) -> Result<bool, RepositoryError> {
+        let mut conn = self.get_conn().await?;
 
-        sqlx::query!(
+        let result = sqlx::query!(
             r#"
             DELETE FROM cards
             WHERE deleted_at IS NOT NULL
@@ -237,8 +241,11 @@ impl CardCommandRepositoryTrait for CardCommandRepository {
         )
         .execute(&mut *conn)
         .await
-        .map_err(RepositoryError::from)?;
+        .map_err(|e| {
+            error!("❌ Failed to delete all merchant: {e:?}");
+            RepositoryError::Sqlx(e)
+        })?;
 
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 }

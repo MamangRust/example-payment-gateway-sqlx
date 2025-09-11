@@ -16,35 +16,35 @@ pub struct GrpcClientConfig {
 
 impl GrpcClientConfig {
     pub fn init() -> Result<Self> {
-        let auth = std::env::var("GRPC_AUTH_ADDR")
-            .context("Missing environment variable: GRPC_AUTH_ADDR")?;
+        let auth = std::env::var("AUTH_GRPC_ADDR")
+            .context("Missing environment variable: AUTH_GRPC_ADDR")?;
 
-        let card = std::env::var("GRPC_CARD_ADDR")
-            .context("Missing environment variable: GRPC_CARD_ADDR")?;
+        let card = std::env::var("CARD_GRPC_ADDR")
+            .context("Missing environment variable: CARD_GRPC_ADDR")?;
 
-        let merchant = std::env::var("GRPC_MERCHANT_ADDR")
-            .context("Missing environment variable: GRPC_MERCHANT_ADDR")?;
+        let merchant = std::env::var("MERCHANT_GRPC_ADDR")
+            .context("Missing environment variable: MERCHANT_GRPC_ADDR")?;
 
-        let role = std::env::var("GRPC_ROLE_ADDR")
-            .context("Missing environment variable: GRPC_ROLE_ADDR")?;
+        let role = std::env::var("ROLE_GRPC_ADDR")
+            .context("Missing environment variable: ROLE_GRPC_ADDR")?;
 
-        let saldo = std::env::var("GRPC_SALDO_ADDR")
-            .context("Missing environment variable: GRPC_SALDO_ADDR")?;
+        let saldo = std::env::var("SALDO_GRPC_ADDR")
+            .context("Missing environment variable: SALDO_GRPC_ADDR")?;
 
-        let topup = std::env::var("GRPC_TOPUP_ADDR")
-            .context("Missing environment variable: GRPC_TOPUP_ADDR")?;
+        let topup = std::env::var("TOPUP_GRPC_ADDR")
+            .context("Missing environment variable: TOPUP_GRPC_ADDR")?;
 
-        let transaction = std::env::var("GRPC_TRANSACTION_ADDR")
-            .context("Missing environment variable: GRPC_TRANSACTION_ADDR")?;
+        let transaction = std::env::var("TRANSACTION_GRPC_ADDR")
+            .context("Missing environment variable: TRANSACTION_GRPC_ADDR")?;
 
-        let transfer = std::env::var("GRPC_TRANSFER_ADDR")
-            .context("Missing environment variable: GRPC_TRANSFER_ADDR")?;
+        let transfer = std::env::var("TRANSFER_GRPC_ADDR")
+            .context("Missing environment variable: TRANSFER_GRPC_ADDR")?;
 
-        let user = std::env::var("GRPC_USER_ADDR")
-            .context("Missing environment variable: GRPC_USER_ADDR")?;
+        let user = std::env::var("USER_GRPC_ADDR")
+            .context("Missing environment variable: USER_GRPC_ADDR")?;
 
-        let withdraw = std::env::var("GRPC_WITHDRAW_ADDR")
-            .context("Missing environment variable: GRPC_WITHDRAW_ADDR")?;
+        let withdraw = std::env::var("WITHDRAW_GRPC_ADDR")
+            .context("Missing environment variable: WITHDRAW_GRPC_ADDR")?;
 
         Ok(Self {
             auth,

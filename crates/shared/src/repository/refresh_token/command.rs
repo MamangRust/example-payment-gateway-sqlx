@@ -17,6 +17,15 @@ impl RefreshTokenCommandRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
@@ -25,7 +34,7 @@ impl RefreshTokenCommandRepositoryTrait for RefreshTokenCommandRepository {
         &self,
         request: &CreateRefreshToken,
     ) -> Result<RefreshTokenModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let expired_at = match parse_expiration_datetime(&request.expires_at) {
             Ok(datetime) => datetime,
@@ -61,7 +70,7 @@ impl RefreshTokenCommandRepositoryTrait for RefreshTokenCommandRepository {
         &self,
         request: &UpdateRefreshToken,
     ) -> Result<RefreshTokenModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let expired_at = match parse_expiration_datetime(&request.expires_at) {
             Ok(datetime) => datetime,
@@ -98,7 +107,7 @@ impl RefreshTokenCommandRepositoryTrait for RefreshTokenCommandRepository {
     }
 
     async fn delete_token(&self, token: String) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query!(
             r#"
@@ -123,7 +132,7 @@ impl RefreshTokenCommandRepositoryTrait for RefreshTokenCommandRepository {
     }
 
     async fn delete_by_user_id(&self, user_id: i32) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query!(
             r#"

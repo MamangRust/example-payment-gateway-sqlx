@@ -197,6 +197,15 @@ pub struct ApiResponseMerchant {
     pub data: ::core::option::Option<MerchantResponse>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApiResponseMerchantDeleteAt {
+    #[prost(string, tag = "1")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub data: ::core::option::Option<MerchantResponseDeleteAt>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ApiResponseMerchantDelete {
     #[prost(string, tag = "1")]
     pub status: ::prost::alloc::string::String,
@@ -1216,7 +1225,7 @@ pub mod merchant_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdMerchantRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseMerchant>,
+            tonic::Response<super::ApiResponseMerchantDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -1240,7 +1249,7 @@ pub mod merchant_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdMerchantRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseMerchant>,
+            tonic::Response<super::ApiResponseMerchantDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -1566,14 +1575,14 @@ pub mod merchant_service_server {
             &self,
             request: tonic::Request<super::FindByIdMerchantRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseMerchant>,
+            tonic::Response<super::ApiResponseMerchantDeleteAt>,
             tonic::Status,
         >;
         async fn restore_merchant(
             &self,
             request: tonic::Request<super::FindByIdMerchantRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseMerchant>,
+            tonic::Response<super::ApiResponseMerchantDeleteAt>,
             tonic::Status,
         >;
         async fn delete_merchant_permanent(
@@ -3111,7 +3120,7 @@ pub mod merchant_service_server {
                         T: MerchantService,
                     > tonic::server::UnaryService<super::FindByIdMerchantRequest>
                     for TrashedMerchantSvc<T> {
-                        type Response = super::ApiResponseMerchant;
+                        type Response = super::ApiResponseMerchantDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -3157,7 +3166,7 @@ pub mod merchant_service_server {
                         T: MerchantService,
                     > tonic::server::UnaryService<super::FindByIdMerchantRequest>
                     for RestoreMerchantSvc<T> {
-                        type Response = super::ApiResponseMerchant;
+                        type Response = super::ApiResponseMerchantDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,

@@ -17,5 +17,5 @@ pub trait UserCommandRepositoryTrait {
     async fn restore(&self, user_id: i32) -> Result<UserModel, RepositoryError>;
     async fn delete_permanent(&self, user_id: i32) -> Result<bool, RepositoryError>;
     async fn restore_all(&self) -> Result<bool, RepositoryError>;
-    async fn delete_all_permanent(&self) -> Result<bool, RepositoryError>;
+    async fn delete_all(&self) -> Result<bool, RepositoryError>;
 }

@@ -1,6 +1,6 @@
 use crate::{
     domain::responses::{
-        MerchantResponseMonthlyPaymentMethod, MerchantResponseYearlyPaymentMethod,
+        ApiResponse, MerchantResponseMonthlyPaymentMethod, MerchantResponseYearlyPaymentMethod,
     },
     errors::AppErrorHttp,
 };
@@ -16,9 +16,9 @@ pub trait MerchantStatsMethodGrpcClientTrait {
     async fn get_monthly_method(
         &self,
         year: i32,
-    ) -> Result<Vec<MerchantResponseMonthlyPaymentMethod>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, AppErrorHttp>;
     async fn get_yearly_method(
         &self,
         year: i32,
-    ) -> Result<Vec<MerchantResponseYearlyPaymentMethod>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, AppErrorHttp>;
 }

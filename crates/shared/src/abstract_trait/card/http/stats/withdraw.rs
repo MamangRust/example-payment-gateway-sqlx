@@ -12,6 +12,10 @@ pub type DynCardStatsWithdrawGrpcClient = Arc<dyn CardStatsWithdrawGrpcClientTra
 pub trait CardStatsWithdrawGrpcClientTrait {
     async fn get_monthly_amount(
         &self,
-    ) -> Result<ApiResponse<CardResponseMonthAmount>, AppErrorHttp>;
-    async fn get_yearly_amount(&self) -> Result<ApiResponse<CardResponseYearAmount>, AppErrorHttp>;
+        year: i32,
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp>;
+    async fn get_yearly_amount(
+        &self,
+        year: i32,
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp>;
 }

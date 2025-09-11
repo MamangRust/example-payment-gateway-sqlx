@@ -16,12 +16,21 @@ impl RoleCommandRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
 impl RoleCommandRepositoryTrait for RoleCommandRepository {
     async fn create(&self, role: &CreateRoleRequest) -> Result<RoleModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query_as!(
             RoleModel,
@@ -35,16 +44,15 @@ impl RoleCommandRepositoryTrait for RoleCommandRepository {
         .fetch_one(&mut *conn)
         .await
         .map_err(|err| {
-            error!("❌ Failed to create role '{}': {:?}", role.name, err);
+            error!("❌ Failed to create role '{}': {err:?}", role.name);
             RepositoryError::from(err)
         })?;
 
-        info!("✅ Created role '{}'", result.role_name);
         Ok(result)
     }
 
     async fn update(&self, role: &UpdateRoleRequest) -> Result<RoleModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query_as!(
             RoleModel,
@@ -60,16 +68,15 @@ impl RoleCommandRepositoryTrait for RoleCommandRepository {
         .fetch_one(&mut *conn)
         .await
         .map_err(|err| {
-            error!("❌ Failed to update role ID {}: {:?}", role.name, err);
+            error!("❌ Failed to update role ID {}: {err:?}", role.name);
             RepositoryError::from(err)
         })?;
 
-        info!("🔄 Updated role '{}'", result.role_name);
         Ok(result)
     }
 
     async fn trash(&self, role_id: i32) -> Result<RoleModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query_as!(
             RoleModel,
@@ -84,16 +91,15 @@ impl RoleCommandRepositoryTrait for RoleCommandRepository {
         .fetch_one(&mut *conn)
         .await
         .map_err(|err| {
-            error!("❌ Failed to trash role ID {}: {:?}", role_id, err);
+            error!("❌ Failed to trash role ID {role_id}: {err:?}");
             RepositoryError::from(err)
         })?;
 
-        info!("🗑️ Trashed role ID {}", role_id);
         Ok(result)
     }
 
     async fn restore(&self, role_id: i32) -> Result<RoleModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query_as!(
             RoleModel,
@@ -108,16 +114,15 @@ impl RoleCommandRepositoryTrait for RoleCommandRepository {
         .fetch_one(&mut *conn)
         .await
         .map_err(|err| {
-            error!("❌ Failed to restore role ID {}: {:?}", role_id, err);
+            error!("❌ Failed to restore role ID {role_id}: {err:?}");
             RepositoryError::from(err)
         })?;
 
-        info!("♻️ Restored role ID {}", role_id);
         Ok(result)
     }
 
     async fn delete_permanent(&self, role_id: i32) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query!(
             r#"
@@ -129,10 +134,7 @@ impl RoleCommandRepositoryTrait for RoleCommandRepository {
         .execute(&mut *conn)
         .await
         .map_err(|err| {
-            error!(
-                "❌ Failed to permanently delete role ID {}: {:?}",
-                role_id, err
-            );
+            error!("❌ Failed to permanently delete role ID {role_id}: {err:?}",);
             RepositoryError::from(err)
         })?;
 
@@ -140,12 +142,11 @@ impl RoleCommandRepositoryTrait for RoleCommandRepository {
             return Err(RepositoryError::NotFound);
         }
 
-        info!("🗑️ Permanently deleted role ID {}", role_id);
         Ok(())
     }
 
     async fn restore_all(&self) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         sqlx::query!(
             r#"
@@ -157,16 +158,15 @@ impl RoleCommandRepositoryTrait for RoleCommandRepository {
         .execute(&mut *conn)
         .await
         .map_err(|err| {
-            error!("❌ Failed to restore all roles: {:?}", err);
+            error!("❌ Failed to restore all roles: {err:?}");
             RepositoryError::from(err)
         })?;
 
-        info!("♻️ All trashed roles have been restored");
         Ok(())
     }
 
     async fn delete_all(&self) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         sqlx::query!(
             r#"
@@ -177,11 +177,10 @@ impl RoleCommandRepositoryTrait for RoleCommandRepository {
         .execute(&mut *conn)
         .await
         .map_err(|err| {
-            error!("❌ Failed to delete all trashed roles: {:?}", err);
+            error!("❌ Failed to delete all trashed roles: {err:?}");
             RepositoryError::from(err)
         })?;
 
-        info!("🗑️ All trashed roles have been permanently deleted");
         Ok(())
     }
 }

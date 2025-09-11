@@ -10,7 +10,12 @@ pub type DynCardStatsTransactionService = Arc<dyn CardStatsTransactionServiceTra
 
 #[async_trait]
 pub trait CardStatsTransactionServiceTrait {
-    fn get_monthly_amount(&self)
-    -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, ServiceError>;
-    fn get_yearly_amount(&self) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, ServiceError>;
+    async fn get_monthly_amount(
+        &self,
+        year: i32,
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, ServiceError>;
+    async fn get_yearly_amount(
+        &self,
+        year: i32,
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, ServiceError>;
 }

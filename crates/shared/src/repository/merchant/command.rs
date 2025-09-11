@@ -19,6 +19,15 @@ impl MerchantCommandRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
@@ -28,9 +37,7 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
         api_key: String,
         request: &CreateMerchantRequest,
     ) -> Result<MerchantModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
-
-        info!("🆕 Creating new merchant: {}", request.name);
+        let mut conn = self.get_conn().await?;
 
         let merchant = sqlx::query_as!(
             MerchantModel,
@@ -62,8 +69,8 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
         .fetch_one(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to create merchant: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to create merchant: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         Ok(merchant)
@@ -73,9 +80,7 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
         &self,
         request: &UpdateMerchantRequest,
     ) -> Result<MerchantModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
-
-        info!("🔄 Updating merchant with ID: {}", request.merchant_id);
+        let mut conn = self.get_conn().await?;
 
         let merchant = sqlx::query_as!(
             MerchantModel,
@@ -114,10 +119,10 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
             }
             _ => {
                 error!(
-                    "❌ Failed to update merchant {}: {:?}",
-                    request.merchant_id, e
+                    "❌ Failed to update merchant {}: {e:?}",
+                    request.merchant_id,
                 );
-                RepositoryError::Sqlx(e.into())
+                RepositoryError::Sqlx(e)
             }
         })?;
 
@@ -126,9 +131,9 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
 
     async fn update_status(
         &self,
-        request: UpdateMerchantStatus,
+        request: &UpdateMerchantStatus,
     ) -> Result<MerchantModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         info!(
             "🔄 Updating status for merchant ID: {}",
@@ -166,10 +171,10 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
             }
             _ => {
                 error!(
-                    "❌ Failed to update status for merchant {}: {:?}",
-                    request.merchant_id, e
+                    "❌ Failed to update status for merchant {}: {e:?}",
+                    request.merchant_id,
                 );
-                RepositoryError::Sqlx(e.into())
+                RepositoryError::Sqlx(e)
             }
         })?;
 
@@ -177,9 +182,7 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
     }
 
     async fn trash(&self, id: i32) -> Result<MerchantModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
-
-        info!("🗑️ Trashing merchant ID: {}", id);
+        let mut conn = self.get_conn().await?;
 
         let merchant = sqlx::query_as!(
             MerchantModel,
@@ -203,12 +206,12 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
-                error!("❌ Merchant not found or already trashed: {}", id);
+                error!("❌ Merchant not found or already trashed: {id}");
                 RepositoryError::NotFound
             }
             _ => {
-                error!("❌ Failed to trash merchant {}: {:?}", id, e);
-                RepositoryError::Sqlx(e.into())
+                error!("❌ Failed to trash merchant {id}: {e:?}");
+                RepositoryError::Sqlx(e)
             }
         })?;
 
@@ -216,9 +219,7 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
     }
 
     async fn restore(&self, id: i32) -> Result<MerchantModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
-
-        info!("↩️ Restoring merchant ID: {}", id);
+        let mut conn = self.get_conn().await?;
 
         let merchant = sqlx::query_as!(
             MerchantModel,
@@ -242,60 +243,40 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
-                error!("❌ Merchant not found or not trashed: {}", id);
+                error!("❌ Merchant not found or not trashed: {id}");
                 RepositoryError::NotFound
             }
             _ => {
-                error!("❌ Failed to restore merchant {}: {:?}", id, e);
-                RepositoryError::Sqlx(e.into())
+                error!("❌ Failed to restore merchant {id}: {e:?}");
+                RepositoryError::Sqlx(e)
             }
         })?;
 
         Ok(merchant)
     }
 
-    async fn delete_permanent(&self, id: i32) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+    async fn delete_permanent(&self, id: i32) -> Result<bool, RepositoryError> {
+        let mut conn = self.get_conn().await?;
 
-        info!("💀 Permanently deleting merchant ID: {}", id);
-
-        let merchant = sqlx::query_as!(
-            MerchantModel,
+        let result = sqlx::query!(
             r#"
-            DELETE FROM merchants
-            WHERE merchant_id = $1 AND deleted_at IS NOT NULL
-            RETURNING
-                merchant_id,
-                name,
-                api_key,
-                user_id,
-                status,
-                created_at,
-                updated_at,
-                deleted_at
+                DELETE FROM merchants
+                WHERE merchant_id = $1 AND deleted_at IS NOT NULL
             "#,
             id
         )
-        .fetch_one(&mut *conn)
+        .execute(&mut *conn)
         .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => {
-                error!("❌ Merchant not found or not soft-deleted: {}", id);
-                RepositoryError::NotFound
-            }
-            _ => {
-                error!("❌ Failed to permanently delete merchant {}: {:?}", id, e);
-                RepositoryError::Sqlx(e.into())
-            }
+        .map_err(|e| {
+            error!("❌ Failed to permanently delete merchant {id}: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
-    async fn restore_all(&self) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
-
-        info!("↩️ Restoring all trashed merchants");
+    async fn restore_all(&self) -> Result<bool, RepositoryError> {
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query!(
             r#"
@@ -306,17 +287,18 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
         )
         .execute(&mut *conn)
         .await
-        .map_err(RepositoryError::from)?;
+        .map_err(|e| {
+            error!("❌ Failed to restore all trashed merchants: {e:?}");
+            RepositoryError::Sqlx(e)
+        })?;
 
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
-    async fn delete_all(&self) -> Result<(), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+    async fn delete_all(&self) -> Result<bool, RepositoryError> {
+        let mut conn = self.get_conn().await?;
 
-        info!("💀 Permanently deleting all trashed merchants");
-
-        sqlx::query!(
+        let result = sqlx::query!(
             r#"
             DELETE FROM merchants
             WHERE deleted_at IS NOT NULL
@@ -325,10 +307,10 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
         .execute(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to delete all trashed merchants: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to delete all trashed merchants: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 }

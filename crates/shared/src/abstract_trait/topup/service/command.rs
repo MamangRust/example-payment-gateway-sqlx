@@ -29,5 +29,5 @@ pub trait TopupCommandServiceTrait {
     ) -> Result<ApiResponse<TopupResponseDeleteAt>, ServiceError>;
     async fn delete_permanent(&self, topup_id: i32) -> Result<ApiResponse<bool>, ServiceError>;
     async fn restore_all(&self) -> Result<ApiResponse<bool>, ServiceError>;
-    async fn delete_all_permanent(&self) -> Result<ApiResponse<bool>, ServiceError>;
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, ServiceError>;
 }

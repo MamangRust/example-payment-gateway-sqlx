@@ -1,7 +1,7 @@
 use crate::{
     domain::{
         requests::role::FindAllRoles,
-        responses::{ApiResponse, RoleResponse},
+        responses::{ApiResponse, ApiResponsePagination, RoleResponse, RoleResponseDeleteAt},
     },
     errors::AppErrorHttp,
 };
@@ -16,14 +16,18 @@ pub trait RoleQueryGrpcClientTrait {
     async fn find_all(
         &self,
         request: &FindAllRoles,
-    ) -> Result<ApiResponse<Vec<RoleResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponsePagination<Vec<RoleResponse>>, AppErrorHttp>;
     async fn find_active(
         &self,
         request: &FindAllRoles,
-    ) -> Result<ApiResponse<Vec<RoleResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponsePagination<Vec<RoleResponseDeleteAt>>, AppErrorHttp>;
     async fn find_trashed(
         &self,
         request: &FindAllRoles,
+    ) -> Result<ApiResponsePagination<Vec<RoleResponseDeleteAt>>, AppErrorHttp>;
+    async fn find_by_user_id(
+        &self,
+        id: i32,
     ) -> Result<ApiResponse<Vec<RoleResponse>>, AppErrorHttp>;
     async fn find_by_id(&self, id: i32) -> Result<ApiResponse<RoleResponse>, AppErrorHttp>;
 }

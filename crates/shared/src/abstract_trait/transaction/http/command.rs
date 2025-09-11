@@ -1,6 +1,6 @@
 use crate::{
     domain::requests::transaction::{CreateTransactionRequest, UpdateTransactionRequest},
-    domain::responses::{ApiResponse, TransactionResponse},
+    domain::responses::{ApiResponse, TransactionResponse, TransactionResponseDeleteAt},
     errors::AppErrorHttp,
 };
 use anyhow::Result;
@@ -13,22 +13,22 @@ pub type DynTransactionCommandGrpcClient = Arc<dyn TransactionCommandGrpcClientT
 pub trait TransactionCommandGrpcClientTrait {
     async fn create(
         &self,
-        api_key: String,
+        api_key: &str,
         req: &CreateTransactionRequest,
     ) -> Result<ApiResponse<TransactionResponse>, AppErrorHttp>;
     async fn update(
         &self,
-        api_key: String,
+        api_key: &str,
         req: &UpdateTransactionRequest,
     ) -> Result<ApiResponse<TransactionResponse>, AppErrorHttp>;
     async fn trashed(
         &self,
         transaction_id: i32,
-    ) -> Result<ApiResponse<TransactionResponse>, AppErrorHttp>;
+    ) -> Result<ApiResponse<TransactionResponseDeleteAt>, AppErrorHttp>;
     async fn restore(
         &self,
         transaction_id: i32,
-    ) -> Result<ApiResponse<TransactionResponse>, AppErrorHttp>;
+    ) -> Result<ApiResponse<TransactionResponseDeleteAt>, AppErrorHttp>;
     async fn delete_permanent(
         &self,
         transaction_id: i32,

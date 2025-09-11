@@ -26,10 +26,10 @@ pub trait TransferQueryRepositoryTrait {
     async fn find_by_id(&self, id: i32) -> Result<TransferModel, RepositoryError>;
     async fn find_by_transfer_from(
         &self,
-        transfer_from: String,
+        transfer_from: &str,
     ) -> Result<Vec<TransferModel>, RepositoryError>;
     async fn find_by_transfer_to(
         &self,
-        transfer_to: String,
+        transfer_to: &str,
     ) -> Result<Vec<TransferModel>, RepositoryError>;
 }

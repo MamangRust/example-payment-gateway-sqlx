@@ -235,6 +235,15 @@ pub struct ApiResponseTransfer {
     #[prost(message, optional, tag = "3")]
     pub data: ::core::option::Option<TransferResponse>,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApiResponseTransferDeleteAt {
+    #[prost(string, tag = "1")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub data: ::core::option::Option<TransferResponseDeleteAt>,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApiResponseTransfers {
     #[prost(string, tag = "1")]
@@ -987,7 +996,7 @@ pub mod transfer_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdTransferRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseTransfer>,
+            tonic::Response<super::ApiResponseTransferDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -1011,7 +1020,7 @@ pub mod transfer_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdTransferRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseTransfer>,
+            tonic::Response<super::ApiResponseTransferDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -1288,14 +1297,14 @@ pub mod transfer_service_server {
             &self,
             request: tonic::Request<super::FindByIdTransferRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseTransfer>,
+            tonic::Response<super::ApiResponseTransferDeleteAt>,
             tonic::Status,
         >;
         async fn restore_transfer(
             &self,
             request: tonic::Request<super::FindByIdTransferRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseTransfer>,
+            tonic::Response<super::ApiResponseTransferDeleteAt>,
             tonic::Status,
         >;
         async fn delete_transfer_permanent(
@@ -2550,7 +2559,7 @@ pub mod transfer_service_server {
                         T: TransferService,
                     > tonic::server::UnaryService<super::FindByIdTransferRequest>
                     for TrashedTransferSvc<T> {
-                        type Response = super::ApiResponseTransfer;
+                        type Response = super::ApiResponseTransferDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -2596,7 +2605,7 @@ pub mod transfer_service_server {
                         T: TransferService,
                     > tonic::server::UnaryService<super::FindByIdTransferRequest>
                     for RestoreTransferSvc<T> {
-                        type Response = super::ApiResponseTransfer;
+                        type Response = super::ApiResponseTransferDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,

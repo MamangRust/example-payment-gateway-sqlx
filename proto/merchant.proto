@@ -138,6 +138,12 @@ message ApiResponseMerchant {
     MerchantResponse data = 3;
 }
 
+message ApiResponseMerchantDeleteAt{
+    string status = 1;
+    string message = 2;
+    MerchantResponseDeleteAt data = 3;
+}
+
 message ApiResponseMerchantDelete {
     string status = 1;
     string message = 2;
@@ -263,8 +269,8 @@ service MerchantService {
     rpc FindByTrashed (FindAllMerchantRequest) returns (ApiResponsePaginationMerchantDeleteAt) {}
     rpc CreateMerchant (CreateMerchantRequest) returns (ApiResponseMerchant) {}
     rpc UpdateMerchant (UpdateMerchantRequest) returns (ApiResponseMerchant) {}
-    rpc TrashedMerchant (FindByIdMerchantRequest) returns (ApiResponseMerchant) {}
-    rpc RestoreMerchant (FindByIdMerchantRequest) returns (ApiResponseMerchant) {}
+    rpc TrashedMerchant (FindByIdMerchantRequest) returns (ApiResponseMerchantDeleteAt) {}
+    rpc RestoreMerchant (FindByIdMerchantRequest) returns (ApiResponseMerchantDeleteAt) {}
     rpc DeleteMerchantPermanent (FindByIdMerchantRequest) returns (ApiResponseMerchantDelete) {}
     rpc RestoreAllMerchant(google.protobuf.Empty) returns (ApiResponseMerchantAll){}
     rpc DeleteAllMerchantPermanent(google.protobuf.Empty) returns (ApiResponseMerchantAll){}

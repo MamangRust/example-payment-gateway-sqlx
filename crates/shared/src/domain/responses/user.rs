@@ -35,9 +35,9 @@ pub struct UserResponseDeleteAt {
 impl From<UserModel> for UserResponse {
     fn from(value: UserModel) -> Self {
         UserResponse {
-            id: value.id,
-            firstname: value.first_name,
-            lastname: value.last_name,
+            id: value.user_id,
+            firstname: value.firstname,
+            lastname: value.lastname,
             email: value.email,
             created_at: value.created_at.map(|dt| dt.to_string()),
             updated_at: value.updated_at.map(|dt| dt.to_string()),
@@ -48,9 +48,9 @@ impl From<UserModel> for UserResponse {
 impl From<UserModel> for UserResponseDeleteAt {
     fn from(value: UserModel) -> Self {
         UserResponseDeleteAt {
-            id: value.id,
-            firstname: value.first_name,
-            lastname: value.last_name,
+            id: value.user_id,
+            firstname: value.firstname,
+            lastname: value.lastname,
             email: value.email,
             created_at: value.created_at.map(|dt| dt.to_string()),
             updated_at: value.updated_at.map(|dt| dt.to_string()),

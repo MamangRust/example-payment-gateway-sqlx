@@ -39,8 +39,6 @@ pub struct CreateUserRequest {
     #[validate(length(min = 6, message = "Confirm password must be at least 6 characters"))]
     #[validate(must_match(other = "password"))]
     pub confirm_password: String,
-
-    pub noc_transfer: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, Validate)]

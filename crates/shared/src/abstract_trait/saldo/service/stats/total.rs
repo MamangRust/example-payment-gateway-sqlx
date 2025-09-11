@@ -15,9 +15,10 @@ pub type DynSaldoTotalBalanceService = Arc<dyn SaldoTotalBalanceServiceTrait + S
 pub trait SaldoTotalBalanceServiceTrait {
     async fn get_month_total_balance(
         &self,
-        req: MonthTotalSaldoBalance,
+        req: &MonthTotalSaldoBalance,
     ) -> Result<ApiResponse<Vec<SaldoMonthTotalBalanceResponse>>, ServiceError>;
     async fn get_year_total_balance(
         &self,
+        year: i32,
     ) -> Result<ApiResponse<Vec<SaldoYearTotalBalanceResponse>>, ServiceError>;
 }

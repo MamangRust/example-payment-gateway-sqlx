@@ -1,12 +1,14 @@
 use crate::{
-    abstract_trait::card::repository::CardStatsBalanceByCardRepositoryTrait,
+    abstract_trait::card::repository::statsbycard::balance::CardStatsBalanceByCardRepositoryTrait,
     config::ConnectionPool,
     domain::requests::card::MonthYearCardNumberCard,
     errors::RepositoryError,
     model::card::{CardMonthBalance, CardYearlyBalance},
 };
 use async_trait::async_trait;
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::NaiveDate;
+use sqlx::Row;
+use tracing::error;
 
 pub struct CardStatsBalanceByCardRepository {
     db: ConnectionPool,
@@ -16,6 +18,15 @@ impl CardStatsBalanceByCardRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
@@ -24,18 +35,14 @@ impl CardStatsBalanceByCardRepositoryTrait for CardStatsBalanceByCardRepository 
         &self,
         req: &MonthYearCardNumberCard,
     ) -> Result<Vec<CardMonthBalance>, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
-        let date = NaiveDate::from_ymd_opt(req.year, 1, 1)
-            .ok_or_else(|| RepositoryError::Custom("Invalid year".into()))?;
-
-        let year_start: NaiveDateTime = date
+        let year_start = NaiveDate::from_ymd_opt(req.year, 1, 1)
+            .ok_or_else(|| RepositoryError::Custom("Invalid year".to_string()))?
             .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| RepositoryError::Custom("Invalid datetime".into()))?;
+            .unwrap();
 
-        let results = sqlx::query_as!(
-            CardMonthBalance,
-            r#"
+        let sql = r#"
             WITH months AS (
                 SELECT generate_series(
                     date_trunc('year', $1::timestamp),
@@ -44,8 +51,8 @@ impl CardStatsBalanceByCardRepositoryTrait for CardStatsBalanceByCardRepository 
                 ) AS month
             )
             SELECT
-                TO_CHAR(m.month, 'Mon') AS "month!",
-                COALESCE(SUM(s.total_balance), 0)::int AS "total_balance!"
+                TO_CHAR(m.month, 'Mon') AS month,
+                COALESCE(SUM(s.total_balance), 0)::bigint AS total_balance
             FROM
                 months m
             LEFT JOIN
@@ -59,59 +66,87 @@ impl CardStatsBalanceByCardRepositoryTrait for CardStatsBalanceByCardRepository 
             GROUP BY
                 m.month
             ORDER BY
-                m.month
-            "#,
-            year_start,
-            req.card_number
-        )
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(RepositoryError::from)?;
+                m.month;
+        "#;
 
-        Ok(results)
+        let rows = sqlx::query(sql)
+            .bind(year_start)
+            .bind(&req.card_number)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("❌ Database error in get_monthly_balance: {e:?}");
+                RepositoryError::Sqlx(e)
+            })?;
+
+        let mut result = Vec::with_capacity(12);
+        for row in rows {
+            let month: String = row.try_get("month")?;
+            let total_balance: i64 = row.try_get("total_balance")?;
+
+            result.push(CardMonthBalance {
+                month,
+                total_balance,
+            });
+        }
+
+        Ok(result)
     }
 
     async fn get_yearly_balance(
         &self,
         req: &MonthYearCardNumberCard,
     ) -> Result<Vec<CardYearlyBalance>, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
-        let results = sqlx::query_as!(
-            CardYearlyBalance,
-            r#"
+        let sql = r#"
             WITH last_five_years AS (
                 SELECT
-                    EXTRACT(YEAR FROM s.created_at)::TEXT AS year, 
-                    COALESCE(SUM(s.total_balance), 0)::bigint AS total_balance
+                    EXTRACT(YEAR FROM s.created_at) AS year,
+                    SUM(s.total_balance) AS total_balance
                 FROM
                     saldos s
                 JOIN
                     cards c ON s.card_number = c.card_number
                 WHERE
-                    s.deleted_at IS NULL 
+                    s.deleted_at IS NULL
                     AND c.deleted_at IS NULL
-                    AND c.card_number = $2
                     AND EXTRACT(YEAR FROM s.created_at) >= $1 - 4
                     AND EXTRACT(YEAR FROM s.created_at) <= $1
+                    AND c.card_number = $2
                 GROUP BY
                     EXTRACT(YEAR FROM s.created_at)
             )
             SELECT
-                year AS "year!",
-                total_balance AS "total_balance!"
+                year::text,
+                total_balance::bigint
             FROM
                 last_five_years
             ORDER BY
-                year  
-            "#,
-            req.year,
-            req.card_number
-        )
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(RepositoryError::from)?;
+                year;
+        "#;
 
-        Ok(results)
+        let rows = sqlx::query(sql)
+            .bind(req.year)
+            .bind(&req.card_number)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("❌ Database error in get_yearly_balance: {e:?}");
+                RepositoryError::Sqlx(e)
+            })?;
+
+        let mut result = Vec::with_capacity(5);
+        for row in rows {
+            let year: String = row.try_get("year")?;
+            let total_balance: i64 = row.try_get("total_balance")?;
+
+            result.push(CardYearlyBalance {
+                year,
+                total_balance,
+            });
+        }
+
+        Ok(result)
     }
 }

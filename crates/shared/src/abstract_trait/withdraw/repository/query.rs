@@ -13,23 +13,25 @@ pub type DynWithdrawQueryRepository = Arc<dyn WithdrawQueryRepositoryTrait + Sen
 pub trait WithdrawQueryRepositoryTrait {
     async fn find_all(
         &self,
-        req: FindAllWithdraws,
+        req: &FindAllWithdraws,
     ) -> Result<(Vec<WithdrawModel>, i64), RepositoryError>;
 
     async fn find_by_active(
         &self,
-        req: FindAllWithdraws,
+        req: &FindAllWithdraws,
     ) -> Result<(Vec<WithdrawModel>, i64), RepositoryError>;
 
     async fn find_by_trashed(
         &self,
-        req: FindAllWithdraws,
+        req: &FindAllWithdraws,
     ) -> Result<(Vec<WithdrawModel>, i64), RepositoryError>;
 
     async fn find_all_by_card_number(
         &self,
-        req: FindAllWithdrawCardNumber,
+        req: &FindAllWithdrawCardNumber,
     ) -> Result<(Vec<WithdrawModel>, i64), RepositoryError>;
 
     async fn find_by_id(&self, id: i32) -> Result<WithdrawModel, RepositoryError>;
+
+    async fn find_by_card(&self, card_number: &str) -> Result<Vec<WithdrawModel>, RepositoryError>;
 }

@@ -24,11 +24,11 @@ pub trait MerchantCommandRepositoryTrait {
     ) -> Result<MerchantModel, RepositoryError>;
     async fn update_status(
         &self,
-        request: UpdateMerchantStatus,
+        request: &UpdateMerchantStatus,
     ) -> Result<MerchantModel, RepositoryError>;
     async fn trash(&self, id: i32) -> Result<MerchantModel, RepositoryError>;
     async fn restore(&self, id: i32) -> Result<MerchantModel, RepositoryError>;
-    async fn delete_permanent(&self, id: i32) -> Result<(), RepositoryError>;
-    async fn restore_all(&self) -> Result<(), RepositoryError>;
-    async fn delete_all(&self) -> Result<(), RepositoryError>;
+    async fn delete_permanent(&self, id: i32) -> Result<bool, RepositoryError>;
+    async fn restore_all(&self) -> Result<bool, RepositoryError>;
+    async fn delete_all(&self) -> Result<bool, RepositoryError>;
 }

@@ -1,7 +1,7 @@
 use crate::{
     domain::{
         requests::role::{CreateRoleRequest, UpdateRoleRequest},
-        responses::{ApiResponse, RoleResponse},
+        responses::{ApiResponse, RoleResponse, RoleResponseDeleteAt},
     },
     errors::ServiceError,
 };
@@ -21,9 +21,9 @@ pub trait RoleCommandServiceTrait {
         &self,
         request: &UpdateRoleRequest,
     ) -> Result<ApiResponse<RoleResponse>, ServiceError>;
-    async fn trash(&self, id: i32) -> Result<ApiResponse<RoleResponse>, ServiceError>;
-    async fn restore(&self, id: i32) -> Result<ApiResponse<RoleResponse>, ServiceError>;
-    async fn delete(&self, id: i32) -> Result<ApiResponse<RoleResponse>, ServiceError>;
-    async fn restore_all(&self) -> Result<ApiResponse<()>, ServiceError>;
-    async fn delete_all(&self) -> Result<ApiResponse<()>, ServiceError>;
+    async fn trash(&self, id: i32) -> Result<ApiResponse<RoleResponseDeleteAt>, ServiceError>;
+    async fn restore(&self, id: i32) -> Result<ApiResponse<RoleResponseDeleteAt>, ServiceError>;
+    async fn delete(&self, id: i32) -> Result<ApiResponse<bool>, ServiceError>;
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, ServiceError>;
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, ServiceError>;
 }

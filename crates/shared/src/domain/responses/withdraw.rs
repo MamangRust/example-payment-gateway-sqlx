@@ -111,7 +111,7 @@ pub struct WithdrawYearlyAmountResponse {
 impl From<WithdrawModel> for WithdrawResponse {
     fn from(model: WithdrawModel) -> Self {
         Self {
-            id: model.id,
+            id: model.withdraw_id,
             withdraw_no: model.withdraw_no,
             card_number: model.card_number,
             withdraw_amount: model.withdraw_amount,
@@ -125,7 +125,7 @@ impl From<WithdrawModel> for WithdrawResponse {
 impl From<WithdrawModel> for WithdrawResponseDeleteAt {
     fn from(model: WithdrawModel) -> Self {
         Self {
-            id: model.id,
+            id: model.withdraw_id,
             withdraw_no: model.withdraw_no,
             card_number: model.card_number,
             withdraw_amount: model.withdraw_amount,

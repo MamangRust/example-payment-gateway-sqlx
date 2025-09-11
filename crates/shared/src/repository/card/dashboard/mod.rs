@@ -1,11 +1,5 @@
-mod balance;
-mod topup;
-mod transaction;
-mod transfer;
-mod withdraw;
-
-pub use self::balance::CardDashboardBalanceRepository;
-pub use self::topup::CardDashboardTopupRepository;
-pub use self::transaction::CardDashboardTransactionRepository;
-pub use self::transfer::CardDashboardTransferRepository;
-pub use self::withdraw::CardDashboardWithdrawRepository;
+pub mod balance;
+pub mod topup;
+pub mod transaction;
+pub mod transfer;
+pub mod withdraw;

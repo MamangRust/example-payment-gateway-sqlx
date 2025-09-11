@@ -4,8 +4,9 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::{error, info};
+use tracing::error;
 
+#[derive(Clone)]
 pub struct RoleQueryRepository {
     db: ConnectionPool,
 }
@@ -14,20 +15,24 @@ impl RoleQueryRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
 impl RoleQueryRepositoryTrait for RoleQueryRepository {
     async fn find_all(&self, req: &FindAllRoles) -> Result<(Vec<RoleModel>, i64), RepositoryError> {
-        info!("🔍 Fetching all roles with search: {:?}", req.search);
+        let mut conn = self.get_conn().await?;
 
-        let mut conn = self.db.acquire().await.map_err(|e| {
-            error!("❌ Failed to acquire DB connection: {:?}", e);
-            RepositoryError::from(e)
-        })?;
-
-        let limit = req.page_size as i64;
-        let offset = ((req.page - 1).max(0) * req.page_size) as i64;
+        let limit = req.page_size.clamp(1, 100);
+        let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
             None
@@ -45,13 +50,13 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
             LIMIT $2 OFFSET $3
             "#,
             search_pattern,
-            limit,
-            offset,
+            limit as i64,
+            offset as i64
         )
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to fetch roles: {:?}", e);
+            error!("❌ Failed to fetch roles: {e:?}");
             RepositoryError::from(e)
         })?;
 
@@ -59,7 +64,6 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
             .first()
             .map(|r| r.total_count.unwrap_or(0))
             .unwrap_or(0);
-        info!("✅ Retrieved {} roles", rows.len());
 
         let result = rows
             .into_iter()
@@ -79,15 +83,10 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
         &self,
         req: &FindAllRoles,
     ) -> Result<(Vec<RoleModel>, i64), RepositoryError> {
-        info!("🔍 Fetching active roles with search: {:?}", req.search);
+        let mut conn = self.get_conn().await?;
 
-        let mut conn = self.db.acquire().await.map_err(|e| {
-            error!("❌ DB connection failed: {:?}", e);
-            RepositoryError::from(e)
-        })?;
-
-        let limit = req.page_size as i64;
-        let offset = ((req.page - 1).max(0) * req.page_size) as i64;
+        let limit = req.page_size.clamp(1, 100);
+        let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
             None
@@ -105,13 +104,13 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
             LIMIT $2 OFFSET $3
             "#,
             search_pattern,
-            limit,
-            offset,
+            limit as i64,
+            offset as i64
         )
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Error fetching active roles: {:?}", e);
+            error!("❌ Error fetching active roles: {e:?}");
             RepositoryError::from(e)
         })?;
 
@@ -119,7 +118,6 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
             .first()
             .map(|r| r.total_count.unwrap_or(0))
             .unwrap_or(0);
-        info!("✅ Retrieved {} active roles", rows.len());
 
         let result = rows
             .into_iter()
@@ -139,15 +137,10 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
         &self,
         req: &FindAllRoles,
     ) -> Result<(Vec<RoleModel>, i64), RepositoryError> {
-        info!("🗑️ Fetching trashed roles with search: {:?}", req.search);
+        let mut conn = self.get_conn().await?;
 
-        let mut conn = self.db.acquire().await.map_err(|e| {
-            error!("❌ DB connection failed: {:?}", e);
-            RepositoryError::from(e)
-        })?;
-
-        let limit = req.page_size as i64;
-        let offset = ((req.page - 1).max(0) * req.page_size) as i64;
+        let limit = req.page_size.clamp(1, 100);
+        let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
             None
@@ -165,13 +158,13 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
             LIMIT $2 OFFSET $3
             "#,
             search_pattern,
-            limit,
-            offset,
+             limit as i64,
+            offset as i64
         )
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Error fetching trashed roles: {:?}", e);
+            error!("❌ Error fetching trashed roles: {e:?}");
             RepositoryError::from(e)
         })?;
 
@@ -179,7 +172,6 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
             .first()
             .map(|r| r.total_count.unwrap_or(0))
             .unwrap_or(0);
-        info!("✅ Retrieved {} trashed roles", rows.len());
 
         let result = rows
             .into_iter()
@@ -196,12 +188,7 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
     }
 
     async fn find_by_id(&self, id: i32) -> Result<Option<RoleModel>, RepositoryError> {
-        info!("🔍 Looking up role by id: {}", id);
-
-        let mut conn = self.db.acquire().await.map_err(|e| {
-            error!("❌ DB connection failed: {:?}", e);
-            RepositoryError::from(e)
-        })?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query_as!(
             RoleModel,
@@ -211,26 +198,15 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
         .fetch_optional(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Error fetching role by id {}: {:?}", id, e);
+            error!("❌ Error fetching role by id {id}: {e:?}");
             RepositoryError::from(e)
         })?;
-
-        if result.is_some() {
-            info!("✅ Found role for id {}", id);
-        } else {
-            info!("⚠️ No role found for id {}", id);
-        }
 
         Ok(result)
     }
 
     async fn find_by_name(&self, name: &str) -> Result<Option<RoleModel>, RepositoryError> {
-        info!("🔍 Looking up role by name: {}", name);
-
-        let mut conn = self.db.acquire().await.map_err(|e| {
-            error!("❌ DB connection failed: {:?}", e);
-            RepositoryError::from(e)
-        })?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query_as!(
             RoleModel,
@@ -240,26 +216,15 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
         .fetch_optional(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Error fetching role by name '{}': {:?}", name, e);
+            error!("❌ Error fetching role by name '{name}': {e:?}");
             RepositoryError::from(e)
         })?;
-
-        if result.is_some() {
-            info!("✅ Found role with name {}", name);
-        } else {
-            info!("⚠️ No role found with name {}", name);
-        }
 
         Ok(result)
     }
 
     async fn find_by_user_id(&self, user_id: i32) -> Result<Vec<RoleModel>, RepositoryError> {
-        info!("🔍 Fetching roles for user_id: {}", user_id);
-
-        let mut conn = self.db.acquire().await.map_err(|e| {
-            error!("❌ DB connection failed: {:?}", e);
-            RepositoryError::from(e)
-        })?;
+        let mut conn = self.get_conn().await?;
 
         let rows = sqlx::query!(
             r#"
@@ -274,11 +239,9 @@ impl RoleQueryRepositoryTrait for RoleQueryRepository {
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Error fetching roles by user_id {}: {:?}", user_id, e);
+            error!("❌ Error fetching roles by user_id {user_id}: {e:?}");
             RepositoryError::from(e)
         })?;
-
-        info!("✅ Retrieved {} roles for user_id {}", rows.len(), user_id);
 
         let result = rows
             .into_iter()

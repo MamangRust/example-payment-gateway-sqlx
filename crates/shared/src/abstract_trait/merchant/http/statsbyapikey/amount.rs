@@ -9,11 +9,11 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-pub type DynMerchantStatsAmountByApiKeyService =
-    Arc<dyn MerchantStatsAmountByApiKeyServiceTrait + Send + Sync>;
+pub type DynMerchantStatsAmountByApiKeyGrpcClient =
+    Arc<dyn MerchantStatsAmountByApiKeyGrpcClientTrait + Send + Sync>;
 
 #[async_trait]
-pub trait MerchantStatsAmountByApiKeyServiceTrait {
+pub trait MerchantStatsAmountByApiKeyGrpcClientTrait {
     async fn get_monthly_amount(
         &self,
         req: &MonthYearAmountApiKey,

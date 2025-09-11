@@ -23,8 +23,8 @@ pub trait MerchantQueryRepositoryTrait {
         request: &FindAllMerchants,
     ) -> Result<(Vec<MerchantModel>, i64), RepositoryError>;
     async fn find_by_id(&self, id: i32) -> Result<MerchantModel, RepositoryError>;
-    async fn find_by_apikey(&self, api_key: String) -> Result<MerchantModel, RepositoryError>;
-    async fn find_by_name(&self, name: String) -> Result<MerchantModel, RepositoryError>;
+    async fn find_by_name(&self, name: &str) -> Result<MerchantModel, RepositoryError>;
+    async fn find_by_apikey(&self, api_key: &str) -> Result<MerchantModel, RepositoryError>;
     async fn find_merchant_user_id(
         &self,
         user_id: i32,

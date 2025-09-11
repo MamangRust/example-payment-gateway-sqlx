@@ -29,7 +29,7 @@ pub trait CardQueryGrpcClientTrait {
     async fn find_by_user_id(
         &self,
         user_id: i32,
-    ) -> Result<ApiResponse<Vec<CardResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<CardResponse>, AppErrorHttp>;
     async fn find_by_card_number(
         &self,
         card_number: String,

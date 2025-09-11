@@ -74,27 +74,3 @@ sysinfo = "0.36.1"
 openssl = { version = "0.10.73", features = ["vendored"] }
 
 
-[profile.dev]
-opt-level = 1
-debug = true
-split-debuginfo = 'unpacked'
-debug-assertions = true
-overflow-checks = true
-lto = false
-panic = 'unwind'
-incremental = true
-codegen-units = 128
-rpath = false
-
-[profile.release]
-opt-level = 'z'
-debug = false
-split-debuginfo = 'unpacked'
-debug-assertions = false
-overflow-checks = false
-lto = true
-panic = 'abort'
-incremental = false
-codegen-units = 1
-rpath = false
-strip = "debuginfo"

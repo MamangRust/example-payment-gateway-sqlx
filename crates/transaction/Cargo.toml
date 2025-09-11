@@ -2,3 +2,23 @@
 name = "transaction"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+shared.workspace = true
+axum.workspace = true
+genproto.workspace = true
+anyhow.workspace = true
+tonic.workspace = true
+tokio.workspace = true
+serde.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+dotenv.workspace = true
+prometheus-client.workspace = true
+prometheus-client-derive-encode.workspace = true
+
+[features]
+vendored-openssl = []
+
+[target.'cfg(target_env = "musl")'.dependencies]
+openssl.workspace = true

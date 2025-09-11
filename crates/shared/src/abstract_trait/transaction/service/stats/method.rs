@@ -13,11 +13,11 @@ pub type DynTransactionStatsMethodService =
 
 #[async_trait]
 pub trait TransactionStatsMethodServiceTrait {
-    async fn find_monthly_method(
+    async fn get_monthly_method(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TransactionMonthMethodResponse>>, ServiceError>;
-    async fn find_yearly_method(
+    async fn get_yearly_method(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TransactionYearMethodResponse>>, ServiceError>;

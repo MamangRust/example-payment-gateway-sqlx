@@ -21,5 +21,6 @@ pub trait SaldoQueryRepositoryTrait {
         &self,
         request: &FindAllSaldos,
     ) -> Result<(Vec<SaldoModel>, i64), RepositoryError>;
+    async fn find_by_card(&self, card_number: &str) -> Result<SaldoModel, RepositoryError>;
     async fn find_by_id(&self, id: i32) -> Result<SaldoModel, RepositoryError>;
 }

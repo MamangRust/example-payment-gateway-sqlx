@@ -37,11 +37,11 @@ pub trait TransferQueryServiceTrait {
 
     async fn find_by_transfer_from(
         &self,
-        transfer_from: String,
+        transfer_from: &str,
     ) -> Result<ApiResponse<Vec<TransferResponse>>, ServiceError>;
 
     async fn find_by_transfer_to(
         &self,
-        transfer_to: String,
+        transfer_to: &str,
     ) -> Result<ApiResponse<Vec<TransferResponse>>, ServiceError>;
 }

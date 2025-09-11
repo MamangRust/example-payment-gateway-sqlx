@@ -12,8 +12,10 @@ pub type DynSaldoBalanceGrpcClient = Arc<dyn SaldoBalanceGrpcClientTrait + Send 
 pub trait SaldoBalanceGrpcClientTrait {
     async fn get_month_balance(
         &self,
+        year: i32,
     ) -> Result<ApiResponse<Vec<SaldoMonthBalanceResponse>>, AppErrorHttp>;
     async fn get_year_balance(
         &self,
+        year: i32,
     ) -> Result<ApiResponse<Vec<SaldoYearBalanceResponse>>, AppErrorHttp>;
 }

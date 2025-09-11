@@ -26,5 +26,5 @@ pub trait UserQueryRepositoryTrait {
 
     async fn find_by_id(&self, user_id: i32) -> Result<UserModel, RepositoryError>;
 
-    async fn find_by_email(&self, email: String) -> Result<UserModel, RepositoryError>;
+    async fn find_by_email(&self, email: String) -> Result<Option<UserModel>, RepositoryError>;
 }

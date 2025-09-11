@@ -22,8 +22,8 @@ pub trait CardCommandServiceTrait {
         req: &UpdateCardRequest,
     ) -> Result<ApiResponse<CardResponse>, ServiceError>;
     async fn trash(&self, id: i32) -> Result<ApiResponse<CardResponseDeleteAt>, ServiceError>;
-    async fn restore(&self, id: i32) -> Result<ApiResponse<CardResponse>, ServiceError>;
-    async fn delete(&self, id: i32) -> Result<ApiResponse<()>, ServiceError>;
-    async fn restore_all(&self) -> Result<ApiResponse<()>, ServiceError>;
-    async fn delete_all(&self) -> Result<ApiResponse<()>, ServiceError>;
+    async fn restore(&self, id: i32) -> Result<ApiResponse<CardResponseDeleteAt>, ServiceError>;
+    async fn delete(&self, id: i32) -> Result<ApiResponse<bool>, ServiceError>;
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, ServiceError>;
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, ServiceError>;
 }

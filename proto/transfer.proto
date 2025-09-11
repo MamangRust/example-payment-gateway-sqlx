@@ -172,6 +172,12 @@ message ApiResponseTransfer {
     TransferResponse data = 3;
 }
 
+message ApiResponseTransferDeleteAt{
+    string status = 1;
+    string message = 2;
+    TransferResponseDeleteAt data = 3;
+}
+
 message ApiResponseTransfers{
     string status = 1;
     string message = 2;
@@ -232,8 +238,8 @@ service TransferService {
     rpc FindByTrashedTransfer (FindAllTransferRequest) returns (ApiResponsePaginationTransferDeleteAt);
     rpc CreateTransfer (CreateTransferRequest) returns (ApiResponseTransfer);
     rpc UpdateTransfer (UpdateTransferRequest) returns (ApiResponseTransfer);
-    rpc TrashedTransfer (FindByIdTransferRequest) returns (ApiResponseTransfer);
-    rpc RestoreTransfer (FindByIdTransferRequest) returns (ApiResponseTransfer);
+    rpc TrashedTransfer (FindByIdTransferRequest) returns (ApiResponseTransferDeleteAt);
+    rpc RestoreTransfer (FindByIdTransferRequest) returns (ApiResponseTransferDeleteAt);
     rpc DeleteTransferPermanent (FindByIdTransferRequest) returns (ApiResponseTransferDelete);
 
     rpc RestoreAllTransfer(google.protobuf.Empty) returns (ApiResponseTransferAll){}

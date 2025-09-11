@@ -11,11 +11,11 @@ pub type DynWithdrawStatsAmountGrpcClient =
 
 #[async_trait]
 pub trait WithdrawStatsAmountGrpcClientTrait {
-    async fn find_monthly_withdraws(
+    async fn get_monthly_withdraws(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<WithdrawMonthlyAmountResponse>>, AppErrorHttp>;
-    async fn find_yearly_withdraws(
+    async fn get_yearly_withdraws(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<WithdrawYearlyAmountResponse>>, AppErrorHttp>;

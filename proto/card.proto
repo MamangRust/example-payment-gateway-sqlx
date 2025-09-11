@@ -107,6 +107,12 @@ message ApiResponseCard {
     CardResponse data = 3;
 }
 
+message ApiResponseCardDeleteAt{
+    string status = 1;
+    string message = 2;
+    CardResponseDeleteAt data = 3;
+}
+
 message ApiResponseCardDelete{
     string status = 1;
     string message = 2;
@@ -261,8 +267,8 @@ service CardService {
     rpc CreateCard (CreateCardRequest) returns (ApiResponseCard) {}
     rpc UpdateCard (UpdateCardRequest) returns (ApiResponseCard) {}
 
-    rpc TrashedCard (FindByIdCardRequest) returns (ApiResponseCard) {}
-    rpc RestoreCard(FindByIdCardRequest) returns (ApiResponseCard) {}
+    rpc TrashedCard (FindByIdCardRequest) returns (ApiResponseCardDeleteAt) {}
+    rpc RestoreCard(FindByIdCardRequest) returns (ApiResponseCardDeleteAt) {}
     rpc DeleteCardPermanent (FindByIdCardRequest) returns (ApiResponseCardDelete) {}
 
     rpc RestoreAllCard(google.protobuf.Empty) returns (ApiResponseCardAll){}

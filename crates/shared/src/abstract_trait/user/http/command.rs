@@ -35,5 +35,5 @@ pub trait UserCommandGrpcClientTrait {
 
     async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp>;
 
-    async fn delete_all_permanent(&self) -> Result<ApiResponse<bool>, AppErrorHttp>;
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp>;
 }

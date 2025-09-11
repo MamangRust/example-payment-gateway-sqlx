@@ -47,7 +47,6 @@ message FindYearTopupStatusCardNumber{
 
 message FindByCardNumberTopupRequest {
     string card_number = 1;
-    int32 year = 2;
 }
 
 
@@ -58,9 +57,8 @@ message FindYearTopupCardNumber{
 
 message CreateTopupRequest {
     string card_number = 1;
-    string topup_no = 2;
-    int32 topup_amount = 3;
-    string topup_method = 4;
+    int32 topup_amount = 2;
+    string topup_method = 3;
 }
 
 message UpdateTopupRequest {
@@ -267,7 +265,7 @@ service TopupService {
     rpc FindMonthlyTopupAmountsByCardNumber(FindYearTopupCardNumber)returns(ApiResponseTopupMonthAmount){}
     rpc FindYearlyTopupAmountsByCardNumber(FindYearTopupCardNumber)returns(ApiResponseTopupYearAmount){}
 
-    rpc FindByCardNumberTopup (FindByCardNumberTopupRequest) returns (ApiResponseTopup);
+    rpc FindByCardNumberTopup (FindByCardNumberTopupRequest) returns (ApiResponsesTopup);
     rpc FindByActive (FindAllTopupRequest) returns (ApiResponsePaginationTopupDeleteAt);
     rpc FindByTrashed (FindAllTopupRequest) returns (ApiResponsePaginationTopupDeleteAt);
     rpc CreateTopup (CreateTopupRequest) returns (ApiResponseTopup);

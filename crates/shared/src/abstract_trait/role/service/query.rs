@@ -1,7 +1,7 @@
 use crate::{
     domain::{
         requests::role::FindAllRoles,
-        responses::{ApiResponse, RoleResponse},
+        responses::{ApiResponse, ApiResponsePagination, RoleResponse, RoleResponseDeleteAt},
     },
     errors::ServiceError,
 };
@@ -16,14 +16,19 @@ pub trait RoleQueryServiceTrait {
     async fn find_all(
         &self,
         request: &FindAllRoles,
-    ) -> Result<ApiResponse<Vec<RoleResponse>>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<RoleResponse>>, ServiceError>;
     async fn find_active(
         &self,
         request: &FindAllRoles,
-    ) -> Result<ApiResponse<Vec<RoleResponse>>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<RoleResponseDeleteAt>>, ServiceError>;
     async fn find_trashed(
         &self,
         request: &FindAllRoles,
-    ) -> Result<ApiResponse<Vec<RoleResponse>>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<RoleResponseDeleteAt>>, ServiceError>;
     async fn find_by_id(&self, id: i32) -> Result<ApiResponse<RoleResponse>, ServiceError>;
+    async fn find_by_user_id(
+        &self,
+        id: i32,
+    ) -> Result<ApiResponse<Vec<RoleResponse>>, ServiceError>;
+    async fn find_by_name(&self, name: String) -> Result<ApiResponse<RoleResponse>, ServiceError>;
 }

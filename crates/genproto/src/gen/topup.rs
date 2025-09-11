@@ -56,8 +56,6 @@ pub struct FindYearTopupStatusCardNumber {
 pub struct FindByCardNumberTopupRequest {
     #[prost(string, tag = "1")]
     pub card_number: ::prost::alloc::string::String,
-    #[prost(int32, tag = "2")]
-    pub year: i32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct FindYearTopupCardNumber {
@@ -70,11 +68,9 @@ pub struct FindYearTopupCardNumber {
 pub struct CreateTopupRequest {
     #[prost(string, tag = "1")]
     pub card_number: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub topup_no: ::prost::alloc::string::String,
-    #[prost(int32, tag = "3")]
+    #[prost(int32, tag = "2")]
     pub topup_amount: i32,
-    #[prost(string, tag = "4")]
+    #[prost(string, tag = "3")]
     pub topup_method: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -947,7 +943,7 @@ pub mod topup_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByCardNumberTopupRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseTopup>,
+            tonic::Response<super::ApiResponsesTopup>,
             tonic::Status,
         > {
             self.inner
@@ -1337,7 +1333,7 @@ pub mod topup_service_server {
             &self,
             request: tonic::Request<super::FindByCardNumberTopupRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseTopup>,
+            tonic::Response<super::ApiResponsesTopup>,
             tonic::Status,
         >;
         async fn find_by_active(
@@ -2434,7 +2430,7 @@ pub mod topup_service_server {
                         T: TopupService,
                     > tonic::server::UnaryService<super::FindByCardNumberTopupRequest>
                     for FindByCardNumberTopupSvc<T> {
-                        type Response = super::ApiResponseTopup;
+                        type Response = super::ApiResponsesTopup;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,

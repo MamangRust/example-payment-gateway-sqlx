@@ -54,6 +54,41 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
 
 [[package]]
+name = "apigateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "axum-extra",
+ "chrono",
+ "dotenv",
+ "genproto",
+ "jsonwebtoken",
+ "openssl",
+ "opentelemetry",
+ "opentelemetry-appender-tracing",
+ "opentelemetry-otlp",
+ "opentelemetry-stdout",
+ "opentelemetry_sdk",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "thiserror 2.0.16",
+ "tokio",
+ "tonic 0.14.1",
+ "tower-http",
+ "tracing",
+ "utoipa",
+ "utoipa-axum",
+ "utoipa-swagger-ui",
+ "uuid",
+ "validator",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -91,6 +126,21 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 [[package]]
 name = "auth"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenv",
+ "genproto",
+ "openssl",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tonic 0.14.1",
+ "tracing",
+]
 
 [[package]]
 name = "autocfg"
@@ -265,6 +315,21 @@ checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 [[package]]
 name = "card"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenv",
+ "genproto",
+ "openssl",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tonic 0.14.1",
+ "tracing",
+]
 
 [[package]]
 name = "cc"
@@ -305,10 +370,6 @@ dependencies = [
  "crypto-common",
  "inout",
 ]
-
-[[package]]
-name = "client"
-version = "0.1.0"
 
 [[package]]
 name = "combine"
@@ -633,6 +694,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "foreign-types"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1"
+dependencies = [
+ "foreign-types-shared",
+]
+
+[[package]]
+name = "foreign-types-shared"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -888,6 +964,12 @@ dependencies = [
  "http-body",
  "pin-project-lite",
 ]
+
+[[package]]
+name = "http-range-header"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9171a2ea8a68358193d15dd5d70c1c10a2afc3e7e4c5bc92bc9f025cebd7359c"
 
 [[package]]
 name = "httparse"
@@ -1298,6 +1380,21 @@ checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
 [[package]]
 name = "merchant"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenv",
+ "genproto",
+ "openssl",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tonic 0.14.1",
+ "tracing",
+]
 
 [[package]]
 name = "mime"
@@ -1473,6 +1570,54 @@ name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+
+[[package]]
+name = "openssl"
+version = "0.10.73"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8505734d46c8ab1e19a1dce3aef597ad87dcb4c37e7188231769bd6bd51cebf8"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "foreign-types",
+ "libc",
+ "once_cell",
+ "openssl-macros",
+ "openssl-sys",
+]
+
+[[package]]
+name = "openssl-macros"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "openssl-src"
+version = "300.5.2+3.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d270b79e2926f5150189d475bc7e9d2c69f9c4697b185fa917d5a32b792d21b4"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "openssl-sys"
+version = "0.9.109"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90096e2e47630d78b7d1c20952dc621f957103f8bc2c8359ec81290d75238571"
+dependencies = [
+ "cc",
+ "libc",
+ "openssl-src",
+ "pkg-config",
+ "vcpkg",
+]
 
 [[package]]
 name = "opentelemetry"
@@ -2093,6 +2238,21 @@ dependencies = [
 [[package]]
 name = "role"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenv",
+ "genproto",
+ "openssl",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tonic 0.14.1",
+ "tracing",
+]
 
 [[package]]
 name = "rsa"
@@ -2216,6 +2376,21 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 [[package]]
 name = "saldo"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenv",
+ "genproto",
+ "openssl",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tonic 0.14.1",
+ "tracing",
+]
 
 [[package]]
 name = "same-file"
@@ -2335,6 +2510,7 @@ dependencies = [
  "chrono",
  "dotenv",
  "genproto",
+ "hex",
  "jsonwebtoken",
  "opentelemetry",
  "opentelemetry-appender-tracing",
@@ -2343,6 +2519,7 @@ dependencies = [
  "opentelemetry_sdk",
  "prometheus-client",
  "prometheus-client-derive-encode",
+ "prost-types",
  "rand 0.9.2",
  "redis",
  "regex",
@@ -2991,6 +3168,21 @@ dependencies = [
 [[package]]
 name = "topup"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenv",
+ "genproto",
+ "openssl",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tonic 0.14.1",
+ "tracing",
+]
 
 [[package]]
 name = "tower"
@@ -3019,14 +3211,24 @@ checksum = "adc82fd73de2a9722ac5da747f12383d2bfdb93591ee6c58486e0097890f05f2"
 dependencies = [
  "bitflags",
  "bytes",
+ "futures-core",
  "futures-util",
  "http",
  "http-body",
+ "http-body-util",
+ "http-range-header",
+ "httpdate",
  "iri-string",
+ "mime",
+ "mime_guess",
+ "percent-encoding",
  "pin-project-lite",
+ "tokio",
+ "tokio-util",
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -3131,10 +3333,40 @@ dependencies = [
 [[package]]
 name = "transaction"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenv",
+ "genproto",
+ "openssl",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tonic 0.14.1",
+ "tracing",
+]
 
 [[package]]
 name = "transfer"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenv",
+ "genproto",
+ "openssl",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tonic 0.14.1",
+ "tracing",
+]
 
 [[package]]
 name = "try-lock"
@@ -3202,6 +3434,21 @@ dependencies = [
 [[package]]
 name = "user"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenv",
+ "genproto",
+ "openssl",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tonic 0.14.1",
+ "tracing",
+]
 
 [[package]]
 name = "utf8_iter"
@@ -3848,6 +4095,21 @@ dependencies = [
 [[package]]
 name = "withdraw"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenv",
+ "genproto",
+ "openssl",
+ "prometheus-client",
+ "prometheus-client-derive-encode",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tonic 0.14.1",
+ "tracing",
+]
 
 [[package]]
 name = "writeable"

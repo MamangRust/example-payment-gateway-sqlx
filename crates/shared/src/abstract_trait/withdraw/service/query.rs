@@ -27,6 +27,10 @@ pub trait WithdrawQueryServiceTrait {
         &self,
         withdraw_id: i32,
     ) -> Result<ApiResponse<WithdrawResponse>, ServiceError>;
+    async fn find_by_card(
+        &self,
+        card_number: &str,
+    ) -> Result<ApiResponse<Vec<WithdrawResponse>>, ServiceError>;
 
     async fn find_by_active(
         &self,

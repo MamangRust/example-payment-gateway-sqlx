@@ -13,11 +13,11 @@ pub type DynTransactionStatsAmountGrpcClient =
 
 #[async_trait]
 pub trait TransactionStatsAmountGrpcClientTrait {
-    async fn find_monthly_amounts(
+    async fn get_monthly_amounts(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TransactionMonthAmountResponse>>, AppErrorHttp>;
-    async fn find_yearly_amounts(
+    async fn get_yearly_amounts(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TransactionYearlyAmountResponse>>, AppErrorHttp>;

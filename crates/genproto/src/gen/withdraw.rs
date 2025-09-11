@@ -242,6 +242,15 @@ pub struct ApiResponseWithdraw {
     pub data: ::core::option::Option<WithdrawResponse>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApiResponseWithdrawDeleteAt {
+    #[prost(string, tag = "1")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub data: ::core::option::Option<WithdrawResponseDeleteAt>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ApiResponseWithdrawDelete {
     #[prost(string, tag = "1")]
     pub status: ::prost::alloc::string::String,
@@ -911,7 +920,7 @@ pub mod withdraw_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdWithdrawRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseWithdraw>,
+            tonic::Response<super::ApiResponseWithdrawDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -935,7 +944,7 @@ pub mod withdraw_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdWithdrawRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseWithdraw>,
+            tonic::Response<super::ApiResponseWithdrawDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -1198,14 +1207,14 @@ pub mod withdraw_service_server {
             &self,
             request: tonic::Request<super::FindByIdWithdrawRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseWithdraw>,
+            tonic::Response<super::ApiResponseWithdrawDeleteAt>,
             tonic::Status,
         >;
         async fn restore_withdraw(
             &self,
             request: tonic::Request<super::FindByIdWithdrawRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseWithdraw>,
+            tonic::Response<super::ApiResponseWithdrawDeleteAt>,
             tonic::Status,
         >;
         async fn delete_withdraw_permanent(
@@ -2322,7 +2331,7 @@ pub mod withdraw_service_server {
                         T: WithdrawService,
                     > tonic::server::UnaryService<super::FindByIdWithdrawRequest>
                     for TrashedWithdrawSvc<T> {
-                        type Response = super::ApiResponseWithdraw;
+                        type Response = super::ApiResponseWithdrawDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -2368,7 +2377,7 @@ pub mod withdraw_service_server {
                         T: WithdrawService,
                     > tonic::server::UnaryService<super::FindByIdWithdrawRequest>
                     for RestoreWithdrawSvc<T> {
-                        type Response = super::ApiResponseWithdraw;
+                        type Response = super::ApiResponseWithdrawDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,

@@ -41,13 +41,13 @@ fn default_page_size() -> i32 {
 pub struct MonthYearPaymentMethod {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
-    #[validate(range(min = 1900, max = 2100, message = "Tahun tidak valid"))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Validate, IntoParams)]
 pub struct MonthStatusTransaction {
-    #[validate(range(min = 1900, max = 2100))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
     #[validate(range(min = 1, max = 12))]
     pub month: i32,
@@ -57,7 +57,7 @@ pub struct MonthStatusTransaction {
 pub struct YearStatusTransactionCardNumber {
     #[validate(length(min = 1))]
     pub card_number: String,
-    #[validate(range(min = 1900, max = 2100))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
 }
 
@@ -65,18 +65,18 @@ pub struct YearStatusTransactionCardNumber {
 pub struct MonthStatusTransactionCardNumber {
     #[validate(length(min = 1))]
     pub card_number: String,
-    #[validate(range(min = 1900, max = 2100))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
     #[validate(range(min = 1, max = 12))]
     pub month: i32,
 }
 
-#[derive(Debug, Deserialize, Serialize, Validate, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, Validate, ToSchema, Clone)]
 pub struct CreateTransactionRequest {
     #[validate(length(min = 1))]
     pub card_number: String,
     #[validate(range(min = 50000))]
-    pub amount: i32,
+    pub amount: i64,
     #[validate(length(min = 1))]
     pub payment_method: String,
     #[validate(range(min = 1))]
@@ -84,13 +84,13 @@ pub struct CreateTransactionRequest {
     pub transaction_time: NaiveDateTime,
 }
 
-#[derive(Debug, Deserialize, Serialize, Validate, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, Validate, ToSchema, Clone)]
 pub struct UpdateTransactionRequest {
-    pub transaction_id: Option<i32>,
+    pub transaction_id: i32,
     #[validate(length(min = 1))]
     pub card_number: String,
     #[validate(range(min = 50000))]
-    pub amount: i32,
+    pub amount: i64,
     #[validate(length(min = 1))]
     pub payment_method: String,
     #[validate(range(min = 1))]
@@ -98,7 +98,7 @@ pub struct UpdateTransactionRequest {
     pub transaction_time: NaiveDateTime,
 }
 
-#[derive(Debug, Deserialize, Serialize, Validate, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, Validate, ToSchema, Clone)]
 pub struct UpdateTransactionStatus {
     #[validate(range(min = 1))]
     pub transaction_id: i32,

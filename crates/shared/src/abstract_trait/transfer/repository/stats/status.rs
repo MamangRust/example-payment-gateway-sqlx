@@ -15,20 +15,20 @@ pub type DynTransferStatsStatusRepository =
 
 #[async_trait]
 pub trait TransferStatsStatusRepositoryTrait {
-    async fn get_month_transfer_status_success(
+    async fn get_month_status_success(
         &self,
         req: &MonthStatusTransfer,
     ) -> Result<Vec<TransferModelMonthStatusSuccess>, RepositoryError>;
 
-    async fn get_yearly_transfer_status_success(
+    async fn get_yearly_status_success(
         &self,
         year: i32,
     ) -> Result<Vec<TransferModelYearStatusSuccess>, RepositoryError>;
-    async fn get_month_transfer_status_failed(
+    async fn get_month_status_failed(
         &self,
         req: &MonthStatusTransfer,
     ) -> Result<Vec<TransferModelMonthStatusFailed>, RepositoryError>;
-    async fn get_yearly_transfer_status_failed(
+    async fn get_yearly_status_failed(
         &self,
         year: i32,
     ) -> Result<Vec<TransferModelYearStatusFailed>, RepositoryError>;

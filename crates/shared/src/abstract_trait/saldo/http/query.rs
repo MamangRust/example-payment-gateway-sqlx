@@ -20,7 +20,7 @@ pub trait SaldoQueryGrpcClientTrait {
     async fn find_active(
         &self,
         request: &FindAllSaldos,
-    ) -> Result<ApiResponsePagination<Vec<SaldoResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponsePagination<Vec<SaldoResponseDeleteAt>>, AppErrorHttp>;
     async fn find_trashed(
         &self,
         request: &FindAllSaldos,

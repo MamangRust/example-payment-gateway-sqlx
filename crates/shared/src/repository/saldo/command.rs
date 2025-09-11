@@ -9,7 +9,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::{error, info};
+use tracing::error;
 
 pub struct SaldoCommandRepository {
     db: ConnectionPool,
@@ -19,12 +19,21 @@ impl SaldoCommandRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
 impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
     async fn create(&self, req: &CreateSaldoRequest) -> Result<SaldoModel, RepositoryError> {
-        info!("🆕 Creating saldo for card: {}", req.card_number);
+        let mut conn = self.get_conn().await?;
 
         let saldo = sqlx::query_as!(
             SaldoModel,
@@ -39,28 +48,28 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             RETURNING
                 saldo_id,
                 card_number,
-                total_balance::INTEGER,
+                total_balance as "total_balance!: i64",
                 NULL::TIMESTAMP AS "withdraw_time",
-                NULL::INTEGER AS "withdraw_amount",
+                NULL::INT AS "withdraw_amount",
                 created_at,
                 updated_at,
                 deleted_at
             "#,
             req.card_number,
-            req.total_balance
+            req.total_balance as i32
         )
-        .fetch_one(&self.db)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to create saldo: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to create saldo: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         Ok(saldo)
     }
 
     async fn update(&self, req: &UpdateSaldoRequest) -> Result<SaldoModel, RepositoryError> {
-        info!("🔄 Updating saldo with ID: {}", req.saldo_id);
+        let mut conn = self.get_conn().await?;
 
         let saldo = sqlx::query_as!(
             SaldoModel,
@@ -83,9 +92,9 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             "#,
             req.saldo_id,
             req.card_number,
-            req.total_balance
+            req.total_balance as i32
         )
-        .fetch_one(&self.db)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
@@ -93,8 +102,8 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
                 RepositoryError::NotFound
             }
             _ => {
-                error!("❌ Failed to update saldo {}: {:?}", req.saldo_id, e);
-                RepositoryError::Sqlx(e.into())
+                error!("❌ Failed to update saldo {}: {e:?}", req.saldo_id);
+                RepositoryError::Sqlx(e)
             }
         })?;
 
@@ -105,7 +114,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
         &self,
         req: &UpdateSaldoBalance,
     ) -> Result<SaldoModel, RepositoryError> {
-        info!("💰 Updating balance for card: {}", req.card_number);
+        let mut conn = self.get_conn().await?;
 
         let saldo = sqlx::query_as!(
             SaldoModel,
@@ -116,7 +125,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             RETURNING
                 saldo_id,
                 card_number,
-                total_balance,
+                total_balance as "total_balance!: i64",
                 withdraw_amount,
                 withdraw_time,
                 created_at,
@@ -124,9 +133,9 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
                 deleted_at
             "#,
             req.card_number,
-            req.total_balance
+            req.total_balance as i32
         )
-        .fetch_one(&self.db)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
@@ -135,10 +144,10 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             }
             _ => {
                 error!(
-                    "❌ Failed to update balance for card {}: {:?}",
-                    req.card_number, e
+                    "❌ Failed to update balance for card {}: {e:?}",
+                    req.card_number,
                 );
-                RepositoryError::Sqlx(e.into())
+                RepositoryError::Sqlx(e)
             }
         })?;
 
@@ -149,10 +158,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
         &self,
         req: &UpdateSaldoWithdraw,
     ) -> Result<SaldoModel, RepositoryError> {
-        info!(
-            "💸 Withdrawing {} from card: {}",
-            req.withdraw_amount, req.card_number
-        );
+        let mut conn = self.get_conn().await?;
 
         let saldo = sqlx::query_as!(
             SaldoModel,
@@ -170,7 +176,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             RETURNING
                 saldo_id,
                 card_number,
-                total_balance,
+                total_balance as "total_balance!: i64",
                 $2::INTEGER AS "withdraw_amount!",
                 $3::TIMESTAMP AS "withdraw_time!",
                 created_at,
@@ -181,7 +187,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             req.withdraw_amount,
             req.withdraw_time
         )
-        .fetch_one(&self.db)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
@@ -192,11 +198,8 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
                 RepositoryError::Custom("Insufficient balance or card not found".into())
             }
             _ => {
-                error!(
-                    "❌ Failed to withdraw from card {}: {:?}",
-                    req.card_number, e
-                );
-                RepositoryError::Sqlx(e.into())
+                error!("❌ Failed to withdraw from card {}: {e:?}", req.card_number);
+                RepositoryError::Sqlx(e)
             }
         })?;
 
@@ -204,7 +207,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
     }
 
     async fn trash(&self, id: i32) -> Result<SaldoModel, RepositoryError> {
-        info!("🗑️ Trashing saldo ID: {}", id);
+        let mut conn = self.get_conn().await?;
 
         let saldo = sqlx::query_as!(
             SaldoModel,
@@ -215,7 +218,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             RETURNING
                 saldo_id,
                 card_number,
-                total_balance,
+                total_balance as "total_balance!: i64",
                 withdraw_amount,
                 withdraw_time,
                 created_at,
@@ -224,16 +227,16 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             "#,
             id
         )
-        .fetch_one(&self.db)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
-                error!("❌ Saldo not found or already trashed: {}", id);
+                error!("❌ Saldo not found or already trashed: {id}");
                 RepositoryError::NotFound
             }
             _ => {
-                error!("❌ Failed to trash saldo {}: {:?}", id, e);
-                RepositoryError::Sqlx(e.into())
+                error!("❌ Failed to trash saldo {id}: {e:?}");
+                RepositoryError::Sqlx(e)
             }
         })?;
 
@@ -241,7 +244,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
     }
 
     async fn restore(&self, id: i32) -> Result<SaldoModel, RepositoryError> {
-        info!("↩️ Restoring saldo ID: {}", id);
+        let mut conn = self.get_conn().await?;
 
         let saldo = sqlx::query_as!(
             SaldoModel,
@@ -252,7 +255,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             RETURNING
                 saldo_id,
                 card_number,
-                total_balance,
+                total_balance as "total_balance!: i64",
                 withdraw_amount,
                 withdraw_time,
                 created_at,
@@ -261,16 +264,16 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             "#,
             id
         )
-        .fetch_one(&self.db)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
-                error!("❌ Saldo not found or not trashed: {}", id);
+                error!("❌ Saldo not found or not trashed: {id}");
                 RepositoryError::NotFound
             }
             _ => {
-                error!("❌ Failed to restore saldo {}: {:?}", id, e);
-                RepositoryError::Sqlx(e.into())
+                error!("❌ Failed to restore saldo {id}: {e:?}");
+                RepositoryError::Sqlx(e)
             }
         })?;
 
@@ -278,7 +281,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
     }
 
     async fn delete_permanent(&self, id: i32) -> Result<(), RepositoryError> {
-        info!("💀 Permanently deleting saldo ID: {}", id);
+        let mut conn = self.get_conn().await?;
 
         sqlx::query!(
             r#"
@@ -287,18 +290,18 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             "#,
             id
         )
-        .execute(&self.db)
+        .execute(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to permanently delete saldo {}: {:?}", id, e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to permanently delete saldo {id}: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         Ok(())
     }
 
     async fn restore_all(&self) -> Result<(), RepositoryError> {
-        info!("↩️ Restoring all trashed saldos");
+        let mut conn = self.get_conn().await?;
 
         sqlx::query!(
             r#"
@@ -307,18 +310,18 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             WHERE deleted_at IS NOT NULL
             "#
         )
-        .execute(&self.db)
+        .execute(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to restore all saldos: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to restore all saldos: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         Ok(())
     }
 
     async fn delete_all(&self) -> Result<(), RepositoryError> {
-        info!("💀 Permanently deleting all trashed saldos");
+        let mut conn = self.get_conn().await?;
 
         sqlx::query!(
             r#"
@@ -326,11 +329,11 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
             WHERE deleted_at IS NOT NULL
             "#
         )
-        .execute(&self.db)
+        .execute(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to delete all trashed saldos: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to delete all trashed saldos: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         Ok(())

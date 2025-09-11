@@ -23,6 +23,7 @@ pub use self::merchant::{
     MerchantResponseYearlyAmount, MerchantResponseYearlyPaymentMethod,
     MerchantResponseYearlyTotalAmount, MerchantTransactionResponse,
 };
+pub use self::pagination::Pagination;
 pub use self::role::{RoleResponse, RoleResponseDeleteAt};
 pub use self::saldo::{
     SaldoMonthBalanceResponse, SaldoMonthTotalBalanceResponse, SaldoResponse,

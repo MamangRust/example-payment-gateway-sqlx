@@ -6,27 +6,28 @@ use crate::{
         },
         responses::{ApiResponsePagination, MerchantTransactionResponse},
     },
-    errors::ServiceError,
+    errors::AppErrorHttp,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-pub type DynMerchantTransactionService = Arc<dyn MerchantTransactionServiceTrait + Send + Sync>;
+pub type DynMerchantTransactionGrpcClient =
+    Arc<dyn MerchantTransactionGrpcClientTrait + Send + Sync>;
 
 #[async_trait]
-pub trait MerchantTransactionServiceTrait {
+pub trait MerchantTransactionGrpcClientTrait {
     async fn find_all_transactiions(
         &self,
         request: &FindAllMerchantTransactions,
-    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, AppErrorHttp>;
 
     async fn find_all_transactiions_by_api_key(
         &self,
         request: &FindAllMerchantTransactionsByApiKey,
-    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, AppErrorHttp>;
     async fn find_all_transactiions_by_id(
         &self,
         request: &FindAllMerchantTransactionsById,
-    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, AppErrorHttp>;
 }

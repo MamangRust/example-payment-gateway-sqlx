@@ -16,18 +16,22 @@ pub trait TopupQueryServiceTrait {
     async fn find_all(
         &self,
         req: &FindAllTopups,
-    ) -> Result<ApiResponsePagination<TopupResponse>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<TopupResponse>>, ServiceError>;
     async fn find_all_by_card_number(
         &self,
         req: &FindAllTopupsByCardNumber,
-    ) -> Result<ApiResponsePagination<TopupResponse>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<TopupResponse>>, ServiceError>;
     async fn find_active(
         &self,
         req: &FindAllTopups,
-    ) -> Result<ApiResponsePagination<TopupResponseDeleteAt>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<TopupResponseDeleteAt>>, ServiceError>;
     async fn find_trashed(
         &self,
         req: &FindAllTopups,
-    ) -> Result<ApiResponsePagination<TopupResponseDeleteAt>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<TopupResponseDeleteAt>>, ServiceError>;
+    async fn find_by_card(
+        &self,
+        card_number: &str,
+    ) -> Result<ApiResponse<Vec<TopupResponse>>, ServiceError>;
     async fn find_by_id(&self, topup_id: i32) -> Result<ApiResponse<TopupResponse>, ServiceError>;
 }

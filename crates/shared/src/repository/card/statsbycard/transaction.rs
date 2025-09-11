@@ -1,12 +1,14 @@
 use crate::{
-    abstract_trait::card::repository::CardStatsTransactionByCardRepositoryTrait,
+    abstract_trait::card::repository::statsbycard::transaction::CardStatsTransactionByCardRepositoryTrait,
     config::ConnectionPool,
     domain::requests::card::MonthYearCardNumberCard,
     errors::RepositoryError,
     model::card::{CardMonthAmount, CardYearAmount},
 };
 use async_trait::async_trait;
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::NaiveDate;
+use sqlx::Row;
+use tracing::error;
 
 pub struct CardStatsTransactionByCardRepository {
     db: ConnectionPool,
@@ -16,6 +18,15 @@ impl CardStatsTransactionByCardRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
@@ -24,66 +35,75 @@ impl CardStatsTransactionByCardRepositoryTrait for CardStatsTransactionByCardRep
         &self,
         req: &MonthYearCardNumberCard,
     ) -> Result<Vec<CardMonthAmount>, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
-        let date = NaiveDate::from_ymd_opt(req.year, 1, 1)
-            .ok_or_else(|| RepositoryError::Custom("Invalid year".into()))?;
-
-        let year_start: NaiveDateTime = date
+        let year_start = NaiveDate::from_ymd_opt(req.year, 1, 1)
+            .ok_or_else(|| RepositoryError::Custom("❌ Invalid year".to_string()))?
             .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| RepositoryError::Custom("Invalid datetime".into()))?;
+            .unwrap();
 
-        let results = sqlx::query_as!(
-            CardMonthAmount,
-            r#"
+        let sql = r#"
             WITH months AS (
                 SELECT generate_series(
-                    date_trunc('year', $1::timestamp),
-                    date_trunc('year', $1::timestamp) + interval '1 year' - interval '1 day',
+                    date_trunc('year', $2::timestamp),
+                    date_trunc('year', $2::timestamp) + interval '1 year' - interval '1 day',
                     interval '1 month'
                 ) AS month
             )
             SELECT
-                TO_CHAR(m.month, 'Mon') AS "month!",
-                COALESCE(SUM(t.amount), 0)::int AS "total_amount!"
+                TO_CHAR(m.month, 'Mon') AS month,
+                COALESCE(SUM(t.amount), 0)::bigint AS total_amount
             FROM
                 months m
             LEFT JOIN
                 transactions t ON EXTRACT(MONTH FROM t.transaction_time) = EXTRACT(MONTH FROM m.month)
                 AND EXTRACT(YEAR FROM t.transaction_time) = EXTRACT(YEAR FROM m.month)
                 AND t.deleted_at IS NULL
+                AND t.card_number = $1
             LEFT JOIN
                 cards c ON t.card_number = c.card_number
                 AND c.deleted_at IS NULL
-                AND t.card_number = $2
             GROUP BY
                 m.month
             ORDER BY
-                m.month
-            "#,
-            year_start,
-            req.card_number
-        )
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(RepositoryError::from)?;
+                m.month;
+        "#;
 
-        Ok(results)
+        let rows = sqlx::query(sql)
+            .bind(&req.card_number)
+            .bind(year_start)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("❌ Database error in get_monthly_amount: {e:?}");
+                RepositoryError::Sqlx(e)
+            })?;
+
+        let mut result = Vec::with_capacity(12);
+        for row in rows {
+            let month: String = row.try_get("month")?;
+            let total_amount: i64 = row.try_get("total_amount")?;
+
+            result.push(CardMonthAmount {
+                month,
+                total_amount,
+            });
+        }
+
+        Ok(result)
     }
 
     async fn get_yearly_amount(
         &self,
         req: &MonthYearCardNumberCard,
     ) -> Result<Vec<CardYearAmount>, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
-        let results = sqlx::query_as!(
-            CardYearAmount,
-            r#"
+        let sql = r#"
             WITH last_five_years AS (
                 SELECT
-                    EXTRACT(YEAR FROM t.transaction_time)::TEXT AS year,
-                    COALESCE(SUM(t.amount), 0)::bigint AS total_amount
+                    EXTRACT(YEAR FROM t.transaction_time) AS year,
+                    SUM(t.amount) AS total_amount
                 FROM
                     transactions t
                 JOIN
@@ -91,27 +111,39 @@ impl CardStatsTransactionByCardRepositoryTrait for CardStatsTransactionByCardRep
                 WHERE
                     t.deleted_at IS NULL
                     AND c.deleted_at IS NULL
-                    AND t.card_number = $2
-                    AND EXTRACT(YEAR FROM t.transaction_time) >= $1 - 4
-                    AND EXTRACT(YEAR FROM t.transaction_time) <= $1
+                    AND t.card_number = $1
+                    AND EXTRACT(YEAR FROM t.transaction_time) >= $2 - 4
+                    AND EXTRACT(YEAR FROM t.transaction_time) <= $2
                 GROUP BY
                     EXTRACT(YEAR FROM t.transaction_time)
             )
             SELECT
-                year AS "year!",
-                total_amount AS "total_amount!"
+                year::text,
+                total_amount::bigint
             FROM
                 last_five_years
             ORDER BY
-                year
-            "#,
-            req.year,
-            req.card_number
-        )
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(RepositoryError::from)?;
+                year;
+        "#;
 
-        Ok(results)
+        let rows = sqlx::query(sql)
+            .bind(&req.card_number)
+            .bind(req.year)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("❌ Database error in get_yearly_amount: {e:?}");
+                RepositoryError::Sqlx(e)
+            })?;
+
+        let mut result = Vec::with_capacity(5);
+        for row in rows {
+            let year: String = row.try_get("year")?;
+            let total_amount: i64 = row.try_get("total_amount")?;
+
+            result.push(CardYearAmount { year, total_amount });
+        }
+
+        Ok(result)
     }
 }

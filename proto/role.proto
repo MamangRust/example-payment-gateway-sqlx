@@ -67,6 +67,12 @@ message ApiResponseRole{
     RoleResponse data = 3;
 }
 
+message ApiResponseRoleDeleteAt{
+    string status = 1;
+    string message = 2;
+    RoleResponseDeleteAt data = 3;
+} 
+
 message ApiResponsesRole{
     string status = 1;
     string message = 2;
@@ -100,8 +106,8 @@ service RoleService{
 
     rpc CreateRole(CreateRoleRequest) returns (ApiResponseRole) {}
     rpc UpdateRole(UpdateRoleRequest) returns (ApiResponseRole) {}
-    rpc TrashedRole(FindByIdRoleRequest) returns (ApiResponseRole) {}
-    rpc RestoreRole(FindByIdRoleRequest) returns (ApiResponseRole) {}
+    rpc TrashedRole(FindByIdRoleRequest) returns (ApiResponseRoleDeleteAt) {}
+    rpc RestoreRole(FindByIdRoleRequest) returns (ApiResponseRoleDeleteAt) {}
     rpc DeleteRolePermanent(FindByIdRoleRequest) returns (ApiResponseRoleDelete) {}
     rpc RestoreAllRole(google.protobuf.Empty) returns (ApiResponseRoleAll){}
     rpc DeleteAllRolePermanent(google.protobuf.Empty) returns (ApiResponseRoleAll){}

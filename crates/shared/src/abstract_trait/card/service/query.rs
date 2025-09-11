@@ -29,9 +29,9 @@ pub trait CardQueryServiceTrait {
     async fn find_by_user_id(
         &self,
         user_id: i32,
-    ) -> Result<ApiResponse<Vec<CardResponse>>, ServiceError>;
-    async fn find_by_card_number(
+    ) -> Result<ApiResponse<CardResponse>, ServiceError>;
+    async fn find_by_card(
         &self,
-        card_number: String,
+        card_number: &str,
     ) -> Result<ApiResponse<CardResponse>, ServiceError>;
 }

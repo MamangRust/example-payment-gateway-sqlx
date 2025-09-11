@@ -42,7 +42,7 @@ message UpdateSaldoRequest{
 message SaldoResponse {
   int32 saldo_id = 1;
   string card_number = 2;
-  int32 total_balance = 3;
+  int64 total_balance = 3;
   string withdraw_time = 4;
   int32 withdraw_amount = 5;
   string created_at = 6;
@@ -52,7 +52,7 @@ message SaldoResponse {
 message SaldoResponseDeleteAt {
   int32 saldo_id = 1;
   string card_number = 2;
-  int32 total_balance = 3;
+  int64 total_balance = 3;
   string withdraw_time = 4;
   int32 withdraw_amount = 5;
   string created_at = 6;
@@ -88,6 +88,12 @@ message ApiResponseSaldo {
     string status = 1;
     string message = 2;
     SaldoResponse data = 3;
+}
+
+message ApiResponseSaldoDeleteAt{
+    string status = 1;
+    string message = 2;
+    SaldoResponseDeleteAt data = 3;
 }
 
 message ApiResponsesSaldo{
@@ -159,8 +165,8 @@ service SaldoService{
    rpc FindByTrashed(FindAllSaldoRequest) returns (ApiResponsePaginationSaldoDeleteAt) {}
    rpc CreateSaldo(CreateSaldoRequest) returns (ApiResponseSaldo) {}
    rpc UpdateSaldo(UpdateSaldoRequest) returns (ApiResponseSaldo) {}
-   rpc TrashedSaldo(FindByIdSaldoRequest) returns (ApiResponseSaldo) {}
-   rpc RestoreSaldo(FindByIdSaldoRequest) returns (ApiResponseSaldo) {}
+   rpc TrashedSaldo(FindByIdSaldoRequest) returns (ApiResponseSaldoDeleteAt) {}
+   rpc RestoreSaldo(FindByIdSaldoRequest) returns (ApiResponseSaldoDeleteAt) {}
    rpc DeleteSaldoPermanent(FindByIdSaldoRequest) returns (ApiResponseSaldoDelete) {}
 
    rpc RestoreAllSaldo(google.protobuf.Empty) returns (ApiResponseSaldoAll){}

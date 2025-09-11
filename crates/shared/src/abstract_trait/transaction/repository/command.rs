@@ -36,5 +36,5 @@ pub trait TransactionCommandRepositoryTrait {
 
     async fn restore_all(&self) -> Result<bool, RepositoryError>;
 
-    async fn delete_all_permanent(&self) -> Result<bool, RepositoryError>;
+    async fn delete_all(&self) -> Result<bool, RepositoryError>;
 }

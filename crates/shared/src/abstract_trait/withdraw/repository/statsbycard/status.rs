@@ -10,27 +10,27 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-pub type DynWithdrawStatsStatusByCardNumberRepository =
-    Arc<dyn WithdrawStatsStatusByCardNumberRepositoryTrait + Send + Sync>;
+pub type DynWithdrawStatsStatusByCardRepository =
+    Arc<dyn WithdrawStatsStatusByCardRepositoryTrait + Send + Sync>;
 
 #[async_trait]
-pub trait WithdrawStatsStatusByCardNumberRepositoryTrait {
-    async fn get_month_status_success_by_card_number(
+pub trait WithdrawStatsStatusByCardRepositoryTrait {
+    async fn get_month_status_success_by_card(
         &self,
         req: &MonthStatusWithdrawCardNumber,
     ) -> Result<Vec<WithdrawModelMonthStatusSuccess>, RepositoryError>;
 
-    async fn get_yearly_status_success_by_card_number(
+    async fn get_yearly_status_success_by_card(
         &self,
         req: &YearStatusWithdrawCardNumber,
     ) -> Result<Vec<WithdrawModelYearStatusSuccess>, RepositoryError>;
 
-    async fn get_month_status_failed_by_card_number(
+    async fn get_month_status_failed_by_card(
         &self,
         req: &MonthStatusWithdrawCardNumber,
     ) -> Result<Vec<WithdrawModelMonthStatusFailed>, RepositoryError>;
 
-    async fn get_yearly_status_failed_by_card_number(
+    async fn get_yearly_status_failed_by_card(
         &self,
         req: &YearStatusWithdrawCardNumber,
     ) -> Result<Vec<WithdrawModelYearStatusFailed>, RepositoryError>;

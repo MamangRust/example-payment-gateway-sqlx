@@ -10,11 +10,11 @@ pub type DynWithdrawStatsAmountService = Arc<dyn WithdrawStatsAmountServiceTrait
 
 #[async_trait]
 pub trait WithdrawStatsAmountServiceTrait {
-    async fn find_monthly_withdraws(
+    async fn get_monthly_withdraws(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<WithdrawMonthlyAmountResponse>>, ServiceError>;
-    async fn find_yearly_withdraws(
+    async fn get_yearly_withdraws(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<WithdrawYearlyAmountResponse>>, ServiceError>;

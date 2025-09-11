@@ -1,4 +1,5 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use prost_types::Timestamp;
 
 pub fn parse_datetime(value: &str) -> Option<String> {
     if value.is_empty() {
@@ -11,4 +12,39 @@ pub fn parse_datetime(value: &str) -> Option<String> {
 }
 pub fn parse_expiration_datetime(input: &str) -> Result<NaiveDateTime, chrono::ParseError> {
     NaiveDateTime::parse_from_str(input, "%Y-%m-%d %H:%M:%S")
+}
+
+pub fn timestamp_to_naive_date(ts: Option<Timestamp>) -> Option<NaiveDate> {
+    ts.and_then(|t| {
+        Utc.timestamp_opt(t.seconds, t.nanos as u32)
+            .single()
+            .map(|dt| dt.date_naive())
+    })
+}
+
+pub fn timestamp_to_naive_datetime(ts: Option<Timestamp>) -> Option<NaiveDateTime> {
+    ts.and_then(|t| {
+        Utc.timestamp_opt(t.seconds, t.nanos as u32)
+            .single()
+            .map(|dt| dt.naive_utc())
+    })
+}
+
+pub fn naive_date_to_timestamp(date: NaiveDate) -> Timestamp {
+    let dt = date.and_hms_opt(0, 0, 0).unwrap();
+    let dt_utc: DateTime<Utc> = Utc.from_utc_datetime(&dt);
+
+    Timestamp {
+        seconds: dt_utc.timestamp(),
+        nanos: dt_utc.timestamp_subsec_nanos() as i32,
+    }
+}
+
+pub fn naive_datetime_to_timestamp(datetime: NaiveDateTime) -> Timestamp {
+    let dt_utc: DateTime<Utc> = Utc.from_utc_datetime(&datetime);
+
+    Timestamp {
+        seconds: dt_utc.timestamp(),
+        nanos: dt_utc.timestamp_subsec_nanos() as i32,
+    }
 }

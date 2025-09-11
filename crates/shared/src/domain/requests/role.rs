@@ -30,7 +30,7 @@ pub struct CreateRoleRequest {
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct UpdateRoleRequest {
-    pub id: Option<i32>,
+    pub id: i32,
 
     #[validate(length(min = 1, message = "Nama role wajib diisi"))]
     pub name: String,

@@ -12,11 +12,11 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-pub type DynTransactionStatsStatusByCardNumberRepository =
-    Arc<dyn TransactionStatsStatusByCardNumberRepositoryTrait + Send + Sync>;
+pub type DynTransactionStatsStatusByCardRepository =
+    Arc<dyn TransactionStatsStatusByCardRepositoryTrait + Send + Sync>;
 
 #[async_trait]
-pub trait TransactionStatsStatusByCardNumberRepositoryTrait {
+pub trait TransactionStatsStatusByCardRepositoryTrait {
     async fn get_month_status_success(
         &self,
         req: &MonthStatusTransactionCardNumber,

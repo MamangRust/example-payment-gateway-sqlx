@@ -184,6 +184,12 @@ message ApiResponseWithdraw{
     WithdrawResponse data = 3;
 }
 
+message ApiResponseWithdrawDeleteAt{
+    string status = 1;
+    string message = 2;
+    WithdrawResponseDeleteAt data = 3;
+}
+
 message ApiResponseWithdrawDelete {
     string status = 1;
     string message = 2;
@@ -235,8 +241,8 @@ service WithdrawService {
     rpc FindByTrashed (FindAllWithdrawRequest) returns (ApiResponsePaginationWithdrawDeleteAt);
     rpc CreateWithdraw (CreateWithdrawRequest) returns (ApiResponseWithdraw);
     rpc UpdateWithdraw (UpdateWithdrawRequest) returns (ApiResponseWithdraw);
-    rpc TrashedWithdraw (FindByIdWithdrawRequest) returns (ApiResponseWithdraw);
-    rpc RestoreWithdraw (FindByIdWithdrawRequest) returns (ApiResponseWithdraw);
+    rpc TrashedWithdraw (FindByIdWithdrawRequest) returns (ApiResponseWithdrawDeleteAt);
+    rpc RestoreWithdraw (FindByIdWithdrawRequest) returns (ApiResponseWithdrawDeleteAt);
     rpc DeleteWithdrawPermanent (FindByIdWithdrawRequest) returns (ApiResponseWithdrawDelete);
 
     rpc RestoreAllWithdraw(google.protobuf.Empty) returns (ApiResponseWithdrawAll){}

@@ -23,11 +23,14 @@ pub enum ServiceError {
     #[error("Token has expired")]
     TokenExpired,
 
-    #[error("Invalid Token")]
+    #[error("Invalid token type")]
     InvalidTokenType,
 
-    #[error("Internal error: {0}")]
-    Internal(String),
+    #[error("Not found: {0}")]
+    NotFound(String),
+
+    #[error("Internal server error: {0}")]
+    InternalServerError(String),
 
     #[error("Custom error: {0}")]
     Custom(String),

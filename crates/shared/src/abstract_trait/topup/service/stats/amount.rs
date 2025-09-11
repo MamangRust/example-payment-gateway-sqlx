@@ -9,12 +9,12 @@ pub type DynTopupStatsAmountService = Arc<dyn TopupStatsAmountServiceTrait + Sen
 
 #[async_trait]
 pub trait TopupStatsAmountServiceTrait {
-    async fn get_monthly_topup_amounts(
+    async fn get_monthly_amounts(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TopupMonthAmountResponse>>, ServiceError>;
 
-    async fn get_yearly_topup_amounts(
+    async fn get_yearly_amounts(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TopupYearlyAmountResponse>>, ServiceError>;

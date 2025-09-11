@@ -9,27 +9,27 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-pub type DynTransferStatsAmountByCardNumberService =
-    Arc<dyn TransferStatsAmountByCardNumberServiceTrait + Send + Sync>;
+pub type DynTransferStatsAmountByCardService =
+    Arc<dyn TransferStatsAmountByCardServiceTrait + Send + Sync>;
 
 #[async_trait]
-pub trait TransferStatsAmountByCardNumberServiceTrait {
-    async fn find_monthly_transfer_amounts_by_sender_card_number(
+pub trait TransferStatsAmountByCardServiceTrait {
+    async fn get_monthly_amounts_by_sender(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, ServiceError>;
 
-    async fn find_monthly_transfer_amounts_by_receiver_card_number(
+    async fn get_monthly_amounts_by_receiver(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, ServiceError>;
 
-    async fn find_yearly_transfer_amounts_by_sender_card_number(
+    async fn get_yearly_amounts_by_sender(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, ServiceError>;
 
-    async fn find_yearly_transfer_amounts_by_receiver_card_number(
+    async fn get_yearly_amounts_by_receiver(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, ServiceError>;

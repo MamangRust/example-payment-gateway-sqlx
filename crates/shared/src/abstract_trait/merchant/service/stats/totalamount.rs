@@ -1,5 +1,7 @@
 use crate::{
-    domain::responses::{MerchantResponseMonthlyTotalAmount, MerchantResponseYearlyTotalAmount},
+    domain::responses::{
+        ApiResponse, MerchantResponseMonthlyTotalAmount, MerchantResponseYearlyTotalAmount,
+    },
     errors::ServiceError,
 };
 use anyhow::Result;
@@ -14,9 +16,9 @@ pub trait MerchantStatsTotalAmountServiceTrait {
     async fn get_monthly_total_amount(
         &self,
         year: i32,
-    ) -> Result<Vec<MerchantResponseMonthlyTotalAmount>, ServiceError>;
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyTotalAmount>>, ServiceError>;
     async fn get_yearly_total_amount(
         &self,
         year: i32,
-    ) -> Result<Vec<MerchantResponseYearlyTotalAmount>, ServiceError>;
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyTotalAmount>>, ServiceError>;
 }

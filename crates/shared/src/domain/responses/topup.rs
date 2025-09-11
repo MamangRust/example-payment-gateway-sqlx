@@ -112,7 +112,7 @@ pub struct TopupYearlyAmountResponse {
 impl From<TopupModel> for TopupResponse {
     fn from(model: TopupModel) -> Self {
         Self {
-            id: model.id,
+            id: model.topup_id,
             card_number: model.card_number,
             topup_no: model.topup_no,
             topup_amount: model.topup_amount,
@@ -127,7 +127,7 @@ impl From<TopupModel> for TopupResponse {
 impl From<TopupModel> for TopupResponseDeleteAt {
     fn from(model: TopupModel) -> Self {
         Self {
-            id: model.id,
+            id: model.topup_id,
             card_number: model.card_number,
             topup_no: model.topup_no,
             topup_amount: model.topup_amount,

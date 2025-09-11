@@ -27,5 +27,6 @@ pub trait TopupQueryRepositoryTrait {
         &self,
         request: &FindAllTopups,
     ) -> Result<(Vec<TopupModel>, i64), RepositoryError>;
+    async fn find_by_card(&self, card_number: &str) -> Result<Vec<TopupModel>, RepositoryError>;
     async fn find_by_id(&self, id: i32) -> Result<TopupModel, RepositoryError>;
 }

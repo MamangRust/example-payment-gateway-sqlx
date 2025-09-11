@@ -20,10 +20,14 @@ pub trait SaldoQueryServiceTrait {
     async fn find_active(
         &self,
         request: &FindAllSaldos,
-    ) -> Result<ApiResponsePagination<Vec<SaldoResponse>>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<SaldoResponseDeleteAt>>, ServiceError>;
     async fn find_trashed(
         &self,
         request: &FindAllSaldos,
     ) -> Result<ApiResponsePagination<Vec<SaldoResponseDeleteAt>>, ServiceError>;
+    async fn find_by_card(
+        &self,
+        card_number: &str,
+    ) -> Result<ApiResponse<SaldoResponse>, ServiceError>;
     async fn find_by_id(&self, id: i32) -> Result<ApiResponse<SaldoResponse>, ServiceError>;
 }

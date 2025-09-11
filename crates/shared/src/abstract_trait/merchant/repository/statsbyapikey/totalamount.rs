@@ -18,6 +18,6 @@ pub trait MerchantStatsTotalAmountByApiKeyRepositoryTrait {
     ) -> Result<Vec<MerchantMonthlyTotalAmount>, RepositoryError>;
     async fn get_yearly_total_amount(
         &self,
-        year: &MonthYearTotalAmountApiKey,
+        req: &MonthYearTotalAmountApiKey,
     ) -> Result<Vec<MerchantYearlyTotalAmount>, RepositoryError>;
 }

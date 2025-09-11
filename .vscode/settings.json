@@ -1,20 +1,3 @@
 // {
-//   // Jangan auto jalanin cargo check tiap save
-//   "rust-analyzer.checkOnSave.enable": false,
-
-//   // Biar lebih cepat, hanya check workspace crate, bukan semua dep
-//   "rust-analyzer.cargo.buildScripts.enable": false,
-//   "rust-analyzer.procMacro.enable": true, // kalau matiin bisa lebih cepat, tapi derive hilang
-
-//   // Batasi jumlah job cargo check
-//   "rust-analyzer.cargo.runBuildScripts": false,
-
-//   // Matikan semantic highlighting (cukup syntax highlight biasa)
-//   "rust-analyzer.highlighting.semantic": false,
-
-//   // Inlay hints bikin rame & berat, bisa dimatiin
-//   "rust-analyzer.inlayHints.enable": false,
-
-//   // Gunakan luar cargo untuk linting manual
-//   "rust-analyzer.checkOnSave.command": "clippy"
+//     "rust-analyzer.checkOnSave.enable": false
 // }

@@ -20,6 +20,15 @@ impl MerchantTransactionRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
@@ -28,16 +37,10 @@ impl MerchantTransactionRepositoryTrait for MerchantTransactionRepository {
         &self,
         req: &FindAllMerchantTransactions,
     ) -> Result<(Vec<MerchantTransactionsModel>, i64), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
-        info!(
-            "🔍 Fetching all transaction merchants with search: {:?}",
-            req.search
-        );
-
-        let limit = req.page_size.max(1).min(100);
-
-        let offset = (req.page - 1).max(0) + limit;
+        let limit = req.page_size.clamp(1, 100);
+        let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
             None
@@ -76,8 +79,8 @@ impl MerchantTransactionRepositoryTrait for MerchantTransactionRepository {
         ).fetch_all(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to fetch all merchants: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to fetch all merchants: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         let total = rows.first().and_then(|r| r.total_count).unwrap_or(0);
@@ -105,7 +108,7 @@ impl MerchantTransactionRepositoryTrait for MerchantTransactionRepository {
         &self,
         req: &FindAllMerchantTransactionsByApiKey,
     ) -> Result<(Vec<MerchantTransactionsModel>, i64), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         info!(
             "🔍 Fetching transactions for api_key: {} with search: {:?}",
@@ -155,8 +158,8 @@ impl MerchantTransactionRepositoryTrait for MerchantTransactionRepository {
         ).fetch_all(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to fetch all merchants: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to fetch all merchants: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         let total = rows.first().and_then(|r| r.total_count).unwrap_or(0);
@@ -183,12 +186,7 @@ impl MerchantTransactionRepositoryTrait for MerchantTransactionRepository {
         &self,
         req: &FindAllMerchantTransactionsById,
     ) -> Result<(Vec<MerchantTransactionsModel>, i64), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
-
-        info!(
-            "🔍 Fetching transactions for merchant_id: {} with search: {:?}",
-            req.merchant_id, req.search
-        );
+        let mut conn = self.get_conn().await?;
 
         let limit = req.page_size.max(1).min(100);
 
@@ -233,8 +231,8 @@ impl MerchantTransactionRepositoryTrait for MerchantTransactionRepository {
         ).fetch_all(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to fetch all merchants: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to fetch all merchants: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         let total = rows.first().and_then(|r| r.total_count).unwrap_or(0);

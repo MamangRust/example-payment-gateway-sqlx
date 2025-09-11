@@ -1,6 +1,8 @@
 use crate::{
-    domain::requests::transaction::{CreateTransactionRequest, UpdateTransactionRequest},
-    domain::responses::{ApiResponse, TransactionResponse},
+    domain::{
+        requests::transaction::{CreateTransactionRequest, UpdateTransactionRequest},
+        responses::{ApiResponse, TransactionResponse, TransactionResponseDeleteAt},
+    },
     errors::ServiceError,
 };
 use anyhow::Result;
@@ -13,22 +15,22 @@ pub type DynTransactionCommandService = Arc<dyn TransactionCommandServiceTrait +
 pub trait TransactionCommandServiceTrait {
     async fn create(
         &self,
-        api_key: String,
+        api_key: &str,
         req: &CreateTransactionRequest,
     ) -> Result<ApiResponse<TransactionResponse>, ServiceError>;
     async fn update(
         &self,
-        api_key: String,
+        api_key: &str,
         req: &UpdateTransactionRequest,
     ) -> Result<ApiResponse<TransactionResponse>, ServiceError>;
     async fn trashed(
         &self,
         transaction_id: i32,
-    ) -> Result<ApiResponse<TransactionResponse>, ServiceError>;
+    ) -> Result<ApiResponse<TransactionResponseDeleteAt>, ServiceError>;
     async fn restore(
         &self,
         transaction_id: i32,
-    ) -> Result<ApiResponse<TransactionResponse>, ServiceError>;
+    ) -> Result<ApiResponse<TransactionResponseDeleteAt>, ServiceError>;
     async fn delete_permanent(
         &self,
         transaction_id: i32,

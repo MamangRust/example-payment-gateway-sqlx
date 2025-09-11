@@ -19,5 +19,6 @@ pub trait SaldoTotalBalanceGrpcClientTrait {
     ) -> Result<ApiResponse<Vec<SaldoMonthTotalBalanceResponse>>, AppErrorHttp>;
     async fn get_year_total_balance(
         &self,
+        year: i32,
     ) -> Result<ApiResponse<Vec<SaldoYearTotalBalanceResponse>>, AppErrorHttp>;
 }

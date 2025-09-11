@@ -4,12 +4,13 @@ use sqlx::FromRow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct TransferModel {
-    pub id: i32,
+    pub transfer_id: i32,
     pub transfer_no: String,
     pub transfer_from: String,
     pub transfer_to: String,
     pub transfer_amount: i64,
-    pub transfer_time: String,
+    pub transfer_time: NaiveDateTime,
+    pub status: String,
     pub created_at: Option<NaiveDateTime>,
     pub updated_at: Option<NaiveDateTime>,
     pub deleted_at: Option<NaiveDateTime>,

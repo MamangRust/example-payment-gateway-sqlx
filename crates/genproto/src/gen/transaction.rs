@@ -302,6 +302,15 @@ pub struct ApiResponseTransaction {
     #[prost(message, optional, tag = "3")]
     pub data: ::core::option::Option<TransactionResponse>,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApiResponseTransactionDeleteAt {
+    #[prost(string, tag = "1")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub data: ::core::option::Option<TransactionResponseDeleteAt>,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApiResponseTransactions {
     #[prost(string, tag = "1")]
@@ -1150,7 +1159,7 @@ pub mod transaction_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdTransactionRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseTransaction>,
+            tonic::Response<super::ApiResponseTransactionDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -1179,7 +1188,7 @@ pub mod transaction_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdTransactionRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseTransaction>,
+            tonic::Response<super::ApiResponseTransactionDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -1478,14 +1487,14 @@ pub mod transaction_service_server {
             &self,
             request: tonic::Request<super::FindByIdTransactionRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseTransaction>,
+            tonic::Response<super::ApiResponseTransactionDeleteAt>,
             tonic::Status,
         >;
         async fn restore_transaction(
             &self,
             request: tonic::Request<super::FindByIdTransactionRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseTransaction>,
+            tonic::Response<super::ApiResponseTransactionDeleteAt>,
             tonic::Status,
         >;
         async fn delete_transaction_permanent(
@@ -2853,7 +2862,7 @@ pub mod transaction_service_server {
                         T: TransactionService,
                     > tonic::server::UnaryService<super::FindByIdTransactionRequest>
                     for TrashedTransactionSvc<T> {
-                        type Response = super::ApiResponseTransaction;
+                        type Response = super::ApiResponseTransactionDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -2902,7 +2911,7 @@ pub mod transaction_service_server {
                         T: TransactionService,
                     > tonic::server::UnaryService<super::FindByIdTransactionRequest>
                     for RestoreTransactionSvc<T> {
-                        type Response = super::ApiResponseTransaction;
+                        type Response = super::ApiResponseTransactionDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,

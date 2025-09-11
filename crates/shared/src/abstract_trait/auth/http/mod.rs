@@ -10,16 +10,16 @@ use crate::{
     errors::AppErrorHttp,
 };
 
-pub type DynAuthService = Arc<dyn AuthServiceTrait + Send + Sync>;
+pub type DynAuthGrpcClient = Arc<dyn AuthGrpcClientTrait + Send + Sync>;
 
 #[async_trait]
-pub trait AuthServiceTrait {
+pub trait AuthGrpcClientTrait {
     async fn login(
         &self,
         request: &AuthRequest,
     ) -> Result<ApiResponse<TokenResponse>, AppErrorHttp>;
-    async fn get_me(&self) -> Result<ApiResponse<UserResponse>, AppErrorHttp>;
-    async fn refresh_token(&self) -> Result<ApiResponse<TokenResponse>, AppErrorHttp>;
+    async fn get_me(&self, id: i32) -> Result<ApiResponse<UserResponse>, AppErrorHttp>;
+    async fn refresh_token(&self, token: &str) -> Result<ApiResponse<TokenResponse>, AppErrorHttp>;
     async fn register(
         &self,
         request: &RegisterRequest,

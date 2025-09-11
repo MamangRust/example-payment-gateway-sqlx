@@ -6,7 +6,7 @@ use sqlx::FromRow;
 pub struct SaldoModel {
     pub saldo_id: i32,
     pub card_number: String,
-    pub total_balance: i32,
+    pub total_balance: i64,
     pub withdraw_amount: Option<i32>,
     pub withdraw_time: Option<NaiveDateTime>,
     pub created_at: Option<NaiveDateTime>,

@@ -23,7 +23,7 @@ message RefreshTokenRequest{
 }
 
 message GetMeRequest{
-    string access_token = 1;
+    int32 id = 1;
 }
 
 message TokenResponse {

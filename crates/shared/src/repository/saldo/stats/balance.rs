@@ -6,7 +6,9 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::NaiveDate;
+use sqlx::Row;
+use tracing::error;
 
 pub struct SaldoBalanceRepository {
     db: ConnectionPool,
@@ -16,6 +18,15 @@ impl SaldoBalanceRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
@@ -24,16 +35,14 @@ impl SaldoBalanceRepositoryTrait for SaldoBalanceRepository {
         &self,
         year: i32,
     ) -> Result<Vec<SaldoMonthSaldoBalance>, RepositoryError> {
-        let date = NaiveDate::from_ymd_opt(year, 1, 1)
-            .ok_or_else(|| RepositoryError::Custom("Invalid year".into()))?;
+        let mut conn = self.get_conn().await?;
 
-        let year_start: NaiveDateTime = date
+        let year_start = NaiveDate::from_ymd_opt(year, 1, 1)
+            .ok_or_else(|| RepositoryError::Custom("Invalid year".to_string()))?
             .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| RepositoryError::Custom("Invalid datetime".into()))?;
+            .unwrap();
 
-        let results = sqlx::query_as!(
-            SaldoMonthSaldoBalance,
-            r#"
+        let sql = r#"
             WITH months AS (
                 SELECT generate_series(
                     date_trunc('year', $1::timestamp),
@@ -42,8 +51,8 @@ impl SaldoBalanceRepositoryTrait for SaldoBalanceRepository {
                 ) AS month
             )
             SELECT
-                TO_CHAR(m.month, 'Mon') AS "month!",
-                COALESCE(SUM(s.total_balance), 0)::bigint AS "total_balance!"
+                TO_CHAR(m.month, 'Mon') AS month,
+                COALESCE(SUM(s.total_balance), 0)::bigint AS total_balance
             FROM
                 months m
             LEFT JOIN
@@ -53,28 +62,43 @@ impl SaldoBalanceRepositoryTrait for SaldoBalanceRepository {
             GROUP BY
                 m.month
             ORDER BY
-                m.month
-            "#,
-            year_start
-        )
-        .fetch_all(&self.db)
-        .await
-        .map_err(RepositoryError::from)?;
+                m.month;
+        "#;
 
-        Ok(results)
+        let rows = sqlx::query(sql)
+            .bind(year_start)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("❌ Database error in get_month_balance: {e:?}");
+                RepositoryError::Sqlx(e)
+            })?;
+
+        let mut result = Vec::with_capacity(12);
+        for row in rows {
+            let month: String = row.try_get("month")?;
+            let total_balance: i64 = row.try_get("total_balance")?;
+
+            result.push(SaldoMonthSaldoBalance {
+                month,
+                total_balance,
+            });
+        }
+
+        Ok(result)
     }
 
     async fn get_year_balance(
         &self,
         year: i32,
     ) -> Result<Vec<SaldoYearSaldoBalance>, RepositoryError> {
-        let results = sqlx::query_as!(
-            SaldoYearSaldoBalance,
-            r#"
+        let mut conn = self.get_conn().await?;
+
+        let sql = r#"
             WITH last_five_years AS (
                 SELECT
-                    EXTRACT(YEAR FROM s.created_at)::int AS year,
-                    COALESCE(SUM(s.total_balance), 0)::bigint AS total_balance
+                    EXTRACT(YEAR FROM s.created_at) AS year,
+                    SUM(s.total_balance) AS total_balance
                 FROM
                     saldos s
                 WHERE
@@ -85,19 +109,34 @@ impl SaldoBalanceRepositoryTrait for SaldoBalanceRepository {
                     EXTRACT(YEAR FROM s.created_at)
             )
             SELECT
-                year::text AS "year!",
-                total_balance AS "total_balance!"
+                year::text,
+                total_balance::bigint
             FROM
                 last_five_years
             ORDER BY
-                year
-            "#,
-            year
-        )
-        .fetch_all(&self.db)
-        .await
-        .map_err(RepositoryError::from)?;
+                year;
+        "#;
 
-        Ok(results)
+        let rows = sqlx::query(sql)
+            .bind(year)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("❌ Database error in get_year_balance: {e:?}");
+                RepositoryError::Sqlx(e)
+            })?;
+
+        let mut result = Vec::with_capacity(5);
+        for row in rows {
+            let year_str: String = row.try_get("year")?;
+            let total_balance: i64 = row.try_get("total_balance")?;
+
+            result.push(SaldoYearSaldoBalance {
+                year: year_str,
+                total_balance,
+            });
+        }
+
+        Ok(result)
     }
 }

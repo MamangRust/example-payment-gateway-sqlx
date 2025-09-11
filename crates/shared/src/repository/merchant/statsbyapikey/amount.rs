@@ -1,5 +1,5 @@
 use crate::{
-    abstract_trait::merchant::repository::statsbyapikey::MerchantStatsAmountByApiKeyRepositoryTrait,
+    abstract_trait::merchant::repository::statsbyapikey::amount::MerchantStatsAmountByApiKeyRepositoryTrait,
     config::ConnectionPool,
     domain::requests::merchant::MonthYearAmountApiKey,
     errors::RepositoryError,
@@ -7,7 +7,9 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::NaiveDate;
+use sqlx::Row;
+use tracing::error;
 
 pub struct MerchantStatsAmountByApiKeyRepository {
     db: ConnectionPool,
@@ -17,6 +19,15 @@ impl MerchantStatsAmountByApiKeyRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
@@ -25,18 +36,14 @@ impl MerchantStatsAmountByApiKeyRepositoryTrait for MerchantStatsAmountByApiKeyR
         &self,
         req: &MonthYearAmountApiKey,
     ) -> Result<Vec<MerchantMonthlyAmount>, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
-        let date = NaiveDate::from_ymd_opt(req.year, 1, 1)
-            .ok_or_else(|| RepositoryError::Custom("Invalid year".into()))?;
-
-        let year_start: NaiveDateTime = date
+        let year_start = NaiveDate::from_ymd_opt(req.year, 1, 1)
+            .ok_or_else(|| RepositoryError::Custom("Invalid year".to_string()))?
             .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| RepositoryError::Custom("Invalid datetime".into()))?;
+            .unwrap();
 
-        let results = sqlx::query_as!(
-            MerchantMonthlyAmount,
-            r#"
+        let sql = r#"
             WITH months AS (
                 SELECT generate_series(
                     date_trunc('year', $1::timestamp),
@@ -45,8 +52,8 @@ impl MerchantStatsAmountByApiKeyRepositoryTrait for MerchantStatsAmountByApiKeyR
                 ) AS month
             )
             SELECT
-                TO_CHAR(m.month, 'Mon') AS "month!",
-                COALESCE(SUM(t.amount), 0)::bigint AS "total_amount!"
+                TO_CHAR(m.month, 'Mon') AS month,
+                COALESCE(SUM(t.amount), 0)::bigint AS total_amount
             FROM
                 months m
             LEFT JOIN
@@ -60,31 +67,44 @@ impl MerchantStatsAmountByApiKeyRepositoryTrait for MerchantStatsAmountByApiKeyR
             GROUP BY
                 m.month
             ORDER BY
-                m.month
-            "#,
-            year_start,
-            req.api_key
-        )
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(RepositoryError::from)?;
+                m.month;
+        "#;
 
-        Ok(results)
+        let rows = sqlx::query(sql)
+            .bind(year_start)
+            .bind(&req.api_key)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("❌ Database error in get_monthly_amount: {e:?}");
+                RepositoryError::Sqlx(e)
+            })?;
+
+        let mut result = Vec::with_capacity(12);
+        for row in rows {
+            let month: String = row.try_get("month")?;
+            let total_amount: i64 = row.try_get("total_amount")?;
+
+            result.push(MerchantMonthlyAmount {
+                month,
+                total_amount,
+            });
+        }
+
+        Ok(result)
     }
 
     async fn get_yearly_amount(
         &self,
         req: &MonthYearAmountApiKey,
     ) -> Result<Vec<MerchantYearlyAmount>, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
-        let results = sqlx::query_as!(
-            MerchantYearlyAmount,
-            r#"
+        let sql = r#"
             WITH last_five_years AS (
                 SELECT
-                    EXTRACT(YEAR FROM t.transaction_time)::TEXT AS year,
-                    COALESCE(SUM(t.amount), 0)::bigint AS total_amount
+                    EXTRACT(YEAR FROM t.transaction_time) AS year,
+                    SUM(t.amount) AS total_amount
                 FROM
                     transactions t
                 JOIN
@@ -92,27 +112,39 @@ impl MerchantStatsAmountByApiKeyRepositoryTrait for MerchantStatsAmountByApiKeyR
                 WHERE
                     t.deleted_at IS NULL
                     AND m.deleted_at IS NULL
-                    AND m.api_key = $2
-                    AND EXTRACT(YEAR FROM t.transaction_time) >= $1 - 4
-                    AND EXTRACT(YEAR FROM t.transaction_time) <= $1
+                    AND m.api_key = $1
+                    AND EXTRACT(YEAR FROM t.transaction_time) >= $2 - 4
+                    AND EXTRACT(YEAR FROM t.transaction_time) <= $2
                 GROUP BY
                     EXTRACT(YEAR FROM t.transaction_time)
             )
             SELECT
-                year AS "year!",
-                total_amount AS "total_amount!"
+                year::text,
+                total_amount::bigint
             FROM
                 last_five_years
             ORDER BY
-                year
-            "#,
-            req.year,
-            req.api_key
-        )
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(RepositoryError::from)?;
+                year;
+        "#;
 
-        Ok(results)
+        let rows = sqlx::query(sql)
+            .bind(&req.api_key)
+            .bind(req.year)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("❌ Database error in get_yearly_amount: {e:?}");
+                RepositoryError::Sqlx(e)
+            })?;
+
+        let mut result = Vec::with_capacity(5);
+        for row in rows {
+            let year: String = row.try_get("year")?;
+            let total_amount: i64 = row.try_get("total_amount")?;
+
+            result.push(MerchantYearlyAmount { year, total_amount });
+        }
+
+        Ok(result)
     }
 }

@@ -38,7 +38,7 @@ pub struct CreateSaldoRequest {
     pub card_number: String,
 
     #[validate(range(min = 1, message = "Total balance wajib diisi"))]
-    pub total_balance: i32,
+    pub total_balance: i64,
 }
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
@@ -49,7 +49,7 @@ pub struct UpdateSaldoRequest {
     pub card_number: String,
 
     #[validate(range(min = 1, message = "Total balance wajib diisi"))]
-    pub total_balance: i32,
+    pub total_balance: i64,
 }
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
@@ -58,7 +58,7 @@ pub struct UpdateSaldoBalance {
     pub card_number: String,
 
     #[validate(range(min = 50000, message = "Minimal saldo 50.000"))]
-    pub total_balance: i32,
+    pub total_balance: i64,
 }
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]

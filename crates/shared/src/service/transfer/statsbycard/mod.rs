@@ -1,9 +1,2 @@
-mod amount;
-mod status;
-
-pub use self::amount::{
-    DynTransferStatsAmountByCardNumberService, TransferStatsAmountByCardNumberServiceTrait,
-};
-pub use self::status::{
-    DynTransferStatsStatusByCardNumberService, TransferStatsStatusByCardNumberServiceTrait,
-};
+pub mod amount;
+pub mod status;

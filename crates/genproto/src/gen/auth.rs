@@ -24,10 +24,10 @@ pub struct RefreshTokenRequest {
     #[prost(string, tag = "1")]
     pub refresh_token: ::prost::alloc::string::String,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetMeRequest {
-    #[prost(string, tag = "1")]
-    pub access_token: ::prost::alloc::string::String,
+    #[prost(int32, tag = "1")]
+    pub id: i32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TokenResponse {

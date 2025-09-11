@@ -1,10 +1,10 @@
 use crate::{
-    abstract_trait::card::repository::CardQueryRepositoryTrait, config::ConnectionPool,
+    abstract_trait::card::repository::query::CardQueryRepositoryTrait, config::ConnectionPool,
     domain::requests::card::FindAllCards, errors::RepositoryError, model::card::CardModel,
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::{error, info};
+use tracing::error;
 
 pub struct CardQueryRepository {
     db: ConnectionPool,
@@ -14,16 +14,23 @@ impl CardQueryRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
 impl CardQueryRepositoryTrait for CardQueryRepository {
     async fn find_all(&self, req: &FindAllCards) -> Result<(Vec<CardModel>, i64), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
-        info!("🔍 Fetching all cards with search: {:?}", req.search);
-
-        let limit = req.page_size.max(1).min(100);
+        let limit = req.page_size.clamp(1, 100);
         let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
@@ -62,8 +69,8 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to fetch cards: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to fetch cards: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         let total = rows.first().and_then(|r| r.total_count).unwrap_or(0);
@@ -91,9 +98,7 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
         &self,
         req: &FindAllCards,
     ) -> Result<(Vec<CardModel>, i64), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
-
-        info!("🔍 Fetching active cards with search: {:?}", req.search);
+        let mut conn = self.get_conn().await?;
 
         let limit = req.page_size.max(1).min(100);
         let offset = (req.page - 1).max(0) * limit;
@@ -134,8 +139,8 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to fetch active cards: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to fetch active cards: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         let total = rows.first().and_then(|r| r.total_count).unwrap_or(0);
@@ -163,9 +168,7 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
         &self,
         req: &FindAllCards,
     ) -> Result<(Vec<CardModel>, i64), RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
-
-        info!("🔍 Fetching trashed cards with search: {:?}", req.search);
+        let mut conn = self.get_conn().await?;
 
         let limit = req.page_size.max(1).min(100);
         let offset = (req.page - 1).max(0) * limit;
@@ -206,8 +209,8 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to fetch trashed cards: {:?}", e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to fetch trashed cards: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         let total = rows.first().and_then(|r| r.total_count).unwrap_or(0);
@@ -232,9 +235,7 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
     }
 
     async fn find_by_id(&self, id: i32) -> Result<CardModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
-
-        info!("🔍 Fetching card by ID: {}", id);
+        let mut conn = self.get_conn().await?;
 
         let row = sqlx::query!(
             r#"
@@ -257,8 +258,8 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
         .fetch_optional(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to fetch card by ID {}: {:?}", id, e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to fetch card by ID {id}: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         match row {
@@ -278,13 +279,8 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
         }
     }
 
-    async fn find_card_by_card_number(
-        &self,
-        card_number: String,
-    ) -> Result<CardModel, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
-
-        info!("🔍 Fetching card by card number: {}", card_number);
+    async fn find_by_card(&self, card_number: &str) -> Result<CardModel, RepositoryError> {
+        let mut conn = self.get_conn().await?;
 
         let row = sqlx::query!(
             r#"
@@ -307,8 +303,8 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
         .fetch_optional(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to fetch card by number {}: {:?}", card_number, e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to fetch card by number {card_number}: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
         match row {
@@ -328,53 +324,47 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
         }
     }
 
-    async fn find_card_by_user_id(&self, user_id: i32) -> Result<Vec<CardModel>, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+    async fn find_by_user_id(&self, user_id: i32) -> Result<CardModel, RepositoryError> {
+        let mut conn = self.get_conn().await?;
 
-        info!("🔍 Fetching cards by user_id: {}", user_id);
-
-        let rows = sqlx::query!(
+        let row = sqlx::query!(
             r#"
-            SELECT
-                c.card_id,
-                c.user_id,
-                c.card_number,
-                c.card_type,
-                c.expire_date,
-                c.cvv,
-                c.card_provider,
-                c.created_at,
-                c.updated_at,
-                c.deleted_at
-            FROM cards c
-            WHERE c.user_id = $1 AND c.deleted_at IS NULL
-            ORDER BY c.card_id
-            "#,
+        SELECT
+            c.card_id,
+            c.user_id,
+            c.card_number,
+            c.card_type,
+            c.expire_date,
+            c.cvv,
+            c.card_provider,
+            c.created_at,
+            c.updated_at,
+            c.deleted_at
+        FROM cards c
+        WHERE c.user_id = $1 AND c.deleted_at IS NULL
+        ORDER BY c.card_id
+        LIMIT 1
+        "#,
             user_id
         )
-        .fetch_all(&mut *conn)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| {
-            error!("❌ Failed to fetch cards by user_id {}: {:?}", user_id, e);
-            RepositoryError::Sqlx(e.into())
+            error!("❌ Failed to fetch card by user_id {user_id}: {e:?}");
+            RepositoryError::Sqlx(e)
         })?;
 
-        let cards = rows
-            .into_iter()
-            .map(|r| CardModel {
-                card_id: r.card_id,
-                user_id: r.user_id,
-                card_number: r.card_number,
-                card_type: r.card_type,
-                expire_date: r.expire_date,
-                cvv: r.cvv,
-                card_provider: r.card_provider,
-                created_at: r.created_at,
-                updated_at: r.updated_at,
-                deleted_at: r.deleted_at,
-            })
-            .collect();
-
-        Ok(cards)
+        Ok(CardModel {
+            card_id: row.card_id,
+            user_id: row.user_id,
+            card_number: row.card_number,
+            card_type: row.card_type,
+            expire_date: row.expire_date,
+            cvv: row.cvv,
+            card_provider: row.card_provider,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            deleted_at: row.deleted_at,
+        })
     }
 }

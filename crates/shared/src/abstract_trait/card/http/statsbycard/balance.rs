@@ -17,9 +17,9 @@ pub trait CardStatsBalanceByCardGrpcClientTrait {
     async fn get_monthly_balance(
         &self,
         req: &MonthYearCardNumberCard,
-    ) -> Result<ApiResponse<CardResponseMonthBalance>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<CardResponseMonthBalance>>, AppErrorHttp>;
     async fn get_yearly_balance(
         &self,
         req: &MonthYearCardNumberCard,
-    ) -> Result<ApiResponse<CardResponseYearlyBalance>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<CardResponseYearlyBalance>>, AppErrorHttp>;
 }

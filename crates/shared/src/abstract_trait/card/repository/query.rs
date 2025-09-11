@@ -22,9 +22,9 @@ pub trait CardQueryRepositoryTrait {
         request: &FindAllCards,
     ) -> Result<(Vec<CardModel>, i64), RepositoryError>;
     async fn find_by_id(&self, id: i32) -> Result<CardModel, RepositoryError>;
-    async fn find_card_by_card_number(
+    async fn find_by_card(
         &self,
-        card_number: String,
+        card_number: &str,
     ) -> Result<CardModel, RepositoryError>;
-    async fn find_card_by_user_id(&self, user_id: i32) -> Result<Vec<CardModel>, RepositoryError>;
+    async fn find_by_user_id(&self, user_id: i32) -> Result<CardModel, RepositoryError>;
 }

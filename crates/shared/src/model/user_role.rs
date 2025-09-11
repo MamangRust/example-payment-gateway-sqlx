@@ -10,8 +10,6 @@ pub struct UserRoleModel {
     pub user_id: i32,
     #[serde(rename = "role_id")]
     pub role_id: i32,
-    #[serde(rename = "role_name", skip_serializing_if = "Option::is_none")]
-    pub role_name: Option<String>,
     pub created_at: Option<NaiveDateTime>,
     pub updated_at: Option<NaiveDateTime>,
     pub deleted_at: Option<NaiveDateTime>,

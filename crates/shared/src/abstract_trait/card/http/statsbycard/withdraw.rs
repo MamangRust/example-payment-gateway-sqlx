@@ -17,9 +17,9 @@ pub trait CardStatsWithdrawByCardGrpcClientTrait {
     async fn get_monthly_amount(
         &self,
         req: &MonthYearCardNumberCard,
-    ) -> Result<ApiResponse<CardResponseMonthAmount>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp>;
     async fn get_yearly_amount(
         &self,
         req: &MonthYearCardNumberCard,
-    ) -> Result<ApiResponse<CardResponseYearAmount>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp>;
 }

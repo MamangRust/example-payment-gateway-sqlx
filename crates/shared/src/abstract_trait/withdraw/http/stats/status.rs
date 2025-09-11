@@ -17,19 +17,19 @@ pub type DynWithdrawStatsStatusGrpcClient =
 
 #[async_trait]
 pub trait WithdrawStatsStatusGrpcClientTrait {
-    async fn find_month_status_success(
+    async fn get_month_status_success(
         &self,
         req: &MonthStatusWithdraw,
     ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusSuccess>>, AppErrorHttp>;
-    async fn find_yearly_status_success(
+    async fn get_yearly_status_success(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusSuccess>>, AppErrorHttp>;
-    async fn find_month_status_failed(
+    async fn get_month_status_failed(
         &self,
         req: &MonthStatusWithdraw,
     ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusFailed>>, AppErrorHttp>;
-    async fn find_yearly_status_failed(
+    async fn get_yearly_status_failed(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusFailed>>, AppErrorHttp>;

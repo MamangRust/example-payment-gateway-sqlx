@@ -7,24 +7,24 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-pub type DynTransferStatsAmountByCardNumberRepository =
-    Arc<dyn TransferStatsAmountByCardNumberRepositoryTrait + Send + Sync>;
+pub type DynTransferStatsAmountByCardRepository =
+    Arc<dyn TransferStatsAmountByCardRepositoryTrait + Send + Sync>;
 
 #[async_trait]
-pub trait TransferStatsAmountByCardNumberRepositoryTrait {
-    async fn get_monthly_transfer_amounts_by_sender_card_number(
+pub trait TransferStatsAmountByCardRepositoryTrait {
+    async fn get_monthly_amounts_by_sender_card(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<Vec<TransferMonthAmount>, RepositoryError>;
-    async fn get_yearly_transfer_amounts_by_sender_card_number(
+    async fn get_yearly_amounts_by_sender_card(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<Vec<TransferYearAmount>, RepositoryError>;
-    async fn get_monthly_transfer_amounts_by_receiver_card_number(
+    async fn get_monthly_amounts_by_receiver_card(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<Vec<TransferMonthAmount>, RepositoryError>;
-    async fn get_yearly_transfer_amounts_by_receiver_card_number(
+    async fn get_yearly_amounts_by_receiver_card(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<Vec<TransferYearAmount>, RepositoryError>;

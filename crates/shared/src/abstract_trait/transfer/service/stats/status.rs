@@ -16,20 +16,20 @@ pub type DynTransferStatsStatusService = Arc<dyn TransferStatsStatusServiceTrait
 
 #[async_trait]
 pub trait TransferStatsStatusServiceTrait {
-    async fn find_month_status_success(
+    async fn get_month_status_success(
         &self,
         req: &MonthStatusTransfer,
     ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusSuccess>>, ServiceError>;
 
-    async fn find_yearly_status_success(
+    async fn get_yearly_status_success(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TransferResponseYearStatusSuccess>>, ServiceError>;
-    async fn find_month_transfer_status_failed(
+    async fn get_month_status_failed(
         &self,
         req: &MonthStatusTransfer,
     ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusFailed>>, ServiceError>;
-    async fn find_yearly_status_failed(
+    async fn get_yearly_status_failed(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TransferResponseYearStatusFailed>>, ServiceError>;

@@ -4,12 +4,13 @@ use sqlx::FromRow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct TopupModel {
-    pub id: i32,
+    pub topup_id: i32,
     pub card_number: String,
     pub topup_no: String,
     pub topup_amount: i64,
     pub topup_method: String,
-    pub topup_time: String,
+    pub topup_time: NaiveDateTime,
+    pub status: String,
     pub created_at: Option<NaiveDateTime>,
     pub updated_at: Option<NaiveDateTime>,
     pub deleted_at: Option<NaiveDateTime>,

@@ -151,6 +151,15 @@ pub struct ApiResponseCard {
     pub data: ::core::option::Option<CardResponse>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApiResponseCardDeleteAt {
+    #[prost(string, tag = "1")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub data: ::core::option::Option<CardResponseDeleteAt>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ApiResponseCardDelete {
     #[prost(string, tag = "1")]
     pub status: ::prost::alloc::string::String,
@@ -1278,7 +1287,7 @@ pub mod card_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdCardRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseCard>,
+            tonic::Response<super::ApiResponseCardDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -1302,7 +1311,7 @@ pub mod card_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdCardRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseCard>,
+            tonic::Response<super::ApiResponseCardDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -1635,11 +1644,17 @@ pub mod card_service_server {
         async fn trashed_card(
             &self,
             request: tonic::Request<super::FindByIdCardRequest>,
-        ) -> std::result::Result<tonic::Response<super::ApiResponseCard>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::ApiResponseCardDeleteAt>,
+            tonic::Status,
+        >;
         async fn restore_card(
             &self,
             request: tonic::Request<super::FindByIdCardRequest>,
-        ) -> std::result::Result<tonic::Response<super::ApiResponseCard>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::ApiResponseCardDeleteAt>,
+            tonic::Status,
+        >;
         async fn delete_card_permanent(
             &self,
             request: tonic::Request<super::FindByIdCardRequest>,
@@ -3405,7 +3420,7 @@ pub mod card_service_server {
                         T: CardService,
                     > tonic::server::UnaryService<super::FindByIdCardRequest>
                     for TrashedCardSvc<T> {
-                        type Response = super::ApiResponseCard;
+                        type Response = super::ApiResponseCardDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -3450,7 +3465,7 @@ pub mod card_service_server {
                         T: CardService,
                     > tonic::server::UnaryService<super::FindByIdCardRequest>
                     for RestoreCardSvc<T> {
-                        type Response = super::ApiResponseCard;
+                        type Response = super::ApiResponseCardDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,

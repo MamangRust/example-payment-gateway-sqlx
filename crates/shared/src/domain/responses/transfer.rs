@@ -95,7 +95,7 @@ pub struct TransferYearAmountResponse {
 impl From<TransferModel> for TransferResponse {
     fn from(model: TransferModel) -> Self {
         Self {
-            id: model.id,
+            id: model.transfer_id,
             transfer_no: model.transfer_no,
             transfer_from: model.transfer_from,
             transfer_to: model.transfer_to,
@@ -110,7 +110,7 @@ impl From<TransferModel> for TransferResponse {
 impl From<TransferModel> for TransferResponseDeleteAt {
     fn from(model: TransferModel) -> Self {
         Self {
-            id: model.id,
+            id: model.transfer_id,
             transfer_no: model.transfer_no,
             transfer_from: model.transfer_from,
             transfer_to: model.transfer_to,

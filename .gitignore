@@ -1,1 +1,4 @@
 /target
+.sqlx
+.vscode
+.idea

@@ -10,12 +10,12 @@ pub type DynTopupStatsMethodRepository = Arc<dyn TopupStatsMethodRepositoryTrait
 
 #[async_trait]
 pub trait TopupStatsMethodRepositoryTrait {
-    async fn get_monthly_topup_methods(
+    async fn get_monthly_methods(
         &self,
         year: i32,
     ) -> Result<Vec<TopupMonthMethod>, RepositoryError>;
 
-    async fn get_yearly_topup_methods(
+    async fn get_yearly_methods(
         &self,
         year: i32,
     ) -> Result<Vec<TopupYearlyMethod>, RepositoryError>;

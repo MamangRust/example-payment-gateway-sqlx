@@ -14,22 +14,22 @@ pub type DynTopupStatsStatusRepository = Arc<dyn TopupStatsStatusRepositoryTrait
 
 #[async_trait]
 pub trait TopupStatsStatusRepositoryTrait {
-    async fn get_month_topup_status_success(
+    async fn get_month_status_success(
         &self,
         req: &MonthTopupStatus,
     ) -> Result<Vec<TopupModelMonthStatusSuccess>, RepositoryError>;
 
-    async fn get_yearly_topup_status_success(
+    async fn get_yearly_status_success(
         &self,
         year: i32,
     ) -> Result<Vec<TopupModelYearStatusSuccess>, RepositoryError>;
 
-    async fn get_month_topup_status_failed(
+    async fn get_month_status_failed(
         &self,
         req: &MonthTopupStatus,
     ) -> Result<Vec<TopupModelMonthStatusFailed>, RepositoryError>;
 
-    async fn get_yearly_topup_status_failed(
+    async fn get_yearly_status_failed(
         &self,
         year: i32,
     ) -> Result<Vec<TopupModelYearStatusFailed>, RepositoryError>;

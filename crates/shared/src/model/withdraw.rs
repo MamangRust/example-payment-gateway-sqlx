@@ -4,11 +4,12 @@ use sqlx::FromRow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct WithdrawModel {
-    pub id: i32,
+    pub withdraw_id: i32,
     pub withdraw_no: String,
     pub card_number: String,
     pub withdraw_amount: i64,
     pub withdraw_time: NaiveDateTime,
+    pub status: String,
     pub created_at: Option<NaiveDateTime>,
     pub updated_at: Option<NaiveDateTime>,
     pub deleted_at: Option<NaiveDateTime>,

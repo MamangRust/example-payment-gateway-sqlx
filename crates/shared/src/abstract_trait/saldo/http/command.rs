@@ -22,8 +22,8 @@ pub trait SaldoCommandGrpcClientTrait {
         request: &UpdateSaldoRequest,
     ) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp>;
     async fn trash(&self, id: i32) -> Result<ApiResponse<SaldoResponseDeleteAt>, AppErrorHttp>;
-    async fn restore(&self, id: i32) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp>;
-    async fn delete(&self, id: i32) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp>;
-    async fn restore_all(&self) -> Result<ApiResponse<()>, AppErrorHttp>;
-    async fn delete_all(&self) -> Result<ApiResponse<()>, AppErrorHttp>;
+    async fn restore(&self, id: i32) -> Result<ApiResponse<SaldoResponseDeleteAt>, AppErrorHttp>;
+    async fn delete_permanent(&self, id: i32) -> Result<ApiResponse<bool>, AppErrorHttp>;
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp>;
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp>;
 }

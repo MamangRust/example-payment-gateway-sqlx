@@ -1,29 +1,39 @@
 use crate::{
     domain::{
         requests::merchant::FindAllMerchants,
-        responses::{ApiResponse, MerchantResponse},
+        responses::{
+            ApiResponse, ApiResponsePagination, MerchantResponse, MerchantResponseDeleteAt,
+        },
     },
-    errors::ServiceError,
+    errors::AppErrorHttp,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-pub type DynMerchantQueryService = Arc<dyn MerchantQueryServiceTrait + Send + Sync>;
+pub type DynMerchantQueryGrpcClient = Arc<dyn MerchantQueryGrpcClientTrait + Send + Sync>;
 
 #[async_trait]
-pub trait MerchantQueryServiceTrait {
+pub trait MerchantQueryGrpcClientTrait {
     async fn find_all(
         &self,
         request: &FindAllMerchants,
-    ) -> Result<ApiResponse<Vec<MerchantResponse>>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<MerchantResponse>>, AppErrorHttp>;
     async fn find_active(
         &self,
         request: &FindAllMerchants,
-    ) -> Result<ApiResponse<Vec<MerchantResponse>>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<MerchantResponseDeleteAt>>, AppErrorHttp>;
     async fn find_trashed(
         &self,
         request: &FindAllMerchants,
-    ) -> Result<ApiResponse<Vec<MerchantResponse>>, ServiceError>;
-    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<MerchantResponse>, ServiceError>;
+    ) -> Result<ApiResponsePagination<Vec<MerchantResponseDeleteAt>>, AppErrorHttp>;
+    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<MerchantResponse>, AppErrorHttp>;
+    async fn find_by_apikey(
+        &self,
+        api_key: &str,
+    ) -> Result<ApiResponse<MerchantResponse>, AppErrorHttp>;
+    async fn find_merchant_user_id(
+        &self,
+        user_id: i32,
+    ) -> Result<ApiResponse<Vec<MerchantResponse>>, AppErrorHttp>;
 }

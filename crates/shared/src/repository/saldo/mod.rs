@@ -1,3 +1,3 @@
-mod command;
-mod query;
-mod stats;
+pub mod command;
+pub mod query;
+pub mod stats;

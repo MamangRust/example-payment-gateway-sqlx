@@ -1,9 +1,10 @@
 use crate::{
-    abstract_trait::card::repository::CardDashboardTransactionRepositoryTrait,
+    abstract_trait::card::repository::dashboard::transaction::CardDashboardTransactionRepositoryTrait,
     config::ConnectionPool, errors::RepositoryError,
 };
 use anyhow::Result;
 use async_trait::async_trait;
+use tracing::error;
 
 pub struct CardDashboardTransactionRepository {
     db: ConnectionPool,
@@ -13,12 +14,21 @@ impl CardDashboardTransactionRepository {
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
+
+    async fn get_conn(
+        &self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, RepositoryError> {
+        self.db.acquire().await.map_err(|e| {
+            error!("❌ Failed to acquire DB connection: {e:?}");
+            RepositoryError::from(e)
+        })
+    }
 }
 
 #[async_trait]
 impl CardDashboardTransactionRepositoryTrait for CardDashboardTransactionRepository {
     async fn get_total_amount(&self) -> Result<i64, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query_scalar::<_, i64>(
             r#"
@@ -30,13 +40,16 @@ impl CardDashboardTransactionRepositoryTrait for CardDashboardTransactionReposit
         )
         .fetch_one(&mut *conn)
         .await
-        .map_err(RepositoryError::from)?;
+        .map_err(|e| {
+            error!("❌ Database error in get_total_amount: {e:?}");
+            RepositoryError::Sqlx(e)
+        })?;
 
         Ok(result)
     }
 
     async fn get_total_amount_by_card(&self, card_number: String) -> Result<i64, RepositoryError> {
-        let mut conn = self.db.acquire().await.map_err(RepositoryError::from)?;
+        let mut conn = self.get_conn().await?;
 
         let result = sqlx::query_scalar::<_, i64>(
             r#"
@@ -51,7 +64,10 @@ impl CardDashboardTransactionRepositoryTrait for CardDashboardTransactionReposit
         .bind(card_number)
         .fetch_one(&mut *conn)
         .await
-        .map_err(RepositoryError::from)?;
+        .map_err(|e| {
+            error!("❌ Database error in get_total_amount_by_card: {e:?}");
+            RepositoryError::Sqlx(e)
+        })?;
 
         Ok(result)
     }

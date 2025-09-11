@@ -39,7 +39,7 @@ fn default_page_size() -> i32 {
 
 #[derive(Debug, Deserialize, Validate, IntoParams)]
 pub struct MonthTopupStatus {
-    #[validate(range(min = 1900, max = 2100, message = "Tahun tidak valid"))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
 
     #[validate(range(min = 1, max = 12, message = "Bulan harus antara 1 - 12"))]
@@ -51,7 +51,7 @@ pub struct MonthTopupStatusCardNumber {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
 
-    #[validate(range(min = 1900, max = 2100, message = "Tahun tidak valid"))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
 
     #[validate(range(min = 1, max = 12, message = "Bulan harus antara 1 - 12"))]
@@ -63,7 +63,7 @@ pub struct YearTopupStatusCardNumber {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
 
-    #[validate(range(min = 1900, max = 2100, message = "Tahun tidak valid"))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
 }
 
@@ -72,7 +72,7 @@ pub struct YearMonthMethod {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
 
-    #[validate(range(min = 1900, max = 2100, message = "Tahun tidak valid"))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
 }
 
@@ -82,7 +82,7 @@ pub struct CreateTopupRequest {
     pub card_number: String,
 
     #[validate(range(min = 50000, message = "Minimal topup 50.000"))]
-    pub topup_amount: i32,
+    pub topup_amount: i64,
 
     #[validate(length(min = 1, message = "Topup method wajib diisi"))]
     pub topup_method: String,
@@ -93,10 +93,10 @@ pub struct UpdateTopupRequest {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
 
-    pub topup_id: Option<i32>,
+    pub topup_id: i32,
 
     #[validate(range(min = 50000, message = "Minimal topup 50.000"))]
-    pub topup_amount: i32,
+    pub topup_amount: i64,
 
     #[validate(length(min = 1, message = "Topup method wajib diisi"))]
     pub topup_method: String,
@@ -108,7 +108,7 @@ pub struct UpdateTopupAmount {
     pub topup_id: i32,
 
     #[validate(range(min = 50000, message = "Minimal topup 50.000"))]
-    pub topup_amount: i32,
+    pub topup_amount: i64,
 }
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]

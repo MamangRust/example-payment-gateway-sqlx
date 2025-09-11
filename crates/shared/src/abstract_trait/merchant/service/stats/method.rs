@@ -1,6 +1,6 @@
 use crate::{
     domain::responses::{
-        MerchantResponseMonthlyPaymentMethod, MerchantResponseYearlyPaymentMethod,
+        ApiResponse, MerchantResponseMonthlyPaymentMethod, MerchantResponseYearlyPaymentMethod,
     },
     errors::ServiceError,
 };
@@ -15,9 +15,9 @@ pub trait MerchantStatsMethodServiceTrait {
     async fn get_monthly_method(
         &self,
         year: i32,
-    ) -> Result<Vec<MerchantResponseMonthlyPaymentMethod>, ServiceError>;
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, ServiceError>;
     async fn get_yearly_method(
         &self,
         year: i32,
-    ) -> Result<Vec<MerchantResponseYearlyPaymentMethod>, ServiceError>;
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, ServiceError>;
 }

@@ -211,6 +211,12 @@ message ApiResponseTransaction {
     TransactionResponse data = 3;
 }
 
+message ApiResponseTransactionDeleteAt {
+    string status = 1;
+    string message = 2;
+    TransactionResponseDeleteAt data = 3;
+}
+
 message ApiResponseTransactions {
     string status = 1;
     string message = 2;
@@ -273,8 +279,8 @@ service TransactionService {
     rpc FindByTrashedTransaction (FindAllTransactionRequest) returns (ApiResponsePaginationTransactionDeleteAt);
     rpc CreateTransaction (CreateTransactionRequest) returns (ApiResponseTransaction);
     rpc UpdateTransaction (UpdateTransactionRequest) returns (ApiResponseTransaction);
-    rpc TrashedTransaction (FindByIdTransactionRequest) returns (ApiResponseTransaction);
-    rpc RestoreTransaction (FindByIdTransactionRequest) returns (ApiResponseTransaction);
+    rpc TrashedTransaction (FindByIdTransactionRequest) returns (ApiResponseTransactionDeleteAt);
+    rpc RestoreTransaction (FindByIdTransactionRequest) returns (ApiResponseTransactionDeleteAt);
     rpc DeleteTransactionPermanent (FindByIdTransactionRequest) returns (ApiResponseTransactionDelete);
 
     rpc RestoreAllTransaction(google.protobuf.Empty) returns (ApiResponseTransactionAll){}

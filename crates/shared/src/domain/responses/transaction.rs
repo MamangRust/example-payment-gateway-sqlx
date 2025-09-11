@@ -116,7 +116,7 @@ pub struct TransactionYearlyAmountResponse {
 impl From<TransactionModel> for TransactionResponse {
     fn from(model: TransactionModel) -> Self {
         Self {
-            id: model.id,
+            id: model.transaction_id,
             transaction_no: model.transaction_no,
             card_number: model.card_number,
             amount: model.amount,
@@ -132,7 +132,7 @@ impl From<TransactionModel> for TransactionResponse {
 impl From<TransactionModel> for TransactionResponseDeleteAt {
     fn from(model: TransactionModel) -> Self {
         Self {
-            id: model.id,
+            id: model.transaction_id,
             transaction_no: model.transaction_no,
             card_number: model.card_number,
             amount: model.amount,

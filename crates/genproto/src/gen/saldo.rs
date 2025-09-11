@@ -47,8 +47,8 @@ pub struct SaldoResponse {
     pub saldo_id: i32,
     #[prost(string, tag = "2")]
     pub card_number: ::prost::alloc::string::String,
-    #[prost(int32, tag = "3")]
-    pub total_balance: i32,
+    #[prost(int64, tag = "3")]
+    pub total_balance: i64,
     #[prost(string, tag = "4")]
     pub withdraw_time: ::prost::alloc::string::String,
     #[prost(int32, tag = "5")]
@@ -64,8 +64,8 @@ pub struct SaldoResponseDeleteAt {
     pub saldo_id: i32,
     #[prost(string, tag = "2")]
     pub card_number: ::prost::alloc::string::String,
-    #[prost(int32, tag = "3")]
-    pub total_balance: i32,
+    #[prost(int64, tag = "3")]
+    pub total_balance: i64,
     #[prost(string, tag = "4")]
     pub withdraw_time: ::prost::alloc::string::String,
     #[prost(int32, tag = "5")]
@@ -115,6 +115,15 @@ pub struct ApiResponseSaldo {
     pub message: ::prost::alloc::string::String,
     #[prost(message, optional, tag = "3")]
     pub data: ::core::option::Option<SaldoResponse>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApiResponseSaldoDeleteAt {
+    #[prost(string, tag = "1")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub data: ::core::option::Option<SaldoResponseDeleteAt>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApiResponsesSaldo {
@@ -564,7 +573,7 @@ pub mod saldo_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdSaldoRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseSaldo>,
+            tonic::Response<super::ApiResponseSaldoDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -588,7 +597,7 @@ pub mod saldo_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdSaldoRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseSaldo>,
+            tonic::Response<super::ApiResponseSaldoDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -778,14 +787,14 @@ pub mod saldo_service_server {
             &self,
             request: tonic::Request<super::FindByIdSaldoRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseSaldo>,
+            tonic::Response<super::ApiResponseSaldoDeleteAt>,
             tonic::Status,
         >;
         async fn restore_saldo(
             &self,
             request: tonic::Request<super::FindByIdSaldoRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseSaldo>,
+            tonic::Response<super::ApiResponseSaldoDeleteAt>,
             tonic::Status,
         >;
         async fn delete_saldo_permanent(
@@ -1408,7 +1417,7 @@ pub mod saldo_service_server {
                         T: SaldoService,
                     > tonic::server::UnaryService<super::FindByIdSaldoRequest>
                     for TrashedSaldoSvc<T> {
-                        type Response = super::ApiResponseSaldo;
+                        type Response = super::ApiResponseSaldoDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -1453,7 +1462,7 @@ pub mod saldo_service_server {
                         T: SaldoService,
                     > tonic::server::UnaryService<super::FindByIdSaldoRequest>
                     for RestoreSaldoSvc<T> {
-                        type Response = super::ApiResponseSaldo;
+                        type Response = super::ApiResponseSaldoDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,

@@ -10,7 +10,6 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use genproto::topup::TopupYearStatusSuccessResponse;
 use std::sync::Arc;
 
 pub type DynTopupStatsStatusGrpcClient = Arc<dyn TopupStatsStatusGrpcClientTrait + Send + Sync>;

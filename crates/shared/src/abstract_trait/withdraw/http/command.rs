@@ -21,10 +21,6 @@ pub trait WithdrawCommandGrpcClientTrait {
         &self,
         req: &UpdateWithdrawRequest,
     ) -> Result<ApiResponse<WithdrawResponse>, AppErrorHttp>;
-    async fn update_status(
-        &self,
-        req: &UpdateWithdrawStatus,
-    ) -> Result<ApiResponse<WithdrawResponse>, AppErrorHttp>;
     async fn trashed_withdraw(
         &self,
         withdraw_id: i32,
@@ -35,5 +31,5 @@ pub trait WithdrawCommandGrpcClientTrait {
     ) -> Result<ApiResponse<WithdrawResponseDeleteAt>, AppErrorHttp>;
     async fn delete_permanent(&self, withdraw_id: i32) -> Result<ApiResponse<bool>, AppErrorHttp>;
     async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp>;
-    async fn delete_all_withdraw(&self) -> Result<ApiResponse<bool>, AppErrorHttp>;
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp>;
 }

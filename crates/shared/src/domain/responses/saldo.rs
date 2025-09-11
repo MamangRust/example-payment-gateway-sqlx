@@ -19,7 +19,7 @@ use utoipa::ToSchema;
 pub struct SaldoResponse {
     pub id: i32,
     pub card_number: String,
-    pub total_balance: i32,
+    pub total_balance: i64,
     pub withdraw_amount: i32,
     pub withdraw_time: Option<String>,
     #[serde(rename = "created_at")]
@@ -32,7 +32,7 @@ pub struct SaldoResponse {
 pub struct SaldoResponseDeleteAt {
     pub id: i32,
     pub card_number: String,
-    pub total_balance: i32,
+    pub total_balance: i64,
     pub withdraw_amount: i32,
     pub withdraw_time: Option<String>,
     #[serde(rename = "created_at")]

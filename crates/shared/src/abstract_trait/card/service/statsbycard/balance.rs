@@ -1,7 +1,7 @@
 use crate::{
     domain::{
         requests::card::MonthYearCardNumberCard,
-        responses::{CardResponseMonthBalance, CardResponseYearlyBalance},
+        responses::{ApiResponse, CardResponseMonthBalance, CardResponseYearlyBalance},
     },
     errors::ServiceError,
 };
@@ -14,12 +14,12 @@ pub type DynCardStatsBalanceByCardService =
 
 #[async_trait]
 pub trait CardStatsBalanceByCardServiceTrait {
-    fn get_monthly_balance(
+    async fn get_monthly_balance(
         &self,
         req: &MonthYearCardNumberCard,
-    ) -> Result<Vec<CardResponseMonthBalance>, ServiceError>;
-    fn get_yearly_balance(
+    ) -> Result<ApiResponse<Vec<CardResponseMonthBalance>>, ServiceError>;
+    async fn get_yearly_balance(
         &self,
         req: &MonthYearCardNumberCard,
-    ) -> Result<Vec<CardResponseYearlyBalance>, ServiceError>;
+    ) -> Result<ApiResponse<Vec<CardResponseYearlyBalance>>, ServiceError>;
 }

@@ -14,12 +14,12 @@ pub type DynTransactionStatsMethodByCardNumberGrpcClient =
 
 #[async_trait]
 pub trait TransactionStatsMethodByCardNumberGrpcClientTrait {
-    async fn find_monthly_method(
+    async fn get_monthly_method(
         &self,
         req: &MonthYearPaymentMethod,
     ) -> Result<ApiResponse<Vec<TransactionMonthMethodResponse>>, AppErrorHttp>;
 
-    async fn find_yearly_method(
+    async fn get_yearly_method(
         &self,
         req: &MonthYearPaymentMethod,
     ) -> Result<ApiResponse<Vec<TransactionYearMethodResponse>>, AppErrorHttp>;

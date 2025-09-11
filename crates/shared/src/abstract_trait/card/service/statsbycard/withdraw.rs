@@ -1,7 +1,7 @@
 use crate::{
     domain::{
         requests::card::MonthYearCardNumberCard,
-        responses::{ApiResponsePagination, CardResponseMonthAmount, CardResponseYearAmount},
+        responses::{ApiResponse, CardResponseMonthAmount, CardResponseYearAmount},
     },
     errors::ServiceError,
 };
@@ -17,9 +17,9 @@ pub trait CardStatsWithdrawByCardServiceTrait {
     async fn get_monthly_amount(
         &self,
         req: &MonthYearCardNumberCard,
-    ) -> Result<ApiResponsePagination<Vec<CardResponseMonthAmount>>, ServiceError>;
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, ServiceError>;
     async fn get_yearly_amount(
         &self,
         req: &MonthYearCardNumberCard,
-    ) -> Result<ApiResponsePagination<Vec<CardResponseYearAmount>>, ServiceError>;
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, ServiceError>;
 }

@@ -43,13 +43,13 @@ pub struct YearMonthCardNumber {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
 
-    #[validate(range(min = 1, message = "Tahun wajib diisi"))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
 }
 
 #[derive(Debug, Deserialize, Validate, IntoParams)]
 pub struct MonthStatusWithdraw {
-    #[validate(range(min = 1, message = "Tahun wajib diisi"))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
 
     #[validate(range(min = 1, max = 12, message = "Bulan harus antara 1 - 12"))]
@@ -61,7 +61,7 @@ pub struct MonthStatusWithdrawCardNumber {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
 
-    #[validate(range(min = 1, message = "Tahun wajib diisi"))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
 
     #[validate(range(min = 1, max = 12, message = "Bulan harus antara 1 - 12"))]
@@ -73,7 +73,7 @@ pub struct YearStatusWithdrawCardNumber {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
 
-    #[validate(range(min = 1, message = "Tahun wajib diisi"))]
+    #[validate(range(min = 2000, max = 2100, message = "Tahun tidak valid"))]
     pub year: i32,
 }
 
@@ -83,7 +83,7 @@ pub struct CreateWithdrawRequest {
     pub card_number: String,
 
     #[validate(range(min = 50000, message = "Minimal withdraw 50000"))]
-    pub withdraw_amount: i32,
+    pub withdraw_amount: i64,
 
     pub withdraw_time: NaiveDateTime,
 }
@@ -93,10 +93,10 @@ pub struct UpdateWithdrawRequest {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
 
-    pub withdraw_id: Option<i32>,
+    pub withdraw_id: i32,
 
     #[validate(range(min = 50000, message = "Minimal withdraw 50000"))]
-    pub withdraw_amount: i32,
+    pub withdraw_amount: i64,
 
     pub withdraw_time: NaiveDateTime,
 }

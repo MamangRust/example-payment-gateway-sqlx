@@ -10,12 +10,12 @@ pub type DynTopupStatsMethodService = Arc<dyn TopupStatsMethodServiceTrait + Sen
 
 #[async_trait]
 pub trait TopupStatsMethodServiceTrait {
-    async fn get_monthly_topup_methods(
+    async fn get_monthly_methods(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TopupMonthMethodResponse>>, ServiceError>;
 
-    async fn get_yearly_topup_methods(
+    async fn get_yearly_methods(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TopupYearlyMethodResponse>>, ServiceError>;

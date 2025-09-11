@@ -7,11 +7,11 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-pub type DynTransactionStatsAmountByCardNumberRepository =
-    Arc<dyn TransactionStatsAmountByCardNumberRepositoryTrait + Send + Sync>;
+pub type DynTransactionStatsAmountByCardRepository =
+    Arc<dyn TransactionStatsAmountByCardRepositoryTrait + Send + Sync>;
 
 #[async_trait]
-pub trait TransactionStatsAmountByCardNumberRepositoryTrait {
+pub trait TransactionStatsAmountByCardRepositoryTrait {
     async fn get_monthly_amounts(
         &self,
         req: &MonthYearPaymentMethod,

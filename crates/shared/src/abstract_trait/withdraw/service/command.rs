@@ -1,7 +1,5 @@
 use crate::{
-    domain::requests::withdraw::{
-        CreateWithdrawRequest, UpdateWithdrawRequest, UpdateWithdrawStatus,
-    },
+    domain::requests::withdraw::{CreateWithdrawRequest, UpdateWithdrawRequest},
     domain::responses::{ApiResponse, WithdrawResponse, WithdrawResponseDeleteAt},
     errors::ServiceError,
 };
@@ -21,10 +19,6 @@ pub trait WithdrawCommandServiceTrait {
         &self,
         req: &UpdateWithdrawRequest,
     ) -> Result<ApiResponse<WithdrawResponse>, ServiceError>;
-    async fn update_status(
-        &self,
-        req: &UpdateWithdrawStatus,
-    ) -> Result<ApiResponse<WithdrawResponse>, ServiceError>;
     async fn trashed_withdraw(
         &self,
         withdraw_id: i32,
@@ -35,5 +29,5 @@ pub trait WithdrawCommandServiceTrait {
     ) -> Result<ApiResponse<WithdrawResponseDeleteAt>, ServiceError>;
     async fn delete_permanent(&self, withdraw_id: i32) -> Result<ApiResponse<bool>, ServiceError>;
     async fn restore_all(&self) -> Result<ApiResponse<bool>, ServiceError>;
-    async fn delete_all_withdraw(&self) -> Result<ApiResponse<bool>, ServiceError>;
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, ServiceError>;
 }

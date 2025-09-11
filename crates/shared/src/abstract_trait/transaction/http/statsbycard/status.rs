@@ -20,19 +20,19 @@ pub type DynTransactionStatsStatusByCardNumberGrpcClient =
 
 #[async_trait]
 pub trait TransactionStatsStatusByCardNumberGrpcClientTrait {
-    async fn find_month_status_success(
+    async fn get_month_status_success(
         &self,
         req: &MonthStatusTransactionCardNumber,
     ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusSuccess>>, AppErrorHttp>;
-    async fn find_yearly_status_success(
+    async fn get_yearly_status_success(
         &self,
         req: &YearStatusTransactionCardNumber,
     ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusSuccess>>, AppErrorHttp>;
-    async fn find_month_status_failed(
+    async fn get_month_status_failed(
         &self,
         req: &MonthStatusTransactionCardNumber,
     ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusFailed>>, AppErrorHttp>;
-    async fn find_yearly_status_failed(
+    async fn get_yearly_status_failed(
         &self,
         req: &YearStatusTransactionCardNumber,
     ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusFailed>>, AppErrorHttp>;

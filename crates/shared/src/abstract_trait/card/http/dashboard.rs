@@ -10,9 +10,9 @@ pub type DynCardDashboardGrpcClient = Arc<dyn CardDashboardGrpcClientTrait + Sen
 
 #[async_trait]
 pub trait CardDashboardGrpcClientTrait {
-    async fn get_dashboard(&self) -> Result<ApiResponse<Vec<DashboardCard>>, AppErrorHttp>;
+    async fn get_dashboard(&self) -> Result<ApiResponse<DashboardCard>, AppErrorHttp>;
     async fn get_dashboard_bycard(
         &self,
-        card_number: String,
+        card_number: &str,
     ) -> Result<ApiResponse<DashboardCardCardNumber>, AppErrorHttp>;
 }

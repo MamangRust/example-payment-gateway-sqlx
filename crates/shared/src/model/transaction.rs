@@ -4,13 +4,14 @@ use sqlx::FromRow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct TransactionModel {
-    pub id: i32,
+    pub transaction_id: i32,
     pub card_number: String,
     pub transaction_no: String,
     pub amount: i64,
     pub payment_method: String,
     pub merchant_id: i32,
-    pub transaction_time: String,
+    pub status: String,
+    pub transaction_time: NaiveDateTime,
     pub created_at: Option<NaiveDateTime>,
     pub updated_at: Option<NaiveDateTime>,
     pub deleted_at: Option<NaiveDateTime>,

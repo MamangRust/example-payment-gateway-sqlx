@@ -18,10 +18,10 @@ pub trait AuthServiceTrait {
         &self,
         input: &RegisterRequest,
     ) -> Result<ApiResponse<UserResponse>, ServiceError>;
-    async fn login_user(&self, input: &AuthRequest) -> Result<ApiResponse<String>, ServiceError>;
-    async fn get_me(&self, id: i32) -> Result<ApiResponse<UserResponse>, ServiceError>;
-    async fn refresh_token(
+    async fn login_user(
         &self,
-        token: String,
+        input: &AuthRequest,
     ) -> Result<ApiResponse<TokenResponse>, ServiceError>;
+    async fn get_me(&self, id: i32) -> Result<ApiResponse<UserResponse>, ServiceError>;
+    async fn refresh_token(&self, token: &str) -> Result<ApiResponse<TokenResponse>, ServiceError>;
 }

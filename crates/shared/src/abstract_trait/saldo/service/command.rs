@@ -22,8 +22,8 @@ pub trait SaldoCommandServiceTrait {
         request: &UpdateSaldoRequest,
     ) -> Result<ApiResponse<SaldoResponse>, ServiceError>;
     async fn trash(&self, id: i32) -> Result<ApiResponse<SaldoResponseDeleteAt>, ServiceError>;
-    async fn restore(&self, id: i32) -> Result<ApiResponse<SaldoResponse>, ServiceError>;
-    async fn delete(&self, id: i32) -> Result<ApiResponse<SaldoResponse>, ServiceError>;
-    async fn restore_all(&self) -> Result<ApiResponse<()>, ServiceError>;
-    async fn delete_all(&self) -> Result<ApiResponse<()>, ServiceError>;
+    async fn restore(&self, id: i32) -> Result<ApiResponse<SaldoResponseDeleteAt>, ServiceError>;
+    async fn delete(&self, id: i32) -> Result<ApiResponse<bool>, ServiceError>;
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, ServiceError>;
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, ServiceError>;
 }

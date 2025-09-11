@@ -77,6 +77,15 @@ pub struct ApiResponseRole {
     #[prost(message, optional, tag = "3")]
     pub data: ::core::option::Option<RoleResponse>,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApiResponseRoleDeleteAt {
+    #[prost(string, tag = "1")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub data: ::core::option::Option<RoleResponseDeleteAt>,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApiResponsesRole {
     #[prost(string, tag = "1")]
@@ -371,7 +380,7 @@ pub mod role_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdRoleRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseRole>,
+            tonic::Response<super::ApiResponseRoleDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -395,7 +404,7 @@ pub mod role_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindByIdRoleRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ApiResponseRole>,
+            tonic::Response<super::ApiResponseRoleDeleteAt>,
             tonic::Status,
         > {
             self.inner
@@ -545,11 +554,17 @@ pub mod role_service_server {
         async fn trashed_role(
             &self,
             request: tonic::Request<super::FindByIdRoleRequest>,
-        ) -> std::result::Result<tonic::Response<super::ApiResponseRole>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::ApiResponseRoleDeleteAt>,
+            tonic::Status,
+        >;
         async fn restore_role(
             &self,
             request: tonic::Request<super::FindByIdRoleRequest>,
-        ) -> std::result::Result<tonic::Response<super::ApiResponseRole>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::ApiResponseRoleDeleteAt>,
+            tonic::Status,
+        >;
         async fn delete_role_permanent(
             &self,
             request: tonic::Request<super::FindByIdRoleRequest>,
@@ -970,7 +985,7 @@ pub mod role_service_server {
                         T: RoleService,
                     > tonic::server::UnaryService<super::FindByIdRoleRequest>
                     for TrashedRoleSvc<T> {
-                        type Response = super::ApiResponseRole;
+                        type Response = super::ApiResponseRoleDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -1015,7 +1030,7 @@ pub mod role_service_server {
                         T: RoleService,
                     > tonic::server::UnaryService<super::FindByIdRoleRequest>
                     for RestoreRoleSvc<T> {
-                        type Response = super::ApiResponseRole;
+                        type Response = super::ApiResponseRoleDeleteAt;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,

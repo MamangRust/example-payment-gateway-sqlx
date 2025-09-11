@@ -11,8 +11,10 @@ pub type DynSaldoBalanceService = Arc<dyn SaldoBalanceServiceTrait + Send + Sync
 pub trait SaldoBalanceServiceTrait {
     async fn get_month_balance(
         &self,
+        year: i32,
     ) -> Result<ApiResponse<Vec<SaldoMonthBalanceResponse>>, ServiceError>;
     async fn get_year_balance(
         &self,
+        year: i32,
     ) -> Result<ApiResponse<Vec<SaldoYearBalanceResponse>>, ServiceError>;
 }
