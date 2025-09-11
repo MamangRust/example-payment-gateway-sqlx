@@ -115,9 +115,8 @@ impl MerchantTransactionRepositoryTrait for MerchantTransactionRepository {
             req.api_key, req.search
         );
 
-        let limit = req.page_size.max(1).min(100);
-
-        let offset = (req.page - 1).max(0) + limit;
+        let limit = req.page_size.clamp(1, 100);
+        let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
             None
@@ -188,9 +187,8 @@ impl MerchantTransactionRepositoryTrait for MerchantTransactionRepository {
     ) -> Result<(Vec<MerchantTransactionsModel>, i64), RepositoryError> {
         let mut conn = self.get_conn().await?;
 
-        let limit = req.page_size.max(1).min(100);
-
-        let offset = (req.page - 1).max(0) + limit;
+        let limit = req.page_size.clamp(1, 100);
+        let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
             None

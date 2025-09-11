@@ -6,7 +6,7 @@ use crate::{
     model::role::RoleModel,
 };
 use async_trait::async_trait;
-use tracing::{error, info};
+use tracing::error;
 
 pub struct RoleCommandRepository {
     db: ConnectionPool,

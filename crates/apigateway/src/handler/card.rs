@@ -729,10 +729,10 @@ pub fn card_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/cards", get(get_cards).post(create_card))
         .route("/api/cards/active", get(get_active_cards))
         .route("/api/cards/trashed", get(get_trashed_cards))
-        .route("/api/cards/:id", get(get_card).put(update_card))
-        .route("/api/cards/trash/:id", delete(trash_card_handler))
-        .route("/api/cards/restore/:id", put(restore_card_handler))
-        .route("/api/cards/delete/:id", delete(delete_card))
+        .route("/api/cards/{id}", get(get_card).put(update_card))
+        .route("/api/cards/trash/{id}", delete(trash_card_handler))
+        .route("/api/cards/restore/{id}", put(restore_card_handler))
+        .route("/api/cards/delete/{id}", delete(delete_card))
         .route("/api/cards/restore-all", put(restore_all_card_handler))
         .route("/api/cards/delete-all", delete(delete_all_card_handler))
         .route("/api/cards/stats/balance/monthly", get(get_monthly_balance))
@@ -811,7 +811,7 @@ pub fn card_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         )
         .route("/api/cards/dashboard", get(get_card_dashboard))
         .route(
-            "/api/cards/dashboard/:card_number",
+            "/api/cards/dashboard/{card_number}",
             get(get_card_dashboard_by_card_number),
         )
         .route_layer(middleware::from_fn(jwt::auth))

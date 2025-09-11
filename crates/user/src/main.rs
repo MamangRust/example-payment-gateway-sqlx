@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use genproto::user::user_service_server::UserServiceServer;
-use shared::config::{Config, ConnectionManager};
+use shared::{
+    config::{Config, ConnectionManager},
+    utils::Logger,
+};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
@@ -9,6 +12,12 @@ use user::{config::ServerConfig, service::UserServiceImpl, state::AppState};
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
+
+    let is_dev = std::env::var("DEV_MODE")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
+    let _logger = Logger::new("user-service", is_dev);
 
     let config = Config::init().context("Failed to load configuration")?;
 
@@ -84,7 +93,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    info!("✅ Auth Service shutdown complete.");
+    info!("✅ User Service shutdown complete.");
     Ok(())
 }
 

@@ -191,7 +191,7 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         &self,
         api_key: &str,
     ) -> Result<ApiResponse<MerchantResponse>, ServiceError> {
-        let masked_key = mask_api_key(&api_key);
+        let masked_key = mask_api_key(api_key);
 
         info!("🔑 Finding merchant by API key: {masked_key}");
 

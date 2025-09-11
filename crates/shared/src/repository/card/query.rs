@@ -100,7 +100,7 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
     ) -> Result<(Vec<CardModel>, i64), RepositoryError> {
         let mut conn = self.get_conn().await?;
 
-        let limit = req.page_size.max(1).min(100);
+        let limit = req.page_size.clamp(1, 100);
         let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
@@ -170,7 +170,7 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
     ) -> Result<(Vec<CardModel>, i64), RepositoryError> {
         let mut conn = self.get_conn().await?;
 
-        let limit = req.page_size.max(1).min(100);
+        let limit = req.page_size.clamp(1, 100);
         let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
@@ -329,22 +329,22 @@ impl CardQueryRepositoryTrait for CardQueryRepository {
 
         let row = sqlx::query!(
             r#"
-        SELECT
-            c.card_id,
-            c.user_id,
-            c.card_number,
-            c.card_type,
-            c.expire_date,
-            c.cvv,
-            c.card_provider,
-            c.created_at,
-            c.updated_at,
-            c.deleted_at
-        FROM cards c
-        WHERE c.user_id = $1 AND c.deleted_at IS NULL
-        ORDER BY c.card_id
-        LIMIT 1
-        "#,
+            SELECT
+                c.card_id,
+                c.user_id,
+                c.card_number,
+                c.card_type,
+                c.expire_date,
+                c.cvv,
+                c.card_provider,
+                c.created_at,
+                c.updated_at,
+                c.deleted_at
+            FROM cards c
+            WHERE c.user_id = $1 AND c.deleted_at IS NULL
+            ORDER BY c.card_id
+            LIMIT 1
+            "#,
             user_id
         )
         .fetch_one(&mut *conn)

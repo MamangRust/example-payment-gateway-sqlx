@@ -705,10 +705,13 @@ pub fn merchant_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/merchants", get(get_merchants).post(create_merchant))
         .route("/api/merchants/active", get(get_active_merchants))
         .route("/api/merchants/trashed", get(get_trashed_merchants))
-        .route("/api/merchants/:id", get(get_merchant).put(update_merchant))
-        .route("/api/merchants/trash/:id", delete(trash_merchant_handler))
-        .route("/api/merchants/restore/:id", put(restore_merchant_handler))
-        .route("/api/merchants/delete/:id", delete(delete_merchant))
+        .route(
+            "/api/merchants/{id}",
+            get(get_merchant).put(update_merchant),
+        )
+        .route("/api/merchants/trash/{id}", delete(trash_merchant_handler))
+        .route("/api/merchants/restore/{id}", put(restore_merchant_handler))
+        .route("/api/merchants/delete/{id}", delete(delete_merchant))
         .route(
             "/api/merchants/restore-all",
             put(restore_all_merchant_handler),

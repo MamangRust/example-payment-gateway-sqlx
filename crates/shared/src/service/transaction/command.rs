@@ -73,7 +73,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
 
         let merchant = self
             .merchant_query
-            .find_by_apikey(&api_key)
+            .find_by_apikey(api_key)
             .await
             .map_err(|e| {
                 error!("error {e:?}");

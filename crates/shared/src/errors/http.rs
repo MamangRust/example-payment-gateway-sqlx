@@ -1,5 +1,5 @@
 use crate::errors::{
-    errors::ErrorResponse, grpc::AppErrorGrpc, repository::RepositoryError, service::ServiceError,
+    error::ErrorResponse, grpc::AppErrorGrpc, repository::RepositoryError, service::ServiceError,
 };
 use axum::{
     Json,

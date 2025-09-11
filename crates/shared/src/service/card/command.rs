@@ -1,7 +1,7 @@
 use crate::{
     abstract_trait::{
         card::{
-            repository::{command::DynCardCommandRepository, query::DynCardQueryRepository},
+            repository::command::DynCardCommandRepository,
             service::command::CardCommandServiceTrait,
         },
         user::repository::query::DynUserQueryRepository,

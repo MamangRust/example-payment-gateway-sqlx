@@ -1,0 +1,53 @@
+{"timestamp":"2025-09-11T14:09:27.323140Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-11T14:09:27.329383Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:27.329966Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:32.331059Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:32.331609Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:37.333020Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:37.333503Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:42.334944Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:42.335358Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:47.337019Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:47.337496Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:52.339037Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:52.339566Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:57.341000Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:09:57.341406Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:02.343062Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:02.343725Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:07.345450Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:07.346042Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:11.288365Z","level":"INFO","fields":{"message":"🛑 Shutdown signal received."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:11.288565Z","level":"INFO","fields":{"message":"🛑 Shutting down all servers..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:12.347268Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:12.347825Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:17.348899Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:17.349712Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:22.351120Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:22.351676Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:27.352998Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:27.353434Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:32.355039Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:32.355552Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:37.356759Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:37.357340Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:41.289784Z","level":"WARN","fields":{"message":"⚠️  Shutdown timeout reached, forcing exit"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:10:41.289934Z","level":"INFO","fields":{"message":"✅ Merchant Service shutdown complete."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:12:21.801921Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-11T14:12:21.819863Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50053"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:13:33.687028Z","level":"INFO","fields":{"message":"🛑 Shutdown signal received."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:13:33.687275Z","level":"INFO","fields":{"message":"gRPC server received shutdown signal"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:13:33.687260Z","level":"INFO","fields":{"message":"🛑 Shutting down all servers..."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:13:33.687456Z","level":"INFO","fields":{"message":"gRPC server stopped gracefully"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:13:33.687582Z","level":"INFO","fields":{"message":"✅ All servers shutdown gracefully"},"target":"merchant"}
+{"timestamp":"2025-09-11T14:13:33.687669Z","level":"INFO","fields":{"message":"✅ Merchant Service shutdown complete."},"target":"merchant"}
+{"timestamp":"2025-09-11T14:14:31.411409Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-11T14:14:31.418970Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50053"},"target":"merchant"}
+{"timestamp":"2025-09-11T18:03:35.472191Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-11T18:03:35.481212Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50053"},"target":"merchant"}
+{"timestamp":"2025-09-11T18:10:28.829088Z","level":"INFO","fields":{"message":"🛑 Shutdown signal received."},"target":"merchant"}
+{"timestamp":"2025-09-11T18:10:28.829319Z","level":"INFO","fields":{"message":"gRPC server received shutdown signal"},"target":"merchant"}
+{"timestamp":"2025-09-11T18:10:28.829323Z","level":"INFO","fields":{"message":"🛑 Shutting down all servers..."},"target":"merchant"}
+{"timestamp":"2025-09-11T18:10:28.829492Z","level":"INFO","fields":{"message":"gRPC server stopped gracefully"},"target":"merchant"}
+{"timestamp":"2025-09-11T18:10:28.829611Z","level":"INFO","fields":{"message":"✅ All servers shutdown gracefully"},"target":"merchant"}
+{"timestamp":"2025-09-11T18:10:28.829692Z","level":"INFO","fields":{"message":"✅ Merchant Service shutdown complete."},"target":"merchant"}

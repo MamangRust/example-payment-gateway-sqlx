@@ -16,7 +16,10 @@ use shared::{
         user::{command::UserCommandRepository, query::UserQueryRepository},
         user_role::UserRoleRepository,
     },
-    service::{auth::AuthService, token::TokenService},
+    service::{
+        auth::{AuthService, AuthServiceDeps},
+        token::TokenService,
+    },
 };
 use std::{fmt, sync::Arc};
 
@@ -65,19 +68,18 @@ impl DependenciesInject {
             refresh_command.clone(),
         )) as DynTokenService;
 
-        let auth_service = Arc::new(
-            AuthService::new(
-                user_query.clone(),
-                user_command.clone(),
-                jwt_config.clone(),
-                hash.clone(),
-                role.clone(),
-                user_role.clone(),
-                token_service.clone(),
-                refresh_command.clone(),
-            )
-            .await,
-        );
+        let deps = AuthServiceDeps {
+            query: user_query.clone(),
+            command: user_command.clone(),
+            jwt_config: jwt_config.clone(),
+            hashing: hash.clone(),
+            role: role.clone(),
+            user_role: user_role.clone(),
+            token: token_service.clone(),
+            refresh_command: refresh_command.clone(),
+        };
+
+        let auth_service = Arc::new(AuthService::new(deps).await);
 
         Ok(Self { auth_service })
     }

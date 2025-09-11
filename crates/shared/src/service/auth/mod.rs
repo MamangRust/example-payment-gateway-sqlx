@@ -1,7 +1,3 @@
-use anyhow::Result;
-use async_trait::async_trait;
-use tracing::{error, info, warn};
-
 use crate::{
     abstract_trait::{
         auth::service::AuthServiceTrait,
@@ -24,6 +20,9 @@ use crate::{
     },
     errors::ServiceError,
 };
+use anyhow::Result;
+use async_trait::async_trait;
+use tracing::{error, info, warn};
 
 #[derive(Clone)]
 pub struct AuthService {
@@ -52,26 +51,28 @@ impl std::fmt::Debug for AuthService {
     }
 }
 
+pub struct AuthServiceDeps {
+    pub query: DynUserQueryRepository,
+    pub command: DynUserCommandRepository,
+    pub hashing: DynHashing,
+    pub role: DynRoleQueryRepository,
+    pub user_role: DynUserRoleCommandRepository,
+    pub refresh_command: DynRefreshTokenCommandRepository,
+    pub jwt_config: DynJwtService,
+    pub token: DynTokenService,
+}
+
 impl AuthService {
-    pub async fn new(
-        query: DynUserQueryRepository,
-        command: DynUserCommandRepository,
-        jwt_config: DynJwtService,
-        hashing: DynHashing,
-        role: DynRoleQueryRepository,
-        user_role: DynUserRoleCommandRepository,
-        token: DynTokenService,
-        refresh_command: DynRefreshTokenCommandRepository,
-    ) -> Self {
+    pub async fn new(deps: AuthServiceDeps) -> Self {
         Self {
-            query,
-            command,
-            jwt_config,
-            hashing,
-            role,
-            user_role,
-            token,
-            refresh_command,
+            query: deps.query,
+            command: deps.command,
+            hashing: deps.hashing,
+            role: deps.role,
+            user_role: deps.user_role,
+            refresh_command: deps.refresh_command,
+            jwt_config: deps.jwt_config,
+            token: deps.token,
         }
     }
 }
@@ -255,7 +256,7 @@ impl AuthServiceTrait for AuthService {
     async fn refresh_token(&self, token: &str) -> Result<ApiResponse<TokenResponse>, ServiceError> {
         info!("🔄 Refreshing access token");
 
-        let user_id = match self.jwt_config.verify_token(&token, "refresh") {
+        let user_id = match self.jwt_config.verify_token(token, "refresh") {
             Ok(uid) => uid,
             Err(ServiceError::TokenExpired) => {
                 let _ = self.refresh_command.delete_token(token.to_string()).await;

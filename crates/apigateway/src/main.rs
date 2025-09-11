@@ -1,12 +1,18 @@
 use anyhow::{Context, Result};
 use apigateway::{handler::AppRouter, state::AppState};
 use dotenv::dotenv;
-use shared::config::Config;
+use shared::{config::Config, utils::Logger};
 use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
+
+    let is_dev = std::env::var("DEV_MODE")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
+    let _logger = Logger::new("apigateway", is_dev);
 
     let config = Config::init().context("Failed to load configuration")?;
 

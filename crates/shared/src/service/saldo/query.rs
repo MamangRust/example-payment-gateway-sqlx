@@ -79,6 +79,11 @@ impl SaldoQueryServiceTrait for SaldoQueryService {
             Some(req.search.clone())
         };
 
+        info!(
+            "🔍 Searching all saldos | Page: {page}, Size: {page_size}, Search: {:?}",
+            search.as_deref().unwrap_or("None")
+        );
+
         let (saldos, total_items) = self.query.find_active(req).await.map_err(|e| {
             error!("❌ Failed to fetch active saldos: {e:?}");
             ServiceError::Custom(e.to_string())

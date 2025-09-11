@@ -20,7 +20,7 @@ impl AppState {
         let deps = DependenciesInjectDeps {
             pool: pool.clone(),
             hash: hashing,
-            jwt_config: jwt_config,
+            jwt_config,
         };
 
         let di_container = {

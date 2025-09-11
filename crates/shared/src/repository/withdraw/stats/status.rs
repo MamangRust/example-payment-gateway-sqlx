@@ -250,12 +250,12 @@ impl WithdrawStatsStatusRepositoryTrait for WithdrawStatsStatusRepository {
         let last_day_current = current_date
             .checked_add_months(chrono::Months::new(1))
             .and_then(|d| d.checked_sub_days(Days::new(1)))
-            .unwrap_or_else(|| current_date);
+            .unwrap_or(current_date);
 
         let last_day_prev = prev_date
             .checked_add_months(chrono::Months::new(1))
             .and_then(|d| d.checked_sub_days(Days::new(1)))
-            .unwrap_or_else(|| prev_date);
+            .unwrap_or(prev_date);
 
         let sql = r#"
             WITH monthly_data AS (
@@ -316,10 +316,10 @@ impl WithdrawStatsStatusRepositoryTrait for WithdrawStatsStatusRepository {
         "#;
 
         let rows = sqlx::query(sql)
-            .bind(&prev_date)
-            .bind(&last_day_prev)
-            .bind(&current_date)
-            .bind(&last_day_current)
+            .bind(prev_date)
+            .bind(last_day_prev)
+            .bind(current_date)
+            .bind(last_day_current)
             .fetch_all(&mut *conn)
             .await
             .map_err(|e| {

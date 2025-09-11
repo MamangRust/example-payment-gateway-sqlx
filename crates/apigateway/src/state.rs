@@ -5,7 +5,6 @@ use shared::{
     config::{GrpcClientConfig, JwtConfig},
 };
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct AppState {

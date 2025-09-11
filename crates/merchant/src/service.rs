@@ -36,10 +36,9 @@ use shared::{
         FindAllMerchantTransactionsByApiKey, FindAllMerchantTransactionsById, FindAllMerchants,
         MonthYearAmountApiKey, MonthYearAmountMerchant, MonthYearPaymentMethodApiKey,
         MonthYearPaymentMethodMerchant, MonthYearTotalAmountApiKey, MonthYearTotalAmountMerchant,
-        UpdateMerchantRequest as DomainUpdateMerchantRequest, UpdateMerchantStatus,
+        UpdateMerchantRequest as DomainUpdateMerchantRequest,
     },
     errors::AppErrorGrpc,
-    utils::timestamp_to_naive_date,
 };
 use tonic::{Request, Response, Status};
 

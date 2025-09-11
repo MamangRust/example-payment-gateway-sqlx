@@ -31,6 +31,7 @@ use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
 #[async_trait]
+#[allow(dead_code)]
 pub trait SaldoGrpcClientServiceTrait:
     SaldoQueryGrpcClientTrait
     + SaldoCommandGrpcClientTrait

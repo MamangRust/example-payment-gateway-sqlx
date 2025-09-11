@@ -593,22 +593,22 @@ pub async fn get_yearly_status_failed_by_card(
 pub fn transfer_routes(app_state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/transfers", get(get_transfers))
-        .route("/api/transfers/:id", get(get_transfer))
+        .route("/api/transfers/{id}", get(get_transfer))
         .route("/api/transfers/active", get(get_active_transfers))
         .route("/api/transfers/trashed", get(get_trashed_transfers))
         .route(
-            "/api/transfers/from/:transfer_from",
+            "/api/transfers/from/{transfer_from}",
             get(get_transfers_by_transfer_from),
         )
         .route(
-            "/api/transfers/to/:transfer_to",
+            "/api/transfers/to/{transfer_to}",
             get(get_transfers_by_transfer_to),
         )
         .route("/api/transfers", post(create_transfer))
-        .route("/api/transfers/:id", put(update_transfer))
-        .route("/api/transfers/trash/:id", delete(trash_transfer_handler))
-        .route("/api/transfers/restore/:id", put(restore_transfer_handler))
-        .route("/api/transfers/delete/:id", delete(delete_transfer))
+        .route("/api/transfers/{id}", put(update_transfer))
+        .route("/api/transfers/trash/{id}", delete(trash_transfer_handler))
+        .route("/api/transfers/restore/{id}", put(restore_transfer_handler))
+        .route("/api/transfers/delete/{id}", delete(delete_transfer))
         .route(
             "/api/transfers/restore-all",
             put(restore_all_transfer_handler),

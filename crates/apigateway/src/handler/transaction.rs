@@ -644,22 +644,22 @@ pub fn transaction_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         )
         .route("/api/transactions/active", get(get_active_transactions))
         .route("/api/transactions/trashed", get(get_trashed_transactions))
-        .route("/api/transactions/:id", get(get_transaction))
+        .route("/api/transactions/{id}", get(get_transaction))
         .route(
-            "/api/transactions/merchant/:merchant_id",
+            "/api/transactions/merchant/{merchant_id}",
             get(get_transactions_by_merchant_id),
         )
         .route("/api/transactions", post(create_transaction))
-        .route("/api/transactions/:id", put(update_transaction))
+        .route("/api/transactions/{id}", put(update_transaction))
         .route(
-            "/api/transactions/trash/:id",
+            "/api/transactions/trash/{id}",
             delete(trash_transaction_handler),
         )
         .route(
-            "/api/transactions/restore/:id",
+            "/api/transactions/restore/{id}",
             put(restore_transaction_handler),
         )
-        .route("/api/transactions/delete/:id", delete(delete_transaction))
+        .route("/api/transactions/delete/{id}", delete(delete_transaction))
         .route(
             "/api/transactions/restore-all",
             put(restore_all_transaction_handler),

@@ -2,7 +2,7 @@ use crate::{
     abstract_trait::{
         card::repository::query::DynCardQueryRepository,
         saldo::{
-            repository::{command::DynSaldoCommandRepository, query::DynSaldoQueryRepository},
+            repository::command::DynSaldoCommandRepository,
             service::command::SaldoCommandServiceTrait,
         },
     },

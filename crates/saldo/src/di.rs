@@ -64,9 +64,7 @@ impl SaldoQueryDeps {
 
 #[derive(Clone)]
 pub struct SaldoStatsDeps {
-    pub balance_repo: DynSaldoBalanceRepository,
     pub balance_service: DynSaldoBalanceService,
-    pub total_repo: DynSaldoTotalBalanceRepository,
     pub total_service: DynSaldoTotalBalanceService,
 }
 
@@ -83,9 +81,7 @@ impl SaldoStatsDeps {
             as DynSaldoTotalBalanceService;
 
         Ok(Self {
-            balance_repo,
             balance_service,
-            total_repo,
             total_service,
         })
     }

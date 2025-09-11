@@ -13,10 +13,10 @@ pub struct ServerConfig {
 impl ServerConfig {
     pub fn from_config(config: &Config) -> Result<Self> {
         Ok(Self {
-            grpc_addr: format!("0.0.0.0:{}", config.auth.grpc_port)
+            grpc_addr: format!("0.0.0.0:{}", config.merchant.grpc_port)
                 .parse()
                 .context("Invalid gRPC address")?,
-            metrics_addr: format!("0.0.0.0:{}", config.auth.metric_port)
+            metrics_addr: format!("0.0.0.0:{}", config.merchant.metric_port)
                 .parse()
                 .context("Invalid metrics address")?,
             database_url: config.database_url.clone(),

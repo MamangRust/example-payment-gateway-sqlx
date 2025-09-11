@@ -1,7 +1,5 @@
 use crate::{
-    domain::requests::withdraw::{
-        CreateWithdrawRequest, UpdateWithdrawRequest, UpdateWithdrawStatus,
-    },
+    domain::requests::withdraw::{CreateWithdrawRequest, UpdateWithdrawRequest},
     domain::responses::{ApiResponse, WithdrawResponse, WithdrawResponseDeleteAt},
     errors::AppErrorHttp,
 };

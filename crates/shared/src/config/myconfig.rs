@@ -67,12 +67,12 @@ pub struct ServiceConfig {
 
 impl ServiceConfig {
     pub fn from_env(prefix: &str) -> Result<Self> {
-        let grpc_port = std::env::var(format!("{}_GRPC_PORT", prefix))
+        let grpc_port = std::env::var(format!("{prefix}_GRPC_PORT"))
             .context(format!("Missing env: {prefix}_GRPC_PORT"))?
             .parse::<u16>()
             .context(format!("{prefix}_GRPC_PORT must be a valid u16 integer",))?;
 
-        let metric_port = std::env::var(format!("{}_METRIC_PORT", prefix))
+        let metric_port = std::env::var(format!("{prefix}_METRIC_PORT"))
             .context(format!("Missing env: {prefix}_METRIC_PORT"))?
             .parse::<u16>()
             .context(format!("{prefix}_METRIC_PORT must be a valid u16 integer",))?;

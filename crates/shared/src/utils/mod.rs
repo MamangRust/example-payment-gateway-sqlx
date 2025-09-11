@@ -1,5 +1,6 @@
 mod api_key;
 mod gracefull;
+mod logs;
 mod mark;
 mod month;
 mod parse_datetime;
@@ -7,6 +8,7 @@ mod random_card_number;
 
 pub use self::api_key::generate_api_key;
 pub use self::gracefull::shutdown_signal;
+pub use self::logs::Logger;
 pub use self::mark::{mask_api_key, mask_card_number};
 pub use self::month::month_name;
 pub use self::parse_datetime::{

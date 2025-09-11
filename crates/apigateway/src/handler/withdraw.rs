@@ -533,14 +533,14 @@ pub fn withdraw_routes(app_state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/withdraws", get(get_withdraws))
         .route("/api/withdraws/by-card", get(get_withdraws_by_card_number))
-        .route("/api/withdraws/:id", get(get_withdraw))
+        .route("/api/withdraws/{id}", get(get_withdraw))
         .route("/api/withdraws/active", get(get_active_withdraws))
         .route("/api/withdraws/trashed", get(get_trashed_withdraws))
         .route("/api/withdraws", post(create_withdraw))
-        .route("/api/withdraws/:id", put(update_withdraw))
-        .route("/api/withdraws/trash/:id", delete(trash_withdraw_handler))
-        .route("/api/withdraws/restore/:id", put(restore_withdraw_handler))
-        .route("/api/withdraws/delete/:id", delete(delete_withdraw))
+        .route("/api/withdraws/{id}", put(update_withdraw))
+        .route("/api/withdraws/trash/{id}", delete(trash_withdraw_handler))
+        .route("/api/withdraws/restore/{id}", put(restore_withdraw_handler))
+        .route("/api/withdraws/delete/{id}", delete(delete_withdraw))
         .route(
             "/api/withdraws/restore-all",
             put(restore_all_withdraw_handler),

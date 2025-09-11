@@ -59,9 +59,9 @@ impl From<UserModel> for UserResponseDeleteAt {
     }
 }
 
-pub fn to_user_response(opt: Option<UserModel>) -> Option<UserResponse> {
-    opt.map(UserResponse::from)
-}
+// pub fn to_user_response(opt: Option<UserModel>) -> Option<UserResponse> {
+//     opt.map(UserResponse::from)
+// }
 
 // response to proto
 impl From<UserResponse> for UserResponseProto {

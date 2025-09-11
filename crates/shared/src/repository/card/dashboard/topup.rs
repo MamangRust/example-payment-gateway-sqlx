@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::{error, info};
+use tracing::error;
 
 pub struct CardDashboardTopupRepository {
     db: ConnectionPool,

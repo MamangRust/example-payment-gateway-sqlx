@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use auth::{config::ServerConfig, service::AuthServiceImpl, state::AppState};
 use genproto::auth::auth_service_server::AuthServiceServer;
-use shared::config::{Config, ConnectionManager};
+use shared::{
+    config::{Config, ConnectionManager},
+    utils::Logger,
+};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
@@ -9,6 +12,12 @@ use tracing::{error, info, warn};
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
+
+    let is_dev = std::env::var("DEV_MODE")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
+    let _logger = Logger::new("auth-service", is_dev);
 
     let config = Config::init().context("Failed to load configuration")?;
     let server_config = ServerConfig::from_config(&config)?;

@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use genproto::withdraw::withdraw_service_server::WithdrawServiceServer;
-use shared::config::{Config, ConnectionManager};
+use shared::{
+    config::{Config, ConnectionManager},
+    utils::Logger,
+};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
@@ -13,6 +16,12 @@ use withdraw::{
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
+
+    let is_dev = std::env::var("DEV_MODE")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
+    let _logger = Logger::new("withdraw-service", is_dev);
 
     let config = Config::init().context("Failed to load configuration")?;
 
@@ -108,7 +117,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    info!("✅ Auth Service shutdown complete.");
+    info!("✅ Withdraw Service shutdown complete.");
     Ok(())
 }
 

@@ -51,11 +51,12 @@ use shared::{
     errors::{AppErrorGrpc, AppErrorHttp},
 };
 use std::sync::Arc;
-use tokio::{sync::Mutex, time::Instant};
+use tokio::sync::Mutex;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
 #[async_trait]
+#[allow(dead_code)]
 pub trait MerchantGrpcClientServiceTrait:
     MerchantQueryGrpcClientTrait
     + MerchantTransactionGrpcClientTrait

@@ -1,0 +1,28 @@
+{"timestamp":"2025-09-11T14:13:20.760146Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-11T14:13:20.766235Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:20.766821Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:25.768009Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:25.768430Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:30.770014Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:30.770440Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:35.772007Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:35.772462Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:40.773976Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:40.774441Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:45.775662Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:45.776153Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:50.777305Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:50.777820Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:55.778998Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T14:13:55.779428Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"auth"}
+{"timestamp":"2025-09-11T14:14:00.780681Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T14:14:00.781094Z","level":"ERROR","fields":{"message":"❌ gRPC server failed: gRPC server failed to start or serve. Restarting in 5s..."},"target":"auth"}
+{"timestamp":"2025-09-11T14:14:05.782569Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T18:02:54.078591Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-11T18:02:54.093141Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-11T18:10:19.570014Z","level":"INFO","fields":{"message":"🛑 Shutdown signal received."},"target":"auth"}
+{"timestamp":"2025-09-11T18:10:19.570217Z","level":"INFO","fields":{"message":"gRPC server received shutdown signal"},"target":"auth"}
+{"timestamp":"2025-09-11T18:10:19.570235Z","level":"INFO","fields":{"message":"🛑 Shutting down all servers..."},"target":"auth"}
+{"timestamp":"2025-09-11T18:10:19.570370Z","level":"INFO","fields":{"message":"gRPC server stopped gracefully"},"target":"auth"}
+{"timestamp":"2025-09-11T18:10:19.570518Z","level":"INFO","fields":{"message":"✅ All servers shutdown gracefully"},"target":"auth"}
+{"timestamp":"2025-09-11T18:10:19.570589Z","level":"INFO","fields":{"message":"✅ Auth Service shutdown complete."},"target":"auth"}

@@ -152,8 +152,6 @@ pub async fn update_saldo(
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateSaldoRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    // Asumsi struct UpdateSaldoRequest punya field `saldo_id`
-    // Jika tidak, sesuaikan dengan struct-mu
     body.saldo_id = id;
     let response = service.update(&body).await?;
     Ok(Json(response))
@@ -347,12 +345,12 @@ pub fn saldo_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/saldos", get(get_saldos))
         .route("/api/saldos/active", get(get_active_saldos))
         .route("/api/saldos/trashed", get(get_trashed_saldos))
-        .route("/api/saldos/:id", get(get_saldo))
+        .route("/api/saldos/{id}", get(get_saldo))
         .route("/api/saldos", post(create_saldo))
-        .route("/api/saldos/:id", put(update_saldo))
-        .route("/api/saldos/trash/:id", delete(trash_saldo_handler))
-        .route("/api/saldos/restore/:id", put(restore_saldo_handler))
-        .route("/api/saldos/delete/:id", delete(delete_saldo))
+        .route("/api/saldos/{id}", put(update_saldo))
+        .route("/api/saldos/trash/{id}", delete(trash_saldo_handler))
+        .route("/api/saldos/restore/{id}", put(restore_saldo_handler))
+        .route("/api/saldos/delete/{id}", delete(delete_saldo))
         .route("/api/saldos/restore-all", put(restore_all_saldo_handler))
         .route("/api/saldos/delete-all", delete(delete_all_saldo_handler))
         .route(

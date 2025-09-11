@@ -260,7 +260,7 @@ impl From<MerchantResponseMonthlyPaymentMethod> for MerchantResponseMonthlyPayme
         Self {
             month: r.month,
             payment_method: r.payment_method,
-            total_amount: r.total_amount as i64,
+            total_amount: r.total_amount,
         }
     }
 }
@@ -270,7 +270,7 @@ impl From<MerchantResponseYearlyPaymentMethod> for MerchantResponseYearlyPayment
         Self {
             year: r.year,
             payment_method: r.payment_method,
-            total_amount: r.total_amount as i64,
+            total_amount: r.total_amount,
         }
     }
 }
@@ -279,7 +279,7 @@ impl From<MerchantResponseMonthlyAmount> for MerchantResponseMonthlyAmountProto 
     fn from(r: MerchantResponseMonthlyAmount) -> Self {
         Self {
             month: r.month,
-            total_amount: r.total_amount as i64,
+            total_amount: r.total_amount,
         }
     }
 }
@@ -288,7 +288,7 @@ impl From<MerchantResponseYearlyAmount> for MerchantResponseYearlyAmountProto {
     fn from(r: MerchantResponseYearlyAmount) -> Self {
         Self {
             year: r.year,
-            total_amount: r.total_amount as i64,
+            total_amount: r.total_amount,
         }
     }
 }
@@ -298,7 +298,7 @@ impl From<MerchantResponseMonthlyTotalAmount> for MerchantMonthlyTotalAmountProt
         Self {
             year: r.year,
             month: r.month,
-            total_amount: r.total_amount as i64,
+            total_amount: r.total_amount,
         }
     }
 }
@@ -307,7 +307,7 @@ impl From<MerchantResponseYearlyTotalAmount> for MerchantResponseYearlyTotalAmou
     fn from(r: MerchantResponseYearlyTotalAmount) -> Self {
         Self {
             year: r.year,
-            total_amount: r.total_amount as i64,
+            total_amount: r.total_amount,
         }
     }
 }

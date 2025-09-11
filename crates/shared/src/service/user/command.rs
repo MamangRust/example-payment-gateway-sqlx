@@ -62,7 +62,7 @@ impl UserCommandServiceTrait for UserCommandService {
 
         info!("🆕 Creating user: {} {}", req.firstname, req.lastname);
 
-        if let Some(_) = self
+        if self
             .query
             .find_by_email(req.email.clone())
             .await
@@ -71,6 +71,7 @@ impl UserCommandServiceTrait for UserCommandService {
                 error!("{msg}");
                 ServiceError::Custom(msg)
             })?
+            .is_some()
         {
             let msg = format!("📧 Email {} already registered", req.email);
             error!("{msg}");

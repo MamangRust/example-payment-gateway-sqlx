@@ -100,7 +100,7 @@ impl MerchantQueryRepositoryTrait for MerchantQueryRepository {
     ) -> Result<(Vec<MerchantModel>, i64), RepositoryError> {
         let mut conn = self.get_conn().await?;
 
-        let limit = req.page_size.max(1).min(100);
+        let limit = req.page_size.clamp(1, 100);
         let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
@@ -166,7 +166,7 @@ impl MerchantQueryRepositoryTrait for MerchantQueryRepository {
     ) -> Result<(Vec<MerchantModel>, i64), RepositoryError> {
         let mut conn = self.get_conn().await?;
 
-        let limit = req.page_size.max(1).min(100);
+        let limit = req.page_size.clamp(1, 100);
         let offset = (req.page - 1).max(0) * limit;
 
         let search_pattern = if req.search.trim().is_empty() {
