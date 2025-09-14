@@ -5,7 +5,7 @@ use genproto::user::{
 };
 use shared::{
     abstract_trait::user::http::{
-        command::UserCommandGrpcClientTrait, query::UserQueryGrpcClientTrait,
+        UserCommandGrpcClientTrait, UserGrpcClientServiceTrait, UserQueryGrpcClientTrait,
     },
     domain::{
         requests::user::{
@@ -22,10 +22,6 @@ use tokio::sync::Mutex;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
-#[async_trait]
-#[allow(dead_code)]
-pub trait UserGrpcClientTrait: UserCommandGrpcClientTrait + UserQueryGrpcClientTrait {}
-
 #[derive(Debug)]
 pub struct UserGrpcClientService {
     client: Arc<Mutex<UserServiceClient<Channel>>>,
@@ -36,6 +32,9 @@ impl UserGrpcClientService {
         Self { client }
     }
 }
+
+#[async_trait]
+impl UserGrpcClientServiceTrait for UserGrpcClientService {}
 
 #[async_trait]
 impl UserQueryGrpcClientTrait for UserGrpcClientService {
@@ -429,6 +428,3 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
         }
     }
 }
-
-#[async_trait]
-impl UserGrpcClientTrait for UserGrpcClientService {}

@@ -103,7 +103,7 @@ impl From<SaldoMonthTotalBalance> for SaldoMonthTotalBalanceResponse {
         Self {
             month: m.month,
             year: m.year,
-            total_balance: m.total_balance,
+            total_balance: m.total_balance as i64,
         }
     }
 }
@@ -112,7 +112,7 @@ impl From<SaldoYearTotalBalance> for SaldoYearTotalBalanceResponse {
     fn from(y: SaldoYearTotalBalance) -> Self {
         Self {
             year: y.year,
-            total_balance: y.total_balance,
+            total_balance: y.total_balance as i64,
         }
     }
 }

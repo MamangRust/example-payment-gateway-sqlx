@@ -1,13 +1,14 @@
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct TransactionModel {
     pub transaction_id: i32,
     pub card_number: String,
-    pub transaction_no: String,
-    pub amount: i64,
+    pub transaction_no: Uuid,
+    pub amount: i32,
     pub payment_method: String,
     pub merchant_id: i32,
     pub status: String,

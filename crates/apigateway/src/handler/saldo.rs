@@ -8,18 +8,17 @@ use axum::{
     http::StatusCode,
     middleware,
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::saldo::http::{
-        command::DynSaldoCommandGrpcClient,
-        query::DynSaldoQueryGrpcClient,
-        stats::{balance::DynSaldoBalanceGrpcClient, total::DynSaldoTotalBalanceGrpcClient},
-    },
+    abstract_trait::saldo::http::DynSaldoGrpcClientService,
     domain::{
-        requests::saldo::{
-            CreateSaldoRequest, FindAllSaldos, MonthTotalSaldoBalance, UpdateSaldoRequest,
+        requests::{
+            saldo::{
+                CreateSaldoRequest, FindAllSaldos, MonthTotalSaldoBalance, UpdateSaldoRequest,
+            },
+            withdraw::YearQuery,
         },
         responses::{
             ApiResponse, ApiResponsePagination, SaldoMonthBalanceResponse,
@@ -45,7 +44,7 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_saldos(
-    Extension(service): Extension<DynSaldoQueryGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(params): Query<FindAllSaldos>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_all(&params).await?;
@@ -65,7 +64,7 @@ pub async fn get_saldos(
     )
 )]
 pub async fn get_active_saldos(
-    Extension(service): Extension<DynSaldoQueryGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(params): Query<FindAllSaldos>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_active(&params).await?;
@@ -85,7 +84,7 @@ pub async fn get_active_saldos(
     )
 )]
 pub async fn get_trashed_saldos(
-    Extension(service): Extension<DynSaldoQueryGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(params): Query<FindAllSaldos>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_trashed(&params).await?;
@@ -105,7 +104,7 @@ pub async fn get_trashed_saldos(
     )
 )]
 pub async fn get_saldo(
-    Extension(service): Extension<DynSaldoQueryGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_id(id).await?;
@@ -113,8 +112,28 @@ pub async fn get_saldo(
 }
 
 #[utoipa::path(
+    get,
+    path = "/api/saldos/by-card/{card_number}",
+    tag = "Saldo",
+    security(("bearer_auth" = [])),
+    params(("card_number" = String, Path, description = "Card Number")),
+    responses(
+        (status = 200, description = "Saldo details", body = ApiResponse<SaldoResponse>),
+        (status = 404, description = "Saldo not found"),
+        (status = 401, description = "Unauthorized")
+    )
+)]
+pub async fn get_saldo_by_card(
+    Extension(service): Extension<DynSaldoGrpcClientService>,
+    Path(card_number): Path<String>,
+) -> Result<impl IntoResponse, AppErrorHttp> {
+    let response = service.find_by_card(&card_number).await?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
     post,
-    path = "/api/saldos",
+    path = "/api/saldos/create",
     tag = "Saldo",
     security(("bearer_auth" = [])),
     request_body = CreateSaldoRequest,
@@ -126,7 +145,7 @@ pub async fn get_saldo(
     )
 )]
 pub async fn create_saldo(
-    Extension(service): Extension<DynSaldoCommandGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateSaldoRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.create(&body).await?;
@@ -134,8 +153,8 @@ pub async fn create_saldo(
 }
 
 #[utoipa::path(
-    put,
-    path = "/api/saldos/{id}",
+    post,
+    path = "/api/saldos/update/{id}",
     tag = "Saldo",
     security(("bearer_auth" = [])),
     params(("id" = i32, Path, description = "Saldo ID")),
@@ -148,7 +167,7 @@ pub async fn create_saldo(
     )
 )]
 pub async fn update_saldo(
-    Extension(service): Extension<DynSaldoCommandGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateSaldoRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
@@ -170,7 +189,7 @@ pub async fn update_saldo(
     )
 )]
 pub async fn trash_saldo_handler(
-    Extension(service): Extension<DynSaldoCommandGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.trash(id).await?;
@@ -190,7 +209,7 @@ pub async fn trash_saldo_handler(
     )
 )]
 pub async fn restore_saldo_handler(
-    Extension(service): Extension<DynSaldoCommandGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.restore(id).await?;
@@ -210,7 +229,7 @@ pub async fn restore_saldo_handler(
     )
 )]
 pub async fn delete_saldo(
-    Extension(service): Extension<DynSaldoCommandGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_permanent(id).await?;
@@ -231,7 +250,7 @@ pub async fn delete_saldo(
     )
 )]
 pub async fn restore_all_saldo_handler(
-    Extension(service): Extension<DynSaldoCommandGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.restore_all().await?;
     Ok(Json(json!({
@@ -251,7 +270,7 @@ pub async fn restore_all_saldo_handler(
     )
 )]
 pub async fn delete_all_saldo_handler(
-    Extension(service): Extension<DynSaldoCommandGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_all().await?;
     Ok(Json(json!({
@@ -265,7 +284,7 @@ pub async fn delete_all_saldo_handler(
     path = "/api/saldos/stats/balance/monthly",
     tag = "Saldo Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly balance", body = ApiResponse<Vec<SaldoMonthBalanceResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -273,10 +292,10 @@ pub async fn delete_all_saldo_handler(
     )
 )]
 pub async fn get_monthly_balance(
-    Extension(service): Extension<DynSaldoBalanceGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_month_balance(year).await?;
+    let response = service.get_month_balance(req.year).await?;
     Ok(Json(response))
 }
 
@@ -285,7 +304,7 @@ pub async fn get_monthly_balance(
     path = "/api/saldos/stats/balance/yearly",
     tag = "Saldo Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly balance", body = ApiResponse<Vec<SaldoYearBalanceResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -293,10 +312,10 @@ pub async fn get_monthly_balance(
     )
 )]
 pub async fn get_yearly_balance(
-    Extension(service): Extension<DynSaldoBalanceGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_year_balance(year).await?;
+    let response = service.get_year_balance(req.year).await?;
     Ok(Json(response))
 }
 
@@ -313,7 +332,7 @@ pub async fn get_yearly_balance(
     )
 )]
 pub async fn get_monthly_total_balance(
-    Extension(service): Extension<DynSaldoTotalBalanceGrpcClient>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(params): Query<MonthTotalSaldoBalance>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_month_total_balance(&params).await?;
@@ -325,7 +344,7 @@ pub async fn get_monthly_total_balance(
     path = "/api/saldos/stats/total-balance/yearly",
     tag = "Saldo Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly total balance", body = ApiResponse<Vec<SaldoYearTotalBalanceResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -333,26 +352,27 @@ pub async fn get_monthly_total_balance(
     )
 )]
 pub async fn get_yearly_total_balance(
-    Extension(service): Extension<DynSaldoTotalBalanceGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynSaldoGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_year_total_balance(year).await?;
+    let response = service.get_year_total_balance(req.year).await?;
     Ok(Json(response))
 }
 
 pub fn saldo_routes(app_state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/saldos", get(get_saldos))
+        .route("/api/saldos/create", post(create_saldo))
+        .route("/api/saldos/update/{id}", post(update_saldo))
         .route("/api/saldos/active", get(get_active_saldos))
         .route("/api/saldos/trashed", get(get_trashed_saldos))
         .route("/api/saldos/{id}", get(get_saldo))
-        .route("/api/saldos", post(create_saldo))
-        .route("/api/saldos/{id}", put(update_saldo))
-        .route("/api/saldos/trash/{id}", delete(trash_saldo_handler))
-        .route("/api/saldos/restore/{id}", put(restore_saldo_handler))
+        .route("/api/saldos/by-card/{card_number}", get(get_saldo_by_card))
+        .route("/api/saldos/trash/{id}", post(trash_saldo_handler))
+        .route("/api/saldos/restore/{id}", post(restore_saldo_handler))
         .route("/api/saldos/delete/{id}", delete(delete_saldo))
-        .route("/api/saldos/restore-all", put(restore_all_saldo_handler))
-        .route("/api/saldos/delete-all", delete(delete_all_saldo_handler))
+        .route("/api/saldos/restore-all", post(restore_all_saldo_handler))
+        .route("/api/saldos/delete-all", post(delete_all_saldo_handler))
         .route(
             "/api/saldos/stats/balance/monthly",
             get(get_monthly_balance),

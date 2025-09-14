@@ -9,18 +9,11 @@ use genproto::transaction::{
 };
 use shared::{
     abstract_trait::transaction::http::{
-        command::TransactionCommandGrpcClientTrait,
-        query::TransactionQueryGrpcClientTrait,
-        stats::{
-            amount::TransactionStatsAmountGrpcClientTrait,
-            method::TransactionStatsMethodGrpcClientTrait,
-            status::TransactionStatsStatusGrpcClientTrait,
-        },
-        statsbycard::{
-            amount::TransactionStatsAmountByCardNumberGrpcClientTrait,
-            method::TransactionStatsMethodByCardNumberGrpcClientTrait,
-            status::TransactionStatsStatusByCardNumberGrpcClientTrait,
-        },
+        TransactionCommandGrpcClientTrait, TransactionGrpcClientServiceTrait,
+        TransactionQueryGrpcClientTrait, TransactionStatsAmountByCardNumberGrpcClientTrait,
+        TransactionStatsAmountGrpcClientTrait, TransactionStatsMethodByCardNumberGrpcClientTrait,
+        TransactionStatsMethodGrpcClientTrait, TransactionStatsStatusByCardNumberGrpcClientTrait,
+        TransactionStatsStatusGrpcClientTrait,
     },
     domain::{
         requests::transaction::{
@@ -48,20 +41,6 @@ use tokio::sync::Mutex;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
-#[async_trait]
-#[allow(dead_code)]
-pub trait TransactionGrpcClientServiceTrait:
-    TransactionQueryGrpcClientTrait
-    + TransactionCommandGrpcClientTrait
-    + TransactionStatsAmountGrpcClientTrait
-    + TransactionStatsMethodGrpcClientTrait
-    + TransactionStatsStatusGrpcClientTrait
-    + TransactionStatsAmountByCardNumberGrpcClientTrait
-    + TransactionStatsMethodByCardNumberGrpcClientTrait
-    + TransactionStatsStatusByCardNumberGrpcClientTrait
-{
-}
-
 #[derive(Debug)]
 pub struct TransactionGrpcClientService {
     client: Arc<Mutex<TransactionServiceClient<Channel>>>,
@@ -72,6 +51,9 @@ impl TransactionGrpcClientService {
         Self { client }
     }
 }
+
+#[async_trait]
+impl TransactionGrpcClientServiceTrait for TransactionGrpcClientService {}
 
 #[async_trait]
 impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
@@ -876,7 +858,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
 #[async_trait]
 impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_amounts(
+    async fn get_monthly_amounts_bycard(
         &self,
         req: &DomainMonthYearPaymentMethod,
     ) -> Result<ApiResponse<Vec<TransactionMonthAmountResponse>>, AppErrorHttp> {
@@ -920,7 +902,7 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_amounts(
+    async fn get_yearly_amounts_bycard(
         &self,
         req: &DomainMonthYearPaymentMethod,
     ) -> Result<ApiResponse<Vec<TransactionYearlyAmountResponse>>, AppErrorHttp> {
@@ -967,7 +949,7 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
 #[async_trait]
 impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_method(
+    async fn get_monthly_method_bycard(
         &self,
         req: &DomainMonthYearPaymentMethod,
     ) -> Result<ApiResponse<Vec<TransactionMonthMethodResponse>>, AppErrorHttp> {
@@ -1014,7 +996,7 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_method(
+    async fn get_yearly_method_bycard(
         &self,
         req: &DomainMonthYearPaymentMethod,
     ) -> Result<ApiResponse<Vec<TransactionYearMethodResponse>>, AppErrorHttp> {
@@ -1064,7 +1046,7 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
 #[async_trait]
 impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_month_status_success(
+    async fn get_month_status_success_bycard(
         &self,
         req: &DomainMonthStatusTransactionCardNumber,
     ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusSuccess>>, AppErrorHttp> {
@@ -1113,7 +1095,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_status_success(
+    async fn get_yearly_status_success_bycard(
         &self,
         req: &DomainYearStatusTransactionCardNumber,
     ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusSuccess>>, AppErrorHttp> {
@@ -1160,7 +1142,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_month_status_failed(
+    async fn get_month_status_failed_bycard(
         &self,
         req: &DomainMonthStatusTransactionCardNumber,
     ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusFailed>>, AppErrorHttp> {
@@ -1209,7 +1191,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_status_failed(
+    async fn get_yearly_status_failed_bycard(
         &self,
         req: &DomainYearStatusTransactionCardNumber,
     ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusFailed>>, AppErrorHttp> {
@@ -1255,6 +1237,3 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
         }
     }
 }
-
-#[async_trait]
-impl TransactionGrpcClientServiceTrait for TransactionGrpcClientService {}

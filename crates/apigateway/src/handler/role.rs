@@ -8,13 +8,11 @@ use axum::{
     http::StatusCode,
     middleware,
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::role::http::{
-        command::DynRoleCommandGrpcClient, query::DynRoleQueryGrpcClient,
-    },
+    abstract_trait::role::http::DynRoleGrpcClientService,
     domain::{
         requests::role::{CreateRoleRequest, FindAllRoles, UpdateRoleRequest},
         responses::{ApiResponse, ApiResponsePagination, RoleResponse, RoleResponseDeleteAt},
@@ -37,7 +35,7 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_roles(
-    Extension(service): Extension<DynRoleQueryGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
     Query(params): Query<FindAllRoles>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_all(&params).await?;
@@ -57,7 +55,7 @@ pub async fn get_roles(
     )
 )]
 pub async fn get_active_roles(
-    Extension(service): Extension<DynRoleQueryGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
     Query(params): Query<FindAllRoles>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_active(&params).await?;
@@ -77,7 +75,7 @@ pub async fn get_active_roles(
     )
 )]
 pub async fn get_trashed_roles(
-    Extension(service): Extension<DynRoleQueryGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
     Query(params): Query<FindAllRoles>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_trashed(&params).await?;
@@ -97,7 +95,7 @@ pub async fn get_trashed_roles(
     )
 )]
 pub async fn get_role(
-    Extension(service): Extension<DynRoleQueryGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_id(id).await?;
@@ -117,7 +115,7 @@ pub async fn get_role(
     )
 )]
 pub async fn get_roles_by_user_id(
-    Extension(service): Extension<DynRoleQueryGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
     Path(user_id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_user_id(user_id).await?;
@@ -138,7 +136,7 @@ pub async fn get_roles_by_user_id(
     )
 )]
 pub async fn create_role(
-    Extension(service): Extension<DynRoleCommandGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateRoleRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.create(&body).await?;
@@ -160,7 +158,7 @@ pub async fn create_role(
     )
 )]
 pub async fn update_role(
-    Extension(service): Extension<DynRoleCommandGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateRoleRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
@@ -182,7 +180,7 @@ pub async fn update_role(
     )
 )]
 pub async fn trash_role_handler(
-    Extension(service): Extension<DynRoleCommandGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.trash(id).await?;
@@ -202,7 +200,7 @@ pub async fn trash_role_handler(
     )
 )]
 pub async fn restore_role_handler(
-    Extension(service): Extension<DynRoleCommandGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.restore(id).await?;
@@ -222,7 +220,7 @@ pub async fn restore_role_handler(
     )
 )]
 pub async fn delete_role(
-    Extension(service): Extension<DynRoleCommandGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete(id).await?;
@@ -243,7 +241,7 @@ pub async fn delete_role(
     )
 )]
 pub async fn restore_all_role_handler(
-    Extension(service): Extension<DynRoleCommandGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.restore_all().await?;
     Ok(Json(json!({
@@ -263,7 +261,7 @@ pub async fn restore_all_role_handler(
     )
 )]
 pub async fn delete_all_role_handler(
-    Extension(service): Extension<DynRoleCommandGrpcClient>,
+    Extension(service): Extension<DynRoleGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_all().await?;
     Ok(Json(json!({
@@ -280,12 +278,12 @@ pub fn role_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/roles/{id}", get(get_role))
         .route("/api/roles/user/{user_id}", get(get_roles_by_user_id))
         .route("/api/roles", post(create_role))
-        .route("/api/roles/{id}", put(update_role))
-        .route("/api/roles/trash/{id}", delete(trash_role_handler))
-        .route("/api/roles/restore/{id}", put(restore_role_handler))
+        .route("/api/roles/{id}", post(update_role))
+        .route("/api/roles/trash/{id}", post(trash_role_handler))
+        .route("/api/roles/restore/{id}", post(restore_role_handler))
         .route("/api/roles/delete/{id}", delete(delete_role))
-        .route("/api/roles/restore-all", put(restore_all_role_handler))
-        .route("/api/roles/delete-all", delete(delete_all_role_handler))
+        .route("/api/roles/restore-all", post(restore_all_role_handler))
+        .route("/api/roles/delete-all", post(delete_all_role_handler))
         .layer(middleware::from_fn(jwt::auth))
         .layer(Extension(app_state.di_container.role_clients.clone()))
         .layer(Extension(app_state.jwt_config.clone()))

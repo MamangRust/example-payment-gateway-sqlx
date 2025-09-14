@@ -8,21 +8,13 @@ use genproto::card::{
 };
 use shared::{
     abstract_trait::card::http::{
-        command::CardCommandGrpcClientTrait,
-        dashboard::CardDashboardGrpcClientTrait,
-        query::CardQueryGrpcClientTrait,
-        stats::{
-            balance::CardStatsBalanceGrpcClientTrait, topup::CardStatsTopupGrpcClientTrait,
-            transaction::CardStatsTransactionGrpcClientTrait,
-            transfer::CardStatsTransferGrpcClientTrait, withdraw::CardStatsWithdrawGrpcClientTrait,
-        },
-        statsbycard::{
-            balance::CardStatsBalanceByCardGrpcClientTrait,
-            topup::CardStatsTopupByCardGrpcClientTrait,
-            transaction::CardStatsTransactionByCardGrpcClientTrait,
-            transfer::CardStatsTransferByCardGrpcClientTrait,
-            withdraw::CardStatsWithdrawByCardGrpcClientTrait,
-        },
+        CardCommandGrpcClientTrait, CardDashboardGrpcClientTrait, CardGrpcClientServiceTrait,
+        CardQueryGrpcClientTrait, CardStatsBalanceByCardGrpcClientTrait,
+        CardStatsBalanceGrpcClientTrait, CardStatsTopupByCardGrpcClientTrait,
+        CardStatsTopupGrpcClientTrait, CardStatsTransactionByCardGrpcClientTrait,
+        CardStatsTransactionGrpcClientTrait, CardStatsTransferByCardGrpcClientTrait,
+        CardStatsTransferGrpcClientTrait, CardStatsWithdrawByCardGrpcClientTrait,
+        CardStatsWithdrawGrpcClientTrait,
     },
     domain::{
         requests::card::{
@@ -43,24 +35,6 @@ use tokio::sync::Mutex;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
-#[async_trait]
-#[allow(dead_code)]
-pub trait CardGrpcClientServiceTrait:
-    CardCommandGrpcClientTrait
-    + CardQueryGrpcClientTrait
-    + CardStatsBalanceGrpcClientTrait
-    + CardStatsTopupGrpcClientTrait
-    + CardStatsTransactionGrpcClientTrait
-    + CardStatsTransferGrpcClientTrait
-    + CardStatsWithdrawGrpcClientTrait
-    + CardStatsBalanceByCardGrpcClientTrait
-    + CardStatsTopupByCardGrpcClientTrait
-    + CardStatsTransactionByCardGrpcClientTrait
-    + CardStatsTransferByCardGrpcClientTrait
-    + CardStatsWithdrawByCardGrpcClientTrait
-{
-}
-
 #[derive(Debug)]
 pub struct CardGrpcClientService {
     client: Arc<Mutex<CardServiceClient<Channel>>>,
@@ -71,6 +45,9 @@ impl CardGrpcClientService {
         Self { client }
     }
 }
+
+#[async_trait]
+impl CardGrpcClientServiceTrait for CardGrpcClientService {}
 
 #[async_trait]
 impl CardDashboardGrpcClientTrait for CardGrpcClientService {
@@ -648,7 +625,7 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
 #[async_trait]
 impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
     #[instrument(skip(self), level = "info")]
-    async fn get_monthly_amount(
+    async fn get_monthly_topup_amount(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
@@ -681,7 +658,7 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn get_yearly_amount(
+    async fn get_yearly_topup_amount(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
@@ -717,7 +694,7 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
 #[async_trait]
 impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
     #[instrument(skip(self), level = "info")]
-    async fn get_monthly_amount(
+    async fn get_monthly_transaction_amount(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
@@ -750,7 +727,7 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn get_yearly_amount(
+    async fn get_yearly_transaction_amount(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
@@ -786,11 +763,11 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
 #[async_trait]
 impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
     #[instrument(skip(self), level = "info")]
-    async fn get_monthly_amount(
+    async fn get_monthly_amount_sender(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
-        info!("fetching monthly TRANSFER amount for year: {year}");
+        info!("fetching monthly TRANSFER amount (sender) for year: {year}");
 
         let mut client = self.client.lock().await;
         let grpc_req = Request::new(FindYearAmount { year });
@@ -802,7 +779,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                     inner.data.into_iter().map(Into::into).collect();
 
                 info!(
-                    "fetched {} monthly transfer amounts for year {year}",
+                    "fetched {} monthly transfer amounts (sender) for year {year}",
                     data.len()
                 );
                 Ok(ApiResponse {
@@ -812,18 +789,18 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                 })
             }
             Err(status) => {
-                error!("fetch monthly TRANSFER amount for year {year} failed: {status:?}");
+                error!("fetch monthly TRANSFER amount (sender) for year {year} failed: {status:?}");
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn get_yearly_amount(
+    async fn get_yearly_amount_sender(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
-        info!("fetching yearly TRANSFER amount for year: {year}");
+        info!("fetching yearly TRANSFER amount (sender) for year: {year}");
 
         let mut client = self.client.lock().await;
         let grpc_req = Request::new(FindYearAmount { year });
@@ -835,7 +812,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                     inner.data.into_iter().map(Into::into).collect();
 
                 info!(
-                    "fetched {} yearly transfer amounts for year {year}",
+                    "fetched {} yearly transfer amounts (sender) for year {year}",
                     data.len()
                 );
                 Ok(ApiResponse {
@@ -845,7 +822,77 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                 })
             }
             Err(status) => {
-                error!("fetch yearly TRANSFER amount for year {year} failed: {status:?}");
+                error!("fetch yearly TRANSFER amount (sender) for year {year} failed: {status:?}");
+                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+            }
+        }
+    }
+
+    #[instrument(skip(self), level = "info")]
+    async fn get_monthly_amount_receiver(
+        &self,
+        year: i32,
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+        info!("fetching monthly TRANSFER amount (receiver) for year: {year}");
+
+        let mut client = self.client.lock().await;
+        let grpc_req = Request::new(FindYearAmount { year });
+
+        match client.find_monthly_transfer_receiver_amount(grpc_req).await {
+            Ok(response) => {
+                let inner = response.into_inner();
+                let data: Vec<CardResponseMonthAmount> =
+                    inner.data.into_iter().map(Into::into).collect();
+
+                info!(
+                    "fetched {} monthly transfer amounts (receiver) for year {year}",
+                    data.len()
+                );
+                Ok(ApiResponse {
+                    data,
+                    message: inner.message,
+                    status: inner.status,
+                })
+            }
+            Err(status) => {
+                error!(
+                    "fetch monthly TRANSFER amount (receiver) for year {year} failed: {status:?}"
+                );
+                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+            }
+        }
+    }
+
+    #[instrument(skip(self), level = "info")]
+    async fn get_yearly_amount_receiver(
+        &self,
+        year: i32,
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+        info!("fetching yearly TRANSFER amount (receiver) for year: {year}");
+
+        let mut client = self.client.lock().await;
+        let grpc_req = Request::new(FindYearAmount { year });
+
+        match client.find_yearly_transfer_receiver_amount(grpc_req).await {
+            Ok(response) => {
+                let inner = response.into_inner();
+                let data: Vec<CardResponseYearAmount> =
+                    inner.data.into_iter().map(Into::into).collect();
+
+                info!(
+                    "fetched {} yearly transfer amounts (receiver) for year {year}",
+                    data.len()
+                );
+                Ok(ApiResponse {
+                    data,
+                    message: inner.message,
+                    status: inner.status,
+                })
+            }
+            Err(status) => {
+                error!(
+                    "fetch yearly TRANSFER amount (receiver) for year {year} failed: {status:?}"
+                );
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }
@@ -855,7 +902,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
 #[async_trait]
 impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
     #[instrument(skip(self), level = "info")]
-    async fn get_monthly_amount(
+    async fn get_monthly_withdraw_amount(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
@@ -888,7 +935,7 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn get_yearly_amount(
+    async fn get_yearly_withdraw_amount(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
@@ -924,7 +971,7 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
 #[async_trait]
 impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_balance(
+    async fn get_monthly_balance_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
     ) -> Result<ApiResponse<Vec<CardResponseMonthBalance>>, AppErrorHttp> {
@@ -968,7 +1015,7 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_balance(
+    async fn get_yearly_balance_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
     ) -> Result<ApiResponse<Vec<CardResponseYearlyBalance>>, AppErrorHttp> {
@@ -1015,7 +1062,7 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
 #[async_trait]
 impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_amount(
+    async fn get_monthly_topup_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
     ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
@@ -1062,7 +1109,7 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_amount(
+    async fn get_yearly_topup_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
     ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
@@ -1112,7 +1159,7 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
 #[async_trait]
 impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_amount(
+    async fn get_monthly_transaction_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
     ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
@@ -1159,7 +1206,7 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_amount(
+    async fn get_yearly_transaction_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
     ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
@@ -1209,12 +1256,12 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
 #[async_trait]
 impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_amount(
+    async fn get_monthly_amount_sender_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
     ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
         info!(
-            "fetching monthly TRANSFER amount for card: {}, year: {}",
+            "fetching monthly TRANSFER amount (sender) for card: {}, year: {}",
             req.card_number, req.year
         );
 
@@ -1234,7 +1281,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                     inner.data.into_iter().map(Into::into).collect();
 
                 info!(
-                    "fetched {} monthly transfer amounts for card {} year {}",
+                    "fetched {} monthly transfer amounts (sender) for card {} year {}",
                     data.len(),
                     req.card_number,
                     req.year
@@ -1247,7 +1294,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
             }
             Err(status) => {
                 error!(
-                    "fetch monthly TRANSFER for card {} year {} failed: {status:?}",
+                    "fetch monthly TRANSFER (sender) for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
@@ -1256,12 +1303,12 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_amount(
+    async fn get_yearly_amount_sender_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
     ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
         info!(
-            "fetching yearly TRANSFER amount for card: {}, year: {}",
+            "fetching yearly TRANSFER amount (sender) for card: {}, year: {}",
             req.card_number, req.year
         );
 
@@ -1281,7 +1328,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                     inner.data.into_iter().map(Into::into).collect();
 
                 info!(
-                    "fetched {} yearly transfer amounts for card {} year {}",
+                    "fetched {} yearly transfer amounts (sender) for card {} year {}",
                     data.len(),
                     req.card_number,
                     req.year
@@ -1294,7 +1341,101 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
             }
             Err(status) => {
                 error!(
-                    "fetch yearly TRANSFER for card {} year {} failed: {status:?}",
+                    "fetch yearly TRANSFER (sender) for card {} year {} failed: {status:?}",
+                    req.card_number, req.year
+                );
+                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+            }
+        }
+    }
+
+    #[instrument(skip(self, req), level = "info")]
+    async fn get_monthly_amount_receiver_bycard(
+        &self,
+        req: &DomainMonthYearCardNumberCard,
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+        info!(
+            "fetching monthly TRANSFER amount (receiver) for card: {}, year: {}",
+            req.card_number, req.year
+        );
+
+        let mut client = self.client.lock().await;
+        let grpc_req = Request::new(FindYearAmountCardNumber {
+            card_number: req.card_number.clone(),
+            year: req.year,
+        });
+
+        match client
+            .find_monthly_transfer_receiver_amount_by_card_number(grpc_req)
+            .await
+        {
+            Ok(response) => {
+                let inner = response.into_inner();
+                let data: Vec<CardResponseMonthAmount> =
+                    inner.data.into_iter().map(Into::into).collect();
+
+                info!(
+                    "fetched {} monthly transfer amounts (receiver) for card {} year {}",
+                    data.len(),
+                    req.card_number,
+                    req.year
+                );
+                Ok(ApiResponse {
+                    data,
+                    message: inner.message,
+                    status: inner.status,
+                })
+            }
+            Err(status) => {
+                error!(
+                    "fetch monthly TRANSFER (receiver) for card {} year {} failed: {status:?}",
+                    req.card_number, req.year
+                );
+                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+            }
+        }
+    }
+
+    #[instrument(skip(self, req), level = "info")]
+    async fn get_yearly_amount_receiver_bycard(
+        &self,
+        req: &DomainMonthYearCardNumberCard,
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+        info!(
+            "fetching yearly TRANSFER amount (receiver) for card: {}, year: {}",
+            req.card_number, req.year
+        );
+
+        let mut client = self.client.lock().await;
+        let grpc_req = Request::new(FindYearAmountCardNumber {
+            card_number: req.card_number.clone(),
+            year: req.year,
+        });
+
+        match client
+            .find_yearly_transfer_receiver_amount_by_card_number(grpc_req)
+            .await
+        {
+            Ok(response) => {
+                let inner = response.into_inner();
+                let data: Vec<CardResponseYearAmount> =
+                    inner.data.into_iter().map(Into::into).collect();
+
+                info!(
+                    "fetched {} yearly transfer amounts (receiver) for card {} year {}",
+                    data.len(),
+                    req.card_number,
+                    req.year
+                );
+                Ok(ApiResponse {
+                    data,
+                    message: inner.message,
+                    status: inner.status,
+                })
+            }
+            Err(status) => {
+                error!(
+                    "fetch yearly TRANSFER (receiver) for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
@@ -1306,7 +1447,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
 #[async_trait]
 impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_amount(
+    async fn get_monthly_withdraw_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
     ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
@@ -1353,7 +1494,7 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_amount(
+    async fn get_yearly_withdraw_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
     ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
@@ -1399,6 +1540,3 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
         }
     }
 }
-
-#[async_trait]
-impl CardGrpcClientServiceTrait for CardGrpcClientService {}

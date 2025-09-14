@@ -8,28 +8,19 @@ use axum::{
     http::StatusCode,
     middleware,
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::topup::http::{
-        command::DynTopupCommandGrpcClient,
-        query::DynTopupQueryGrpcClient,
-        stats::{
-            amount::DynTopupStatsAmountGrpcClient, method::DynTopupStatsMethodGrpcClient,
-            status::DynTopupStatsStatusGrpcClient,
-        },
-        statsbycard::{
-            amount::DynTopupStatsAmountByCardNumberGrpcClient,
-            method::DynTopupStatsMethodByCardNumberGrpcClient,
-            status::DynTopupStatsStatusByCardNumberGrpcClient,
-        },
-    },
+    abstract_trait::topup::http::DynTopupGrpcClientService,
     domain::{
-        requests::topup::{
-            CreateTopupRequest, FindAllTopups, FindAllTopupsByCardNumber, MonthTopupStatus,
-            MonthTopupStatusCardNumber, UpdateTopupRequest, YearMonthMethod,
-            YearTopupStatusCardNumber,
+        requests::{
+            topup::{
+                CreateTopupRequest, FindAllTopups, FindAllTopupsByCardNumber, MonthTopupStatus,
+                MonthTopupStatusCardNumber, UpdateTopupRequest, YearMonthMethod,
+                YearTopupStatusCardNumber,
+            },
+            withdraw::YearQuery,
         },
         responses::{
             ApiResponse, ApiResponsePagination, TopupMonthAmountResponse, TopupMonthMethodResponse,
@@ -56,7 +47,7 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_topups(
-    Extension(service): Extension<DynTopupQueryGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<FindAllTopups>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_all(&params).await?;
@@ -76,7 +67,7 @@ pub async fn get_topups(
     )
 )]
 pub async fn get_topups_by_card_number(
-    Extension(service): Extension<DynTopupQueryGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<FindAllTopupsByCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_all_by_card_number(&params).await?;
@@ -96,7 +87,7 @@ pub async fn get_topups_by_card_number(
     )
 )]
 pub async fn get_active_topups(
-    Extension(service): Extension<DynTopupQueryGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<FindAllTopups>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_active(&params).await?;
@@ -116,7 +107,7 @@ pub async fn get_active_topups(
     )
 )]
 pub async fn get_trashed_topups(
-    Extension(service): Extension<DynTopupQueryGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<FindAllTopups>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_trashed(&params).await?;
@@ -136,7 +127,7 @@ pub async fn get_trashed_topups(
     )
 )]
 pub async fn get_topup(
-    Extension(service): Extension<DynTopupQueryGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_id(id).await?;
@@ -145,7 +136,7 @@ pub async fn get_topup(
 
 #[utoipa::path(
     post,
-    path = "/api/topups",
+    path = "/api/topups/create",
     tag = "Topup",
     security(("bearer_auth" = [])),
     request_body = CreateTopupRequest,
@@ -157,7 +148,7 @@ pub async fn get_topup(
     )
 )]
 pub async fn create_topup(
-    Extension(service): Extension<DynTopupCommandGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateTopupRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.create(&body).await?;
@@ -165,8 +156,8 @@ pub async fn create_topup(
 }
 
 #[utoipa::path(
-    put,
-    path = "/api/topups/{id}",
+    post,
+    path = "/api/topups/update/{id}",
     tag = "Topup",
     security(("bearer_auth" = [])),
     params(("id" = i32, Path, description = "Topup ID")),
@@ -179,7 +170,7 @@ pub async fn create_topup(
     )
 )]
 pub async fn update_topup(
-    Extension(service): Extension<DynTopupCommandGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTopupRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
@@ -201,7 +192,7 @@ pub async fn update_topup(
     )
 )]
 pub async fn trash_topup_handler(
-    Extension(service): Extension<DynTopupCommandGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.trashed(id).await?;
@@ -221,7 +212,7 @@ pub async fn trash_topup_handler(
     )
 )]
 pub async fn restore_topup_handler(
-    Extension(service): Extension<DynTopupCommandGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.restore(id).await?;
@@ -241,7 +232,7 @@ pub async fn restore_topup_handler(
     )
 )]
 pub async fn delete_topup(
-    Extension(service): Extension<DynTopupCommandGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_permanent(id).await?;
@@ -262,7 +253,7 @@ pub async fn delete_topup(
     )
 )]
 pub async fn restore_all_topup_handler(
-    Extension(service): Extension<DynTopupCommandGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.restore_all().await?;
     Ok(Json(json!({
@@ -282,7 +273,7 @@ pub async fn restore_all_topup_handler(
     )
 )]
 pub async fn delete_all_topup_handler(
-    Extension(service): Extension<DynTopupCommandGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_all_permanent().await?;
     Ok(Json(json!({
@@ -296,7 +287,7 @@ pub async fn delete_all_topup_handler(
     path = "/api/topups/stats/amount/monthly",
     tag = "Topup Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly topup amount", body = ApiResponse<Vec<TopupMonthAmountResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -304,10 +295,10 @@ pub async fn delete_all_topup_handler(
     )
 )]
 pub async fn get_monthly_topup_amounts(
-    Extension(service): Extension<DynTopupStatsAmountGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_topup_amounts(year).await?;
+    let response = service.get_monthly_amounts(req.year).await?;
     Ok(Json(response))
 }
 
@@ -316,7 +307,7 @@ pub async fn get_monthly_topup_amounts(
     path = "/api/topups/stats/amount/yearly",
     tag = "Topup Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly topup amount", body = ApiResponse<Vec<TopupYearlyAmountResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -324,10 +315,10 @@ pub async fn get_monthly_topup_amounts(
     )
 )]
 pub async fn get_yearly_topup_amounts(
-    Extension(service): Extension<DynTopupStatsAmountGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_topup_amounts(year).await?;
+    let response = service.get_yearly_amounts(req.year).await?;
     Ok(Json(response))
 }
 
@@ -336,7 +327,7 @@ pub async fn get_yearly_topup_amounts(
     path = "/api/topups/stats/method/monthly",
     tag = "Topup Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly topup method", body = ApiResponse<Vec<TopupMonthMethodResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -344,10 +335,10 @@ pub async fn get_yearly_topup_amounts(
     )
 )]
 pub async fn get_monthly_topup_methods(
-    Extension(service): Extension<DynTopupStatsMethodGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_topup_methods(year).await?;
+    let response = service.get_monthly_methods(req.year).await?;
     Ok(Json(response))
 }
 
@@ -356,7 +347,7 @@ pub async fn get_monthly_topup_methods(
     path = "/api/topups/stats/method/yearly",
     tag = "Topup Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly topup method", body = ApiResponse<Vec<TopupYearlyMethodResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -364,10 +355,10 @@ pub async fn get_monthly_topup_methods(
     )
 )]
 pub async fn get_yearly_topup_methods(
-    Extension(service): Extension<DynTopupStatsMethodGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_topup_methods(year).await?;
+    let response = service.get_yearly_methods(req.year).await?;
     Ok(Json(response))
 }
 
@@ -384,10 +375,10 @@ pub async fn get_yearly_topup_methods(
     )
 )]
 pub async fn get_month_topup_status_success(
-    Extension(service): Extension<DynTopupStatsStatusGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<MonthTopupStatus>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_month_topup_status_success(&params).await?;
+    let response = service.get_month_status_success(&params).await?;
     Ok(Json(response))
 }
 
@@ -396,7 +387,7 @@ pub async fn get_month_topup_status_success(
     path = "/api/topups/stats/status/success/yearly",
     tag = "Topup Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly successful topup status", body = ApiResponse<Vec<TopupResponseYearStatusSuccess>>),
         (status = 401, description = "Unauthorized"),
@@ -404,10 +395,10 @@ pub async fn get_month_topup_status_success(
     )
 )]
 pub async fn get_yearly_topup_status_success(
-    Extension(service): Extension<DynTopupStatsStatusGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_topup_status_success(year).await?;
+    let response = service.get_yearly_status_success(req.year).await?;
     Ok(Json(response))
 }
 
@@ -424,10 +415,10 @@ pub async fn get_yearly_topup_status_success(
     )
 )]
 pub async fn get_month_topup_status_failed(
-    Extension(service): Extension<DynTopupStatsStatusGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<MonthTopupStatus>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_month_topup_status_failed(&params).await?;
+    let response = service.get_month_status_failed(&params).await?;
     Ok(Json(response))
 }
 
@@ -436,7 +427,7 @@ pub async fn get_month_topup_status_failed(
     path = "/api/topups/stats/status/failed/yearly",
     tag = "Topup Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly failed topup status", body = ApiResponse<Vec<TopupResponseYearStatusFailed>>),
         (status = 401, description = "Unauthorized"),
@@ -444,10 +435,10 @@ pub async fn get_month_topup_status_failed(
     )
 )]
 pub async fn get_yearly_topup_status_failed(
-    Extension(service): Extension<DynTopupStatsStatusGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_topup_status_failed(year).await?;
+    let response = service.get_yearly_status_failed(req.year).await?;
     Ok(Json(response))
 }
 
@@ -464,10 +455,10 @@ pub async fn get_yearly_topup_status_failed(
     )
 )]
 pub async fn get_monthly_topup_amounts_by_card(
-    Extension(service): Extension<DynTopupStatsAmountByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearMonthMethod>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_topup_amounts(&params).await?;
+    let response = service.get_monthly_amounts_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -484,10 +475,10 @@ pub async fn get_monthly_topup_amounts_by_card(
     )
 )]
 pub async fn get_yearly_topup_amounts_by_card(
-    Extension(service): Extension<DynTopupStatsAmountByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearMonthMethod>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_topup_amounts(&params).await?;
+    let response = service.get_yearly_amounts_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -504,10 +495,10 @@ pub async fn get_yearly_topup_amounts_by_card(
     )
 )]
 pub async fn get_monthly_topup_methods_by_card(
-    Extension(service): Extension<DynTopupStatsMethodByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearMonthMethod>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_topup_methods(&params).await?;
+    let response = service.get_monthly_methods_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -524,10 +515,10 @@ pub async fn get_monthly_topup_methods_by_card(
     )
 )]
 pub async fn get_yearly_topup_methods_by_card(
-    Extension(service): Extension<DynTopupStatsMethodByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearMonthMethod>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_topup_methods(&params).await?;
+    let response = service.get_yearly_methods_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -544,10 +535,10 @@ pub async fn get_yearly_topup_methods_by_card(
     )
 )]
 pub async fn get_month_topup_status_success_by_card(
-    Extension(service): Extension<DynTopupStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<MonthTopupStatusCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_month_topup_status_success(&params).await?;
+    let response = service.get_month_status_success_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -564,10 +555,10 @@ pub async fn get_month_topup_status_success_by_card(
     )
 )]
 pub async fn get_yearly_topup_status_success_by_card(
-    Extension(service): Extension<DynTopupStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearTopupStatusCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_topup_status_success(&params).await?;
+    let response = service.get_yearly_status_success_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -584,10 +575,10 @@ pub async fn get_yearly_topup_status_success_by_card(
     )
 )]
 pub async fn get_month_topup_status_failed_by_card(
-    Extension(service): Extension<DynTopupStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<MonthTopupStatusCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_month_topup_status_failed(&params).await?;
+    let response = service.get_month_status_failed_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -604,27 +595,27 @@ pub async fn get_month_topup_status_failed_by_card(
     )
 )]
 pub async fn get_yearly_topup_status_failed_by_card(
-    Extension(service): Extension<DynTopupStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearTopupStatusCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_topup_status_failed(&params).await?;
+    let response = service.get_yearly_status_failed_bycard(&params).await?;
     Ok(Json(response))
 }
 
 pub fn topup_routes(app_state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/topups", get(get_topups))
+        .route("/api/topups/create", post(create_topup))
+        .route("/api/topups/update/{id}", post(update_topup))
         .route("/api/topups/by-card", get(get_topups_by_card_number))
         .route("/api/topups/active", get(get_active_topups))
         .route("/api/topups/trashed", get(get_trashed_topups))
         .route("/api/topups/{id}", get(get_topup))
-        .route("/api/topups", post(create_topup))
-        .route("/api/topups/{id}", put(update_topup))
-        .route("/api/topups/trash/{id}", delete(trash_topup_handler))
-        .route("/api/topups/restore/{id}", put(restore_topup_handler))
+        .route("/api/topups/trash/{id}", post(trash_topup_handler))
+        .route("/api/topups/restore/{id}", post(restore_topup_handler))
         .route("/api/topups/delete/{id}", delete(delete_topup))
-        .route("/api/topups/restore-all", put(restore_all_topup_handler))
-        .route("/api/topups/delete-all", delete(delete_all_topup_handler))
+        .route("/api/topups/restore-all", post(restore_all_topup_handler))
+        .route("/api/topups/delete-all", post(delete_all_topup_handler))
         .route(
             "/api/topups/stats/amount/monthly",
             get(get_monthly_topup_amounts),

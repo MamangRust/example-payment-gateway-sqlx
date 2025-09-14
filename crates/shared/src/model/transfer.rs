@@ -1,14 +1,15 @@
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct TransferModel {
     pub transfer_id: i32,
-    pub transfer_no: String,
+    pub transfer_no: Uuid,
     pub transfer_from: String,
     pub transfer_to: String,
-    pub transfer_amount: i64,
+    pub transfer_amount: i32,
     pub transfer_time: NaiveDateTime,
     pub status: String,
     pub created_at: Option<NaiveDateTime>,

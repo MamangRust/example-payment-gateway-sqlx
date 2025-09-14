@@ -8,29 +8,15 @@ use axum::{
     http::StatusCode,
     middleware,
     response::IntoResponse,
-    routing::{delete, get, put},
+    routing::{delete, get, post},
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::card::http::{
-        command::DynCardCommandGrpcClient,
-        dashboard::DynCardDashboardGrpcClient,
-        query::DynCardQueryGrpcClient,
-        stats::{
-            balance::DynCardStatsBalanceGrpcClient, topup::DynCardStatsTopupGrpcClient,
-            transaction::DynCardStatsTransactionGrpcClient,
-            transfer::DynCardStatsTransferGrpcClient, withdraw::DynCardStatsWithdrawGrpcClient,
-        },
-        statsbycard::{
-            balance::DynCardStatsBalanceByCardGrpcClient, topup::DynCardStatsTopupByCardGrpcClient,
-            transaction::DynCardStatsTransactionByCardGrpcClient,
-            transfer::DynCardStatsTransferByCardGrpcClient,
-            withdraw::DynCardStatsWithdrawByCardGrpcClient,
-        },
-    },
+    abstract_trait::card::http::DynCardGrpcClientService,
     domain::{
-        requests::card::{
-            CreateCardRequest, FindAllCards, MonthYearCardNumberCard, UpdateCardRequest,
+        requests::{
+            card::{CreateCardRequest, FindAllCards, MonthYearCardNumberCard, UpdateCardRequest},
+            withdraw::YearQuery,
         },
         responses::{
             ApiResponse, ApiResponsePagination, CardResponse, CardResponseDeleteAt,
@@ -56,7 +42,7 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_cards(
-    Extension(service): Extension<DynCardQueryGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<FindAllCards>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_all(&params).await?;
@@ -76,7 +62,7 @@ pub async fn get_cards(
     )
 )]
 pub async fn get_active_cards(
-    Extension(service): Extension<DynCardQueryGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<FindAllCards>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_active(&params).await?;
@@ -96,7 +82,7 @@ pub async fn get_active_cards(
     )
 )]
 pub async fn get_trashed_cards(
-    Extension(service): Extension<DynCardQueryGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<FindAllCards>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_trashed(&params).await?;
@@ -116,7 +102,7 @@ pub async fn get_trashed_cards(
     )
 )]
 pub async fn get_card(
-    Extension(service): Extension<DynCardQueryGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_id(id).await?;
@@ -124,8 +110,48 @@ pub async fn get_card(
 }
 
 #[utoipa::path(
+    get,
+    path = "/api/cards/by-user/{user_id}",
+    tag = "Card",
+    security(("bearer_auth" = [])),
+    params(("user_id" = i32, Path, description = "User ID")),
+    responses(
+        (status = 200, description = "Card by user", body = ApiResponse<CardResponse>),
+        (status = 404, description = "Card not found"),
+        (status = 401, description = "Unauthorized")
+    )
+)]
+pub async fn get_card_by_user(
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Path(user_id): Path<i32>,
+) -> Result<impl IntoResponse, AppErrorHttp> {
+    let response = service.find_by_user_id(user_id).await?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/cards/by-card/{card_number}",
+    tag = "Card",
+    security(("bearer_auth" = [])),
+    params(("card_number" = String, Path, description = "Card Number")),
+    responses(
+        (status = 200, description = "Card by number", body = ApiResponse<CardResponse>),
+        (status = 404, description = "Card not found"),
+        (status = 401, description = "Unauthorized")
+    )
+)]
+pub async fn get_card_by_number(
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Path(card_number): Path<String>,
+) -> Result<impl IntoResponse, AppErrorHttp> {
+    let response = service.find_by_card_number(card_number).await?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
     post,
-    path = "/api/cards",
+    path = "/api/cards/create",
     tag = "Card",
     security(("bearer_auth" = [])),
     request_body = CreateCardRequest,
@@ -137,7 +163,7 @@ pub async fn get_card(
     )
 )]
 pub async fn create_card(
-    Extension(service): Extension<DynCardCommandGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateCardRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.create(&body).await?;
@@ -146,7 +172,7 @@ pub async fn create_card(
 
 #[utoipa::path(
     put,
-    path = "/api/cards/{id}",
+    path = "/api/cards/update/{id}",
     tag = "Card",
     security(("bearer_auth" = [])),
     params(("id" = i32, Path, description = "Card ID")),
@@ -159,7 +185,7 @@ pub async fn create_card(
     )
 )]
 pub async fn update_card(
-    Extension(service): Extension<DynCardCommandGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateCardRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
@@ -181,7 +207,7 @@ pub async fn update_card(
     )
 )]
 pub async fn trash_card_handler(
-    Extension(service): Extension<DynCardCommandGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.trash(id).await?;
@@ -201,7 +227,7 @@ pub async fn trash_card_handler(
     )
 )]
 pub async fn restore_card_handler(
-    Extension(service): Extension<DynCardCommandGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.restore(id).await?;
@@ -221,7 +247,7 @@ pub async fn restore_card_handler(
     )
 )]
 pub async fn delete_card(
-    Extension(service): Extension<DynCardCommandGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete(id).await?;
@@ -242,7 +268,7 @@ pub async fn delete_card(
     )
 )]
 pub async fn restore_all_card_handler(
-    Extension(service): Extension<DynCardCommandGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.restore_all().await?;
     Ok(Json(json!({
@@ -262,7 +288,7 @@ pub async fn restore_all_card_handler(
     )
 )]
 pub async fn delete_all_card_handler(
-    Extension(service): Extension<DynCardCommandGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_all().await?;
     Ok(Json(json!({
@@ -278,7 +304,7 @@ pub async fn delete_all_card_handler(
     path = "/api/cards/stats/balance/monthly",
     tag = "Card Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly balance", body = ApiResponse<Vec<CardResponseMonthBalance>>),
         (status = 401, description = "Unauthorized"),
@@ -286,10 +312,10 @@ pub async fn delete_all_card_handler(
     )
 )]
 pub async fn get_monthly_balance(
-    Extension(service): Extension<DynCardStatsBalanceGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_balance(year).await?;
+    let response = service.get_monthly_balance(req.year).await?;
     Ok(Json(response))
 }
 
@@ -298,7 +324,7 @@ pub async fn get_monthly_balance(
     path = "/api/cards/stats/balance/yearly",
     tag = "Card Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly balance", body = ApiResponse<Vec<CardResponseYearlyBalance>>),
         (status = 401, description = "Unauthorized"),
@@ -306,10 +332,10 @@ pub async fn get_monthly_balance(
     )
 )]
 pub async fn get_yearly_balance(
-    Extension(service): Extension<DynCardStatsBalanceGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_balance(year).await?;
+    let response = service.get_yearly_balance(req.year).await?;
     Ok(Json(response))
 }
 
@@ -320,7 +346,7 @@ pub async fn get_yearly_balance(
     path = "/api/cards/stats/topup/monthly",
     tag = "Card Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly topup amount", body = ApiResponse<Vec<CardResponseMonthAmount>>),
         (status = 401, description = "Unauthorized"),
@@ -328,10 +354,10 @@ pub async fn get_yearly_balance(
     )
 )]
 pub async fn get_monthly_topup_amount(
-    Extension(service): Extension<DynCardStatsTopupGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amount(year).await?;
+    let response = service.get_monthly_topup_amount(req.year).await?;
     Ok(Json(response))
 }
 
@@ -340,7 +366,7 @@ pub async fn get_monthly_topup_amount(
     path = "/api/cards/stats/topup/yearly",
     tag = "Card Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly topup amount", body = ApiResponse<Vec<CardResponseYearAmount>>),
         (status = 401, description = "Unauthorized"),
@@ -348,21 +374,19 @@ pub async fn get_monthly_topup_amount(
     )
 )]
 pub async fn get_yearly_topup_amount(
-    Extension(service): Extension<DynCardStatsTopupGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amount(year).await?;
+    let response = service.get_yearly_topup_amount(req.year).await?;
     Ok(Json(response))
 }
-
-// Transaction
 
 #[utoipa::path(
     get,
     path = "/api/cards/stats/transaction/monthly",
     tag = "Card Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly transaction amount", body = ApiResponse<Vec<CardResponseMonthAmount>>),
         (status = 401, description = "Unauthorized"),
@@ -370,10 +394,10 @@ pub async fn get_yearly_topup_amount(
     )
 )]
 pub async fn get_monthly_transaction_amount(
-    Extension(service): Extension<DynCardStatsTransactionGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amount(year).await?;
+    let response = service.get_monthly_transaction_amount(req.year).await?;
     Ok(Json(response))
 }
 
@@ -382,7 +406,7 @@ pub async fn get_monthly_transaction_amount(
     path = "/api/cards/stats/transaction/yearly",
     tag = "Card Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly transaction amount", body = ApiResponse<Vec<CardResponseYearAmount>>),
         (status = 401, description = "Unauthorized"),
@@ -390,10 +414,10 @@ pub async fn get_monthly_transaction_amount(
     )
 )]
 pub async fn get_yearly_transaction_amount(
-    Extension(service): Extension<DynCardStatsTransactionGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amount(year).await?;
+    let response = service.get_yearly_transaction_amount(req.year).await?;
     Ok(Json(response))
 }
 
@@ -401,43 +425,81 @@ pub async fn get_yearly_transaction_amount(
 
 #[utoipa::path(
     get,
-    path = "/api/cards/stats/transfer/monthly",
-    tag = "Card Stats",
+    path = "/api/cards/stats/transfer/monthly/sender",
+    tag = "Card Stats (Sender)",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
-        (status = 200, description = "Monthly transfer amount", body = ApiResponse<Vec<CardResponseMonthAmount>>),
+        (status = 200, description = "Monthly transfer amount (sender)", body = ApiResponse<Vec<CardResponseMonthAmount>>),
         (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     )
 )]
-pub async fn get_monthly_transfer_amount(
-    Extension(service): Extension<DynCardStatsTransferGrpcClient>,
-    Query(year): Query<i32>,
+pub async fn get_monthly_transfer_amount_sender(
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amount(year).await?;
+    let response = service.get_monthly_amount_sender(req.year).await?;
     Ok(Json(response))
 }
 
-// Transfer
-
 #[utoipa::path(
     get,
-    path = "/api/cards/stats/transfer/yearly",
-    tag = "Card Stats",
+    path = "/api/cards/stats/transfer/monthly/receiver",
+    tag = "Card Stats (Receiver)",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
-        (status = 200, description = "Yearly transfer amount", body = ApiResponse<Vec<CardResponseYearAmount>>),
+        (status = 200, description = "Monthly transfer amount (receiver)", body = ApiResponse<Vec<CardResponseMonthAmount>>),
         (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     )
 )]
-pub async fn get_yearly_transfer_amount(
-    Extension(service): Extension<DynCardStatsTransferGrpcClient>,
-    Query(year): Query<i32>,
+pub async fn get_monthly_transfer_amount_receiver(
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amount(year).await?;
+    let response = service.get_monthly_amount_receiver(req.year).await?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/cards/stats/transfer/yearly/sender",
+    tag = "Card Stats (Sender)",
+    security(("bearer_auth" = [])),
+    params(YearQuery),
+    responses(
+        (status = 200, description = "Yearly transfer amount (sender)", body = ApiResponse<Vec<CardResponseYearAmount>>),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_yearly_transfer_amount_sender(
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
+) -> Result<impl IntoResponse, AppErrorHttp> {
+    let response = service.get_yearly_amount_sender(req.year).await?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/cards/stats/transfer/yearly/receiver",
+    tag = "Card Stats (Receiver)",
+    security(("bearer_auth" = [])),
+    params(YearQuery),
+    responses(
+        (status = 200, description = "Yearly transfer amount (receiver)", body = ApiResponse<Vec<CardResponseYearAmount>>),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_yearly_transfer_amount_receiver(
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
+) -> Result<impl IntoResponse, AppErrorHttp> {
+    let response = service.get_yearly_amount_receiver(req.year).await?;
     Ok(Json(response))
 }
 
@@ -448,7 +510,7 @@ pub async fn get_yearly_transfer_amount(
     path = "/api/cards/stats/withdraw/monthly",
     tag = "Card Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly withdraw amount", body = ApiResponse<Vec<CardResponseMonthAmount>>),
         (status = 401, description = "Unauthorized"),
@@ -456,10 +518,10 @@ pub async fn get_yearly_transfer_amount(
     )
 )]
 pub async fn get_monthly_withdraw_amount(
-    Extension(service): Extension<DynCardStatsWithdrawGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amount(year).await?;
+    let response = service.get_monthly_withdraw_amount(req.year).await?;
     Ok(Json(response))
 }
 
@@ -468,7 +530,7 @@ pub async fn get_monthly_withdraw_amount(
     path = "/api/cards/stats/withdraw/yearly",
     tag = "Card Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly withdraw amount", body = ApiResponse<Vec<CardResponseYearAmount>>),
         (status = 401, description = "Unauthorized"),
@@ -476,10 +538,10 @@ pub async fn get_monthly_withdraw_amount(
     )
 )]
 pub async fn get_yearly_withdraw_amount(
-    Extension(service): Extension<DynCardStatsWithdrawGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amount(year).await?;
+    let response = service.get_yearly_withdraw_amount(req.year).await?;
     Ok(Json(response))
 }
 
@@ -499,10 +561,10 @@ pub async fn get_yearly_withdraw_amount(
 // Stats by card
 
 pub async fn get_monthly_balance_by_card(
-    Extension(service): Extension<DynCardStatsBalanceByCardGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<MonthYearCardNumberCard>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_balance(&params).await?;
+    let response = service.get_monthly_balance_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -519,10 +581,10 @@ pub async fn get_monthly_balance_by_card(
     )
 )]
 pub async fn get_yearly_balance_by_card(
-    Extension(service): Extension<DynCardStatsBalanceByCardGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<MonthYearCardNumberCard>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_balance(&params).await?;
+    let response = service.get_yearly_balance_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -539,10 +601,10 @@ pub async fn get_yearly_balance_by_card(
     )
 )]
 pub async fn get_monthly_topup_amount_by_card(
-    Extension(service): Extension<DynCardStatsTopupByCardGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<MonthYearCardNumberCard>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amount(&params).await?;
+    let response = service.get_monthly_topup_amount_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -559,10 +621,10 @@ pub async fn get_monthly_topup_amount_by_card(
     )
 )]
 pub async fn get_yearly_topup_amount_by_card(
-    Extension(service): Extension<DynCardStatsTopupByCardGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<MonthYearCardNumberCard>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amount(&params).await?;
+    let response = service.get_yearly_topup_amount_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -579,10 +641,12 @@ pub async fn get_yearly_topup_amount_by_card(
     )
 )]
 pub async fn get_monthly_transaction_amount_by_card(
-    Extension(service): Extension<DynCardStatsTransactionByCardGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<MonthYearCardNumberCard>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amount(&params).await?;
+    let response = service
+        .get_monthly_transaction_amount_bycard(&params)
+        .await?;
     Ok(Json(response))
 }
 
@@ -599,50 +663,92 @@ pub async fn get_monthly_transaction_amount_by_card(
     )
 )]
 pub async fn get_yearly_transaction_amount_by_card(
-    Extension(service): Extension<DynCardStatsTransactionByCardGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<MonthYearCardNumberCard>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amount(&params).await?;
+    let response = service
+        .get_yearly_transaction_amount_bycard(&params)
+        .await?;
     Ok(Json(response))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/cards/stats/transfer/monthly/by-card",
-    tag = "Card Stats By Card",
+    path = "/api/cards/stats/transfer/monthly/by-card/sender",
+    tag = "Card Stats By Card (Sender)",
     security(("bearer_auth" = [])),
     params(MonthYearCardNumberCard),
     responses(
-        (status = 200, description = "Monthly transfer amount by card", body = ApiResponse<Vec<CardResponseMonthAmount>>),
+        (status = 200, description = "Monthly transfer amount by card (sender)", body = ApiResponse<Vec<CardResponseMonthAmount>>),
         (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     )
 )]
-pub async fn get_monthly_transfer_amount_by_card(
-    Extension(service): Extension<DynCardStatsTransferByCardGrpcClient>,
+pub async fn get_monthly_transfer_amount_by_card_sender(
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<MonthYearCardNumberCard>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amount(&params).await?;
+    let response = service.get_monthly_amount_sender_bycard(&params).await?;
     Ok(Json(response))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/cards/stats/transfer/yearly/by-card",
-    tag = "Card Stats By Card",
+    path = "/api/cards/stats/transfer/monthly/by-card/receiver",
+    tag = "Card Stats By Card (Receiver)",
     security(("bearer_auth" = [])),
     params(MonthYearCardNumberCard),
     responses(
-        (status = 200, description = "Yearly transfer amount by card", body = ApiResponse<Vec<CardResponseYearAmount>>),
+        (status = 200, description = "Monthly transfer amount by card (receiver)", body = ApiResponse<Vec<CardResponseMonthAmount>>),
         (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     )
 )]
-pub async fn get_yearly_transfer_amount_by_card(
-    Extension(service): Extension<DynCardStatsTransferByCardGrpcClient>,
+pub async fn get_monthly_transfer_amount_by_card_receiver(
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<MonthYearCardNumberCard>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amount(&params).await?;
+    let response = service.get_monthly_amount_receiver_bycard(&params).await?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/cards/stats/transfer/yearly/by-card/sender",
+    tag = "Card Stats By Card (Sender)",
+    security(("bearer_auth" = [])),
+    params(MonthYearCardNumberCard),
+    responses(
+        (status = 200, description = "Yearly transfer amount by card (sender)", body = ApiResponse<Vec<CardResponseYearAmount>>),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_yearly_transfer_amount_by_card_sender(
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(params): Query<MonthYearCardNumberCard>,
+) -> Result<impl IntoResponse, AppErrorHttp> {
+    let response = service.get_yearly_amount_sender_bycard(&params).await?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/cards/stats/transfer/yearly/by-card/receiver",
+    tag = "Card Stats By Card (Receiver)",
+    security(("bearer_auth" = [])),
+    params(MonthYearCardNumberCard),
+    responses(
+        (status = 200, description = "Yearly transfer amount by card (receiver)", body = ApiResponse<Vec<CardResponseYearAmount>>),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_yearly_transfer_amount_by_card_receiver(
+    Extension(service): Extension<DynCardGrpcClientService>,
+    Query(params): Query<MonthYearCardNumberCard>,
+) -> Result<impl IntoResponse, AppErrorHttp> {
+    let response = service.get_yearly_amount_receiver_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -659,10 +765,10 @@ pub async fn get_yearly_transfer_amount_by_card(
     )
 )]
 pub async fn get_monthly_withdraw_amount_by_card(
-    Extension(service): Extension<DynCardStatsWithdrawByCardGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<MonthYearCardNumberCard>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amount(&params).await?;
+    let response = service.get_monthly_withdraw_amount_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -679,10 +785,10 @@ pub async fn get_monthly_withdraw_amount_by_card(
     )
 )]
 pub async fn get_yearly_withdraw_amount_by_card(
-    Extension(service): Extension<DynCardStatsWithdrawByCardGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Query(params): Query<MonthYearCardNumberCard>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amount(&params).await?;
+    let response = service.get_yearly_withdraw_amount_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -698,7 +804,7 @@ pub async fn get_yearly_withdraw_amount_by_card(
     )
 )]
 pub async fn get_card_dashboard(
-    Extension(service): Extension<DynCardDashboardGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_dashboard().await?;
     Ok(Json(response))
@@ -717,7 +823,7 @@ pub async fn get_card_dashboard(
     )
 )]
 pub async fn get_card_dashboard_by_card_number(
-    Extension(service): Extension<DynCardDashboardGrpcClient>,
+    Extension(service): Extension<DynCardGrpcClientService>,
     Path(card_number): Path<String>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_dashboard_bycard(&card_number).await?;
@@ -726,15 +832,22 @@ pub async fn get_card_dashboard_by_card_number(
 
 pub fn card_routes(app_state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
-        .route("/api/cards", get(get_cards).post(create_card))
+        .route("/api/cards", get(get_cards))
+        .route("/api/cards/create", post(create_card))
+        .route("/api/cards/update", post(update_card))
         .route("/api/cards/active", get(get_active_cards))
         .route("/api/cards/trashed", get(get_trashed_cards))
-        .route("/api/cards/{id}", get(get_card).put(update_card))
-        .route("/api/cards/trash/{id}", delete(trash_card_handler))
-        .route("/api/cards/restore/{id}", put(restore_card_handler))
+        .route("/api/cards/{id}", get(get_card))
+        .route("/api/cards/by-user/{user_id}", get(get_card_by_user))
+        .route(
+            "/api/cards/by-number/{card_number}",
+            get(get_card_by_number),
+        )
+        .route("/api/cards/trash/{id}", post(trash_card_handler))
+        .route("/api/cards/restore/{id}", post(restore_card_handler))
         .route("/api/cards/delete/{id}", delete(delete_card))
-        .route("/api/cards/restore-all", put(restore_all_card_handler))
-        .route("/api/cards/delete-all", delete(delete_all_card_handler))
+        .route("/api/cards/restore-all", post(restore_all_card_handler))
+        .route("/api/cards/delete-all", post(delete_all_card_handler))
         .route("/api/cards/stats/balance/monthly", get(get_monthly_balance))
         .route("/api/cards/stats/balance/yearly", get(get_yearly_balance))
         .route(
@@ -754,12 +867,20 @@ pub fn card_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             get(get_yearly_transaction_amount),
         )
         .route(
-            "/api/cards/stats/transfer/monthly",
-            get(get_monthly_transfer_amount),
+            "/api/cards/stats/transfer/monthly/sender",
+            get(get_monthly_transfer_amount_sender),
         )
         .route(
-            "/api/cards/stats/transfer/yearly",
-            get(get_yearly_transfer_amount),
+            "/api/cards/stats/transfer/monthly/receiver",
+            get(get_monthly_transfer_amount_receiver),
+        )
+        .route(
+            "/api/cards/stats/transfer/yearly/sender",
+            get(get_yearly_transfer_amount_sender),
+        )
+        .route(
+            "/api/cards/stats/transfer/yearly/receiver",
+            get(get_yearly_transfer_amount_receiver),
         )
         .route(
             "/api/cards/stats/withdraw/monthly",
@@ -794,12 +915,21 @@ pub fn card_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             get(get_yearly_transaction_amount_by_card),
         )
         .route(
-            "/api/cards/stats/transfer/monthly/by-card",
-            get(get_monthly_transfer_amount_by_card),
+            "/api/cards/stats/transfer/monthly/by-card/sender",
+            get(get_monthly_transfer_amount_by_card_sender),
         )
         .route(
-            "/api/cards/stats/transfer/yearly/by-card",
-            get(get_yearly_transfer_amount_by_card),
+            "/api/cards/stats/transfer/monthly/by-card/receiver",
+            get(get_monthly_transfer_amount_by_card_receiver),
+        )
+        // Yearly
+        .route(
+            "/api/cards/stats/transfer/yearly/by-card/sender",
+            get(get_yearly_transfer_amount_by_card_sender),
+        )
+        .route(
+            "/api/cards/stats/transfer/yearly/by-card/receiver",
+            get(get_yearly_transfer_amount_by_card_receiver),
         )
         .route(
             "/api/cards/stats/withdraw/monthly/by-card",

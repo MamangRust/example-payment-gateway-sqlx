@@ -112,9 +112,9 @@ impl From<WithdrawModel> for WithdrawResponse {
     fn from(model: WithdrawModel) -> Self {
         Self {
             id: model.withdraw_id,
-            withdraw_no: model.withdraw_no,
+            withdraw_no: model.withdraw_no.to_string(),
             card_number: model.card_number,
-            withdraw_amount: model.withdraw_amount,
+            withdraw_amount: model.withdraw_amount as i64,
             withdraw_time: model.withdraw_time.to_string(),
             created_at: model.created_at.map(|dt| dt.to_string()),
             updated_at: model.updated_at.map(|dt| dt.to_string()),
@@ -126,9 +126,9 @@ impl From<WithdrawModel> for WithdrawResponseDeleteAt {
     fn from(model: WithdrawModel) -> Self {
         Self {
             id: model.withdraw_id,
-            withdraw_no: model.withdraw_no,
+            withdraw_no: model.withdraw_no.to_string(),
             card_number: model.card_number,
-            withdraw_amount: model.withdraw_amount,
+            withdraw_amount: model.withdraw_amount as i64,
             withdraw_time: model.withdraw_time.to_string(),
             created_at: model.created_at.map(|dt| dt.to_string()),
             updated_at: model.updated_at.map(|dt| dt.to_string()),

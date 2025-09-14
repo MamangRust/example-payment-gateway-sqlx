@@ -5,7 +5,7 @@ use genproto::role::{
 };
 use shared::{
     abstract_trait::role::http::{
-        command::RoleCommandGrpcClientTrait, query::RoleQueryGrpcClientTrait,
+        RoleCommandGrpcClientTrait, RoleGrpcClientServiceTrait, RoleQueryGrpcClientTrait,
     },
     domain::{
         requests::role::{
@@ -21,13 +21,6 @@ use tokio::sync::Mutex;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
-#[async_trait]
-#[allow(dead_code)]
-pub trait RoleGrpcClientServiceTrait:
-    RoleQueryGrpcClientTrait + RoleCommandGrpcClientTrait
-{
-}
-
 #[derive(Debug)]
 pub struct RoleGrpcClientService {
     client: Arc<Mutex<RoleServiceClient<Channel>>>,
@@ -38,6 +31,9 @@ impl RoleGrpcClientService {
         Self { client }
     }
 }
+
+#[async_trait]
+impl RoleGrpcClientServiceTrait for RoleGrpcClientService {}
 
 #[async_trait]
 impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
@@ -441,6 +437,3 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         }
     }
 }
-
-#[async_trait]
-impl RoleGrpcClientServiceTrait for RoleGrpcClientService {}

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{
     middleware::{jwt, validate::SimpleValidatedJson},
     state::AppState,
@@ -14,22 +12,15 @@ use axum::{
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::transfer::http::{
-        command::DynTransferCommandGrpcClient,
-        query::DynTransferQueryGrpcClient,
-        stats::{
-            amount::DynTransferStatsAmountGrpcClient, status::DynTransferStatsStatusGrpcClient,
-        },
-        statsbycard::{
-            amount::DynTransferStatsAmountByCardNumberGrpcClient,
-            status::DynTransferStatsStatusByCardNumberGrpcClient,
-        },
-    },
+    abstract_trait::transfer::http::DynTransferGrpcClientService,
     domain::{
-        requests::transfer::{
-            CreateTransferRequest, FindAllTransfers, MonthStatusTransfer,
-            MonthStatusTransferCardNumber, MonthYearCardNumber, UpdateTransferRequest,
-            YearStatusTransferCardNumber,
+        requests::{
+            transfer::{
+                CreateTransferRequest, FindAllTransfers, MonthStatusTransfer,
+                MonthStatusTransferCardNumber, MonthYearCardNumber, UpdateTransferRequest,
+                YearStatusTransferCardNumber,
+            },
+            withdraw::YearQuery,
         },
         responses::{
             ApiResponse, ApiResponsePagination, TransferMonthAmountResponse, TransferResponse,
@@ -40,6 +31,7 @@ use shared::{
     },
     errors::AppErrorHttp,
 };
+use std::sync::Arc;
 use utoipa_axum::router::OpenApiRouter;
 
 #[utoipa::path(
@@ -55,7 +47,7 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_transfers(
-    Extension(service): Extension<DynTransferQueryGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<FindAllTransfers>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_all(&params).await?;
@@ -75,7 +67,7 @@ pub async fn get_transfers(
     )
 )]
 pub async fn get_transfer(
-    Extension(service): Extension<DynTransferQueryGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_id(id).await?;
@@ -95,7 +87,7 @@ pub async fn get_transfer(
     )
 )]
 pub async fn get_active_transfers(
-    Extension(service): Extension<DynTransferQueryGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<FindAllTransfers>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_active(&params).await?;
@@ -115,7 +107,7 @@ pub async fn get_active_transfers(
     )
 )]
 pub async fn get_trashed_transfers(
-    Extension(service): Extension<DynTransferQueryGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<FindAllTransfers>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_trashed(&params).await?;
@@ -135,7 +127,7 @@ pub async fn get_trashed_transfers(
     )
 )]
 pub async fn get_transfers_by_transfer_from(
-    Extension(service): Extension<DynTransferQueryGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Path(transfer_from): Path<String>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_transfer_from(&transfer_from).await?;
@@ -155,7 +147,7 @@ pub async fn get_transfers_by_transfer_from(
     )
 )]
 pub async fn get_transfers_by_transfer_to(
-    Extension(service): Extension<DynTransferQueryGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Path(transfer_to): Path<String>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_transfer_to(&transfer_to).await?;
@@ -164,7 +156,7 @@ pub async fn get_transfers_by_transfer_to(
 
 #[utoipa::path(
     post,
-    path = "/api/transfers",
+    path = "/api/transfers/create",
     tag = "Transfer",
     security(("bearer_auth" = [])),
     request_body = CreateTransferRequest,
@@ -176,7 +168,7 @@ pub async fn get_transfers_by_transfer_to(
     )
 )]
 pub async fn create_transfer(
-    Extension(service): Extension<DynTransferCommandGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateTransferRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.create(&body).await?;
@@ -184,8 +176,8 @@ pub async fn create_transfer(
 }
 
 #[utoipa::path(
-    put,
-    path = "/api/transfers/{id}",
+    post,
+    path = "/api/transfers/update/{id}",
     tag = "Transfer",
     security(("bearer_auth" = [])),
     params(("id" = i32, Path, description = "Transfer ID")),
@@ -198,7 +190,7 @@ pub async fn create_transfer(
     )
 )]
 pub async fn update_transfer(
-    Extension(service): Extension<DynTransferCommandGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTransferRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
@@ -220,7 +212,7 @@ pub async fn update_transfer(
     )
 )]
 pub async fn trash_transfer_handler(
-    Extension(service): Extension<DynTransferCommandGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.trashed(id).await?;
@@ -240,7 +232,7 @@ pub async fn trash_transfer_handler(
     )
 )]
 pub async fn restore_transfer_handler(
-    Extension(service): Extension<DynTransferCommandGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.restore(id).await?;
@@ -260,7 +252,7 @@ pub async fn restore_transfer_handler(
     )
 )]
 pub async fn delete_transfer(
-    Extension(service): Extension<DynTransferCommandGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_permanent(id).await?;
@@ -281,7 +273,7 @@ pub async fn delete_transfer(
     )
 )]
 pub async fn restore_all_transfer_handler(
-    Extension(service): Extension<DynTransferCommandGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.restore_all().await?;
     Ok(Json(json!({
@@ -301,7 +293,7 @@ pub async fn restore_all_transfer_handler(
     )
 )]
 pub async fn delete_all_transfer_handler(
-    Extension(service): Extension<DynTransferCommandGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_all().await?;
     Ok(Json(json!({
@@ -315,7 +307,7 @@ pub async fn delete_all_transfer_handler(
     path = "/api/transfers/stats/amount/monthly",
     tag = "Transfer Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly transfer amount", body = ApiResponse<Vec<TransferMonthAmountResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -323,10 +315,10 @@ pub async fn delete_all_transfer_handler(
     )
 )]
 pub async fn get_monthly_amounts(
-    Extension(service): Extension<DynTransferStatsAmountGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amounts(year).await?;
+    let response = service.get_monthly_amounts(req.year).await?;
     Ok(Json(response))
 }
 
@@ -335,7 +327,7 @@ pub async fn get_monthly_amounts(
     path = "/api/transfers/stats/amount/yearly",
     tag = "Transfer Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly transfer amount", body = ApiResponse<Vec<TransferYearAmountResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -343,10 +335,10 @@ pub async fn get_monthly_amounts(
     )
 )]
 pub async fn get_yearly_amounts(
-    Extension(service): Extension<DynTransferStatsAmountGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amounts(year).await?;
+    let response = service.get_yearly_amounts(req.year).await?;
     Ok(Json(response))
 }
 
@@ -363,7 +355,7 @@ pub async fn get_yearly_amounts(
     )
 )]
 pub async fn get_month_status_success(
-    Extension(service): Extension<DynTransferStatsStatusGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthStatusTransfer>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_month_status_success(&params).await?;
@@ -375,7 +367,7 @@ pub async fn get_month_status_success(
     path = "/api/transfers/stats/status/success/yearly",
     tag = "Transfer Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly successful transfer status", body = ApiResponse<Vec<TransferResponseYearStatusSuccess>>),
         (status = 401, description = "Unauthorized"),
@@ -383,10 +375,10 @@ pub async fn get_month_status_success(
     )
 )]
 pub async fn get_yearly_status_success(
-    Extension(service): Extension<DynTransferStatsStatusGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_status_success(year).await?;
+    let response = service.get_yearly_status_success(req.year).await?;
     Ok(Json(response))
 }
 
@@ -403,7 +395,7 @@ pub async fn get_yearly_status_success(
     )
 )]
 pub async fn get_month_status_failed(
-    Extension(service): Extension<DynTransferStatsStatusGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthStatusTransfer>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_month_status_failed(&params).await?;
@@ -415,7 +407,7 @@ pub async fn get_month_status_failed(
     path = "/api/transfers/stats/status/failed/yearly",
     tag = "Transfer Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly failed transfer status", body = ApiResponse<Vec<TransferResponseYearStatusFailed>>),
         (status = 401, description = "Unauthorized"),
@@ -423,10 +415,10 @@ pub async fn get_month_status_failed(
     )
 )]
 pub async fn get_yearly_status_failed(
-    Extension(service): Extension<DynTransferStatsStatusGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_status_failed(year).await?;
+    let response = service.get_yearly_status_failed(req.year).await?;
     Ok(Json(response))
 }
 
@@ -443,10 +435,10 @@ pub async fn get_yearly_status_failed(
     )
 )]
 pub async fn get_monthly_amounts_by_sender(
-    Extension(service): Extension<DynTransferStatsAmountByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthYearCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amounts_by_sender(&params).await?;
+    let response = service.get_monthly_amounts_sender_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -463,10 +455,10 @@ pub async fn get_monthly_amounts_by_sender(
     )
 )]
 pub async fn get_monthly_amounts_by_receiver(
-    Extension(service): Extension<DynTransferStatsAmountByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthYearCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amounts_by_receiver(&params).await?;
+    let response = service.get_monthly_amounts_receiver_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -483,10 +475,10 @@ pub async fn get_monthly_amounts_by_receiver(
     )
 )]
 pub async fn get_yearly_amounts_by_sender(
-    Extension(service): Extension<DynTransferStatsAmountByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthYearCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amounts_by_sender(&params).await?;
+    let response = service.get_yearly_amounts_sender_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -503,10 +495,10 @@ pub async fn get_yearly_amounts_by_sender(
     )
 )]
 pub async fn get_yearly_amounts_by_receiver(
-    Extension(service): Extension<DynTransferStatsAmountByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthYearCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amounts_by_receiver(&params).await?;
+    let response = service.get_yearly_amounts_receiver_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -523,7 +515,7 @@ pub async fn get_yearly_amounts_by_receiver(
     )
 )]
 pub async fn get_month_status_success_by_card(
-    Extension(service): Extension<DynTransferStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthStatusTransferCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_month_status_success_by_card(&params).await?;
@@ -543,7 +535,7 @@ pub async fn get_month_status_success_by_card(
     )
 )]
 pub async fn get_yearly_status_success_by_card(
-    Extension(service): Extension<DynTransferStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<YearStatusTransferCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_yearly_status_success_by_card(&params).await?;
@@ -563,7 +555,7 @@ pub async fn get_yearly_status_success_by_card(
     )
 )]
 pub async fn get_month_status_failed_by_card(
-    Extension(service): Extension<DynTransferStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthStatusTransferCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_month_status_failed_by_card(&params).await?;
@@ -583,7 +575,7 @@ pub async fn get_month_status_failed_by_card(
     )
 )]
 pub async fn get_yearly_status_failed_by_card(
-    Extension(service): Extension<DynTransferStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<YearStatusTransferCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_yearly_status_failed_by_card(&params).await?;
@@ -604,11 +596,14 @@ pub fn transfer_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/transfers/to/{transfer_to}",
             get(get_transfers_by_transfer_to),
         )
-        .route("/api/transfers", post(create_transfer))
-        .route("/api/transfers/{id}", put(update_transfer))
+        .route("/api/transfers/create", post(create_transfer))
+        .route("/api/transfers/update/{id}", post(update_transfer))
         .route("/api/transfers/trash/{id}", delete(trash_transfer_handler))
-        .route("/api/transfers/restore/{id}", put(restore_transfer_handler))
-        .route("/api/transfers/delete/{id}", delete(delete_transfer))
+        .route(
+            "/api/transfers/restore/{id}",
+            post(restore_transfer_handler),
+        )
+        .route("/api/transfers/delete/{id}", post(delete_transfer))
         .route(
             "/api/transfers/restore-all",
             put(restore_all_transfer_handler),

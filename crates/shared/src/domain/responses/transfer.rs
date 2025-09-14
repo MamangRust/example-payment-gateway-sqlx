@@ -96,10 +96,10 @@ impl From<TransferModel> for TransferResponse {
     fn from(model: TransferModel) -> Self {
         Self {
             id: model.transfer_id,
-            transfer_no: model.transfer_no,
+            transfer_no: model.transfer_no.to_string(),
             transfer_from: model.transfer_from,
             transfer_to: model.transfer_to,
-            transfer_amount: model.transfer_amount,
+            transfer_amount: model.transfer_amount as i64,
             transfer_time: model.transfer_time.to_string(),
             created_at: model.created_at.map(|dt| dt.to_string()),
             updated_at: model.updated_at.map(|dt| dt.to_string()),
@@ -111,10 +111,10 @@ impl From<TransferModel> for TransferResponseDeleteAt {
     fn from(model: TransferModel) -> Self {
         Self {
             id: model.transfer_id,
-            transfer_no: model.transfer_no,
+            transfer_no: model.transfer_no.to_string(),
             transfer_from: model.transfer_from,
             transfer_to: model.transfer_to,
-            transfer_amount: model.transfer_amount,
+            transfer_amount: model.transfer_amount as i64,
             transfer_time: model.transfer_time.to_string(),
             created_at: model.created_at.map(|dt| dt.to_string()),
             updated_at: model.updated_at.map(|dt| dt.to_string()),

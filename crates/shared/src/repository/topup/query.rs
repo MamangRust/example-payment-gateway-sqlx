@@ -87,7 +87,7 @@ impl TopupQueryRepositoryTrait for TopupQueryRepository {
             .map(|r| TopupModel {
                 topup_id: r.topup_id,
                 card_number: r.card_number,
-                topup_no: r.topup_no.to_string(),
+                topup_no: r.topup_no,
                 topup_amount: r.topup_amount as i64,
                 topup_method: r.topup_method,
                 topup_time: r.topup_time,
@@ -162,7 +162,7 @@ impl TopupQueryRepositoryTrait for TopupQueryRepository {
             .map(|r| TopupModel {
                 topup_id: r.topup_id,
                 card_number: r.card_number,
-                topup_no: r.topup_no.to_string(),
+                topup_no: r.topup_no,
                 topup_amount: r.topup_amount as i64,
                 topup_method: r.topup_method,
                 topup_time: r.topup_time,
@@ -233,7 +233,7 @@ impl TopupQueryRepositoryTrait for TopupQueryRepository {
             .map(|r| TopupModel {
                 topup_id: r.topup_id,
                 card_number: r.card_number,
-                topup_no: r.topup_no.to_string(),
+                topup_no: r.topup_no,
                 topup_amount: r.topup_amount as i64,
                 topup_method: r.topup_method,
                 topup_time: r.topup_time,
@@ -303,7 +303,7 @@ impl TopupQueryRepositoryTrait for TopupQueryRepository {
             .map(|r| TopupModel {
                 topup_id: r.topup_id,
                 card_number: r.card_number,
-                topup_no: r.topup_no.to_string(),
+                topup_no: r.topup_no,
                 topup_amount: r.topup_amount as i64,
                 topup_method: r.topup_method,
                 topup_time: r.topup_time,
@@ -356,7 +356,7 @@ impl TopupQueryRepositoryTrait for TopupQueryRepository {
             .map(|r| TopupModel {
                 topup_id: r.topup_id,
                 card_number: r.card_number,
-                topup_no: r.topup_no.to_string(),
+                topup_no: r.topup_no,
                 topup_amount: r.topup_amount as i64,
                 topup_method: r.topup_method,
                 topup_time: r.topup_time,
@@ -402,7 +402,7 @@ impl TopupQueryRepositoryTrait for TopupQueryRepository {
             Some(r) => Ok(TopupModel {
                 topup_id: r.topup_id,
                 card_number: r.card_number,
-                topup_no: r.topup_no.to_string(),
+                topup_no: r.topup_no,
                 topup_amount: r.topup_amount as i64,
                 topup_method: r.topup_method,
                 topup_time: r.topup_time,

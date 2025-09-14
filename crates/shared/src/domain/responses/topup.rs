@@ -114,7 +114,7 @@ impl From<TopupModel> for TopupResponse {
         Self {
             id: model.topup_id,
             card_number: model.card_number,
-            topup_no: model.topup_no,
+            topup_no: model.topup_no.to_string(),
             topup_amount: model.topup_amount,
             topup_method: model.topup_method,
             topup_time: model.topup_time.to_string(),
@@ -129,7 +129,7 @@ impl From<TopupModel> for TopupResponseDeleteAt {
         Self {
             id: model.topup_id,
             card_number: model.card_number,
-            topup_no: model.topup_no,
+            topup_no: model.topup_no.to_string(),
             topup_amount: model.topup_amount,
             topup_method: model.topup_method,
             topup_time: model.topup_time.to_string(),

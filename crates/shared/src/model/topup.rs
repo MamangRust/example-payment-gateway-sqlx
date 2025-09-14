@@ -1,12 +1,13 @@
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct TopupModel {
     pub topup_id: i32,
     pub card_number: String,
-    pub topup_no: String,
+    pub topup_no: Uuid,
     pub topup_amount: i64,
     pub topup_method: String,
     pub topup_time: NaiveDateTime,

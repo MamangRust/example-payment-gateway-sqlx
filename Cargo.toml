@@ -13,6 +13,7 @@ members = [
     "crates/withdraw",
     "crates/genproto",
     "crates/shared",
+    "crates/dashboard/src-tauri",
 ]
 resolver = "3"
 
@@ -64,12 +65,12 @@ tokio = { version = "1.45.0", features = [
 ] }
 axum = { version = "0.8.4", features = ["multipart"] }
 axum-extra = { version = "0.10.1", features = ["cookie"] }
-tower-http = { version = "0.6.2", features = ["limit", "trace", "fs"] }
+tower-http = { version = "0.6.2", features = ["limit", "trace", "fs", "cors"] }
 tonic = "0.14.0"
 utoipa = { version = "5.3.1", features = ["axum_extras", "chrono"] }
 utoipa-axum = "0.2.0"
 utoipa-swagger-ui = { version = "9.0.1", features = ["axum"] }
-uuid = { version = "1.16.0", features = ["v4"] }
+uuid = { version = "1.16.0", features = ["v4", "serde"] }
 sysinfo = "0.36.1"
 openssl = { version = "0.10.73", features = ["vendored"] }
 

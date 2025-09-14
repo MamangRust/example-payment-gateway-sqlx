@@ -212,7 +212,7 @@ impl WithdrawQueryRepositoryTrait for WithdrawQueryRepository {
         let sql = r#"
             SELECT
                 withdraw_id,
-                withdraw_no,
+                withdraw_no::TEXT,
                 card_number,
                 withdraw_amount,
                 withdraw_time,
@@ -269,7 +269,7 @@ impl WithdrawQueryRepositoryTrait for WithdrawQueryRepository {
             })
             .collect::<Result<Vec<_>, sqlx::Error>>()
             .map_err(|e| {
-                error!("Failed to map trashed withdraw rows: {e:?}");
+                error!("Failed to map withdraw rows: {e:?}");
                 RepositoryError::Sqlx(e)
             })?;
 
@@ -353,7 +353,7 @@ impl WithdrawQueryRepositoryTrait for WithdrawQueryRepository {
             })
             .collect::<Result<Vec<_>, sqlx::Error>>()
             .map_err(|e| {
-                error!("Failed to map withdraw by card number: {e:?}");
+                error!("Failed to map withdraw rows: {e:?}");
                 RepositoryError::Sqlx(e)
             })?;
 

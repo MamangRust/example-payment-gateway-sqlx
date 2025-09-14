@@ -7,9 +7,6 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
-
-pub type DynRoleQueryGrpcClient = Arc<dyn RoleQueryGrpcClientTrait + Send + Sync>;
 
 #[async_trait]
 pub trait RoleQueryGrpcClientTrait {

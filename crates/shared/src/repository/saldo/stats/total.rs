@@ -133,7 +133,7 @@ impl SaldoTotalBalanceRepositoryTrait for SaldoTotalBalanceRepository {
         for row in rows {
             let year: String = row.try_get("year")?;
             let month: String = row.try_get("month")?;
-            let total_balance: i64 = row.try_get("total_balance")?;
+            let total_balance: i32 = row.try_get("total_balance")?;
 
             result.push(SaldoMonthTotalBalance {
                 year,
@@ -211,7 +211,7 @@ impl SaldoTotalBalanceRepositoryTrait for SaldoTotalBalanceRepository {
         let mut result = Vec::with_capacity(rows.len());
         for row in rows {
             let year_str: String = row.try_get("year")?;
-            let total_balance: i64 = row.try_get("total_balance")?;
+            let total_balance: i32 = row.try_get("total_balance")?;
 
             result.push(SaldoYearTotalBalance {
                 year: year_str,

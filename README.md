@@ -1,7 +1,14 @@
-### Example Sqlx Payment Gateway
+## Example Sqlx Payment Gateway
 
 
 
-#### Screenshot
+### Screenshot
+
+#### OpenApi
 
 <img src="./images/swagger-ui.png" alt="hello" />
+
+
+#### Dashboard Tauri
+
+<img src="./images/example-dashboard.png" alt="tauri" />

@@ -1,13 +1,14 @@
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct WithdrawModel {
     pub withdraw_id: i32,
-    pub withdraw_no: String,
+    pub withdraw_no: Uuid,
     pub card_number: String,
-    pub withdraw_amount: i64,
+    pub withdraw_amount: i32,
     pub withdraw_time: NaiveDateTime,
     pub status: String,
     pub created_at: Option<NaiveDateTime>,

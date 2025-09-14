@@ -1,0 +1,39 @@
+{"timestamp":"2025-09-14T00:06:34.035094Z","level":"INFO","fields":{"message":"🔐 Incoming login request for user: hello_@gmail.com"},"target":"shared::service::auth"}
+{"timestamp":"2025-09-14T00:06:34.201623Z","level":"INFO","fields":{"message":"✅ Successfully generated access token for user_id: 25"},"target":"shared::service::token"}
+{"timestamp":"2025-09-14T00:06:34.383912Z","level":"INFO","fields":{"message":"Deleted all refresh tokens for user_id=25"},"target":"shared::repository::refresh_token::command"}
+{"timestamp":"2025-09-14T00:06:34.389440Z","level":"INFO","fields":{"message":"Created refresh token for user_id=25"},"target":"shared::repository::refresh_token::command"}
+{"timestamp":"2025-09-14T00:06:34.389578Z","level":"INFO","fields":{"message":"✅ Created refresh token for user_id 25"},"target":"shared::service::token"}
+{"timestamp":"2025-09-14T00:06:34.389621Z","level":"INFO","fields":{"message":"✅ Login successful for email: hello_@gmail.com"},"target":"shared::service::auth"}
+{"timestamp":"2025-09-14T00:06:34.389662Z","level":"INFO","fields":{"message":"User login success: Login successful"},"target":"auth::service"}
+{"timestamp":"2025-09-14T00:06:34.506961Z","level":"INFO","fields":{"message":"📄 Fetching current user profile (get_me)"},"target":"shared::service::auth"}
+{"timestamp":"2025-09-14T00:06:34.512839Z","level":"INFO","fields":{"message":"GetMe success: user fetched successfully"},"target":"auth::service"}
+{"timestamp":"2025-09-14T00:06:34.520951Z","level":"INFO","fields":{"message":"📄 Fetching current user profile (get_me)"},"target":"shared::service::auth"}
+{"timestamp":"2025-09-14T00:06:34.523447Z","level":"INFO","fields":{"message":"GetMe success: user fetched successfully"},"target":"auth::service"}
+{"timestamp":"2025-09-14T05:15:57.065432Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-14T05:15:57.090526Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}
+{"timestamp":"2025-09-14T05:21:21.576676Z","level":"INFO","fields":{"message":"🔐 Incoming login request for user: hello_@gmail.com"},"target":"shared::service::auth"}
+{"timestamp":"2025-09-14T05:21:21.589001Z","level":"INFO","fields":{"message":"✅ Successfully generated access token for user_id: 25"},"target":"shared::service::token"}
+{"timestamp":"2025-09-14T05:21:21.721549Z","level":"INFO","fields":{"message":"Deleted all refresh tokens for user_id=25"},"target":"shared::repository::refresh_token::command"}
+{"timestamp":"2025-09-14T05:21:21.729219Z","level":"INFO","fields":{"message":"Created refresh token for user_id=25"},"target":"shared::repository::refresh_token::command"}
+{"timestamp":"2025-09-14T05:21:21.729345Z","level":"INFO","fields":{"message":"✅ Created refresh token for user_id 25"},"target":"shared::service::token"}
+{"timestamp":"2025-09-14T05:21:21.729396Z","level":"INFO","fields":{"message":"✅ Login successful for email: hello_@gmail.com"},"target":"shared::service::auth"}
+{"timestamp":"2025-09-14T05:21:21.729439Z","level":"INFO","fields":{"message":"User login success: Login successful"},"target":"auth::service"}
+{"timestamp":"2025-09-14T06:25:15.621672Z","level":"INFO","fields":{"message":"🔐 Incoming login request for user: hello_@gmail.com"},"target":"shared::service::auth"}
+{"timestamp":"2025-09-14T06:25:15.763985Z","level":"INFO","fields":{"message":"✅ Successfully generated access token for user_id: 25"},"target":"shared::service::token"}
+{"timestamp":"2025-09-14T06:25:15.901171Z","level":"INFO","fields":{"message":"Deleted all refresh tokens for user_id=25"},"target":"shared::repository::refresh_token::command"}
+{"timestamp":"2025-09-14T06:25:15.907361Z","level":"INFO","fields":{"message":"Created refresh token for user_id=25"},"target":"shared::repository::refresh_token::command"}
+{"timestamp":"2025-09-14T06:25:15.907669Z","level":"INFO","fields":{"message":"✅ Created refresh token for user_id 25"},"target":"shared::service::token"}
+{"timestamp":"2025-09-14T06:25:15.907763Z","level":"INFO","fields":{"message":"✅ Login successful for email: hello_@gmail.com"},"target":"shared::service::auth"}
+{"timestamp":"2025-09-14T06:25:15.907848Z","level":"INFO","fields":{"message":"User login success: Login successful"},"target":"auth::service"}
+{"timestamp":"2025-09-14T06:25:16.010439Z","level":"INFO","fields":{"message":"📄 Fetching current user profile (get_me)"},"target":"shared::service::auth"}
+{"timestamp":"2025-09-14T06:25:16.017313Z","level":"INFO","fields":{"message":"GetMe success: user fetched successfully"},"target":"auth::service"}
+{"timestamp":"2025-09-14T06:25:16.028068Z","level":"INFO","fields":{"message":"📄 Fetching current user profile (get_me)"},"target":"shared::service::auth"}
+{"timestamp":"2025-09-14T06:25:16.030053Z","level":"INFO","fields":{"message":"GetMe success: user fetched successfully"},"target":"auth::service"}
+{"timestamp":"2025-09-14T06:57:19.468441Z","level":"INFO","fields":{"message":"🛑 Shutdown signal received."},"target":"auth"}
+{"timestamp":"2025-09-14T06:57:19.471299Z","level":"INFO","fields":{"message":"gRPC server received shutdown signal"},"target":"auth"}
+{"timestamp":"2025-09-14T06:57:19.471335Z","level":"INFO","fields":{"message":"🛑 Shutting down all servers..."},"target":"auth"}
+{"timestamp":"2025-09-14T06:57:19.474671Z","level":"INFO","fields":{"message":"gRPC server stopped gracefully"},"target":"auth"}
+{"timestamp":"2025-09-14T06:57:19.475255Z","level":"INFO","fields":{"message":"✅ All servers shutdown gracefully"},"target":"auth"}
+{"timestamp":"2025-09-14T06:57:19.475548Z","level":"INFO","fields":{"message":"✅ Auth Service shutdown complete."},"target":"auth"}
+{"timestamp":"2025-09-14T07:31:43.446912Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-14T07:31:43.454704Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50051"},"target":"auth"}

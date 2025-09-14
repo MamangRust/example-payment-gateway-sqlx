@@ -117,9 +117,9 @@ impl From<TransactionModel> for TransactionResponse {
     fn from(model: TransactionModel) -> Self {
         Self {
             id: model.transaction_id,
-            transaction_no: model.transaction_no,
+            transaction_no: model.transaction_no.to_string(),
             card_number: model.card_number,
-            amount: model.amount,
+            amount: model.amount as i64,
             payment_method: model.payment_method,
             merchant_id: model.merchant_id,
             transaction_time: model.transaction_time.to_string(),
@@ -133,9 +133,9 @@ impl From<TransactionModel> for TransactionResponseDeleteAt {
     fn from(model: TransactionModel) -> Self {
         Self {
             id: model.transaction_id,
-            transaction_no: model.transaction_no,
+            transaction_no: model.transaction_no.to_string(),
             card_number: model.card_number,
-            amount: model.amount,
+            amount: model.amount as i64,
             payment_method: model.payment_method,
             merchant_id: model.merchant_id,
             transaction_time: model.transaction_time.to_string(),

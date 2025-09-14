@@ -1,15 +1,16 @@
 use async_trait::async_trait;
-use std::sync::Arc;
-
-use genproto::saldo::{
-    CreateSaldoRequest, FindAllSaldoRequest, FindByIdSaldoRequest, FindMonthlySaldoTotalBalance,
-    FindYearlySaldo, UpdateSaldoRequest, saldo_service_client::SaldoServiceClient,
+use genproto::{
+    card::FindByCardNumberRequest,
+    saldo::{
+        CreateSaldoRequest, FindAllSaldoRequest, FindByIdSaldoRequest,
+        FindMonthlySaldoTotalBalance, FindYearlySaldo, UpdateSaldoRequest,
+        saldo_service_client::SaldoServiceClient,
+    },
 };
 use shared::{
     abstract_trait::saldo::http::{
-        command::SaldoCommandGrpcClientTrait,
-        query::SaldoQueryGrpcClientTrait,
-        stats::{balance::SaldoBalanceGrpcClientTrait, total::SaldoTotalBalanceGrpcClientTrait},
+        SaldoBalanceGrpcClientTrait, SaldoCommandGrpcClientTrait, SaldoGrpcClientServiceTrait,
+        SaldoQueryGrpcClientTrait, SaldoTotalBalanceGrpcClientTrait,
     },
     domain::{
         requests::saldo::{
@@ -26,19 +27,10 @@ use shared::{
     errors::{AppErrorGrpc, AppErrorHttp},
     utils::{mask_card_number, month_name},
 };
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
-
-#[async_trait]
-#[allow(dead_code)]
-pub trait SaldoGrpcClientServiceTrait:
-    SaldoQueryGrpcClientTrait
-    + SaldoCommandGrpcClientTrait
-    + SaldoBalanceGrpcClientTrait
-    + SaldoTotalBalanceGrpcClientTrait
-{
-}
 
 #[derive(Debug)]
 pub struct SaldoGrpcClientService {
@@ -50,6 +42,9 @@ impl SaldoGrpcClientService {
         Self { client }
     }
 }
+
+#[async_trait]
+impl SaldoGrpcClientServiceTrait for SaldoGrpcClientService {}
 
 #[async_trait]
 impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
@@ -196,6 +191,43 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
             }
             Err(status) => {
                 error!("find saldo {id} failed: {status:?}");
+                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+            }
+        }
+    }
+
+    #[instrument(skip(self), level = "info")]
+    async fn find_by_card(
+        &self,
+        card_number: &str,
+    ) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp> {
+        info!("fetching saldo by card_number: {card_number}");
+
+        let mut client = self.client.lock().await;
+
+        let grpc_req = Request::new(FindByCardNumberRequest {
+            card_number: card_number.to_string(),
+        });
+
+        match client.find_by_card_number(grpc_req).await {
+            Ok(response) => {
+                let inner = response.into_inner();
+                let data = inner.data.ok_or_else(|| {
+                    error!("saldo with card_number {card_number} - data missing in gRPC response");
+                    AppErrorHttp(AppErrorGrpc::Unhandled(
+                        "Saldo data is missing in gRPC response".into(),
+                    ))
+                })?;
+
+                info!("found saldo with card_number {card_number}");
+                Ok(ApiResponse {
+                    data: data.into(),
+                    message: inner.message,
+                    status: inner.status,
+                })
+            }
+            Err(status) => {
+                error!("find saldo with card_number {card_number} failed: {status:?}");
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }

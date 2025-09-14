@@ -8,26 +8,16 @@ use axum::{
     http::StatusCode,
     middleware,
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::withdraw::http::{
-        command::DynWithdrawCommandGrpcClient,
-        query::DynWithdrawQueryGrpcClient,
-        stats::{
-            amount::DynWithdrawStatsAmountGrpcClient, status::DynWithdrawStatsStatusGrpcClient,
-        },
-        statsbycard::{
-            amount::DynWithdrawStatsAmountByCardNumberGrpcClient,
-            status::DynWithdrawStatsStatusByCardNumberGrpcClient,
-        },
-    },
+    abstract_trait::withdraw::http::DynWithdrawGrpcClientService,
     domain::{
         requests::withdraw::{
             CreateWithdrawRequest, FindAllWithdrawCardNumber, FindAllWithdraws,
             MonthStatusWithdraw, MonthStatusWithdrawCardNumber, UpdateWithdrawRequest,
-            YearMonthCardNumber, YearStatusWithdrawCardNumber,
+            YearMonthCardNumber, YearQuery, YearStatusWithdrawCardNumber,
         },
         responses::{
             ApiResponse, ApiResponsePagination, WithdrawMonthlyAmountResponse, WithdrawResponse,
@@ -54,7 +44,7 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_withdraws(
-    Extension(service): Extension<DynWithdrawQueryGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<FindAllWithdraws>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_all(&params).await?;
@@ -74,7 +64,7 @@ pub async fn get_withdraws(
     )
 )]
 pub async fn get_withdraws_by_card_number(
-    Extension(service): Extension<DynWithdrawQueryGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<FindAllWithdrawCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_all_by_card_number(&params).await?;
@@ -94,7 +84,7 @@ pub async fn get_withdraws_by_card_number(
     )
 )]
 pub async fn get_withdraw(
-    Extension(service): Extension<DynWithdrawQueryGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_id(id).await?;
@@ -114,7 +104,7 @@ pub async fn get_withdraw(
     )
 )]
 pub async fn get_active_withdraws(
-    Extension(service): Extension<DynWithdrawQueryGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<FindAllWithdraws>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_active(&params).await?;
@@ -134,7 +124,7 @@ pub async fn get_active_withdraws(
     )
 )]
 pub async fn get_trashed_withdraws(
-    Extension(service): Extension<DynWithdrawQueryGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<FindAllWithdraws>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_trashed(&params).await?;
@@ -155,7 +145,7 @@ pub async fn get_trashed_withdraws(
     )
 )]
 pub async fn create_withdraw(
-    Extension(service): Extension<DynWithdrawCommandGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateWithdrawRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.create(&body).await?;
@@ -177,7 +167,7 @@ pub async fn create_withdraw(
     )
 )]
 pub async fn update_withdraw(
-    Extension(service): Extension<DynWithdrawCommandGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateWithdrawRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
@@ -199,7 +189,7 @@ pub async fn update_withdraw(
     )
 )]
 pub async fn trash_withdraw_handler(
-    Extension(service): Extension<DynWithdrawCommandGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.trashed_withdraw(id).await?;
@@ -219,7 +209,7 @@ pub async fn trash_withdraw_handler(
     )
 )]
 pub async fn restore_withdraw_handler(
-    Extension(service): Extension<DynWithdrawCommandGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.restore(id).await?;
@@ -239,7 +229,7 @@ pub async fn restore_withdraw_handler(
     )
 )]
 pub async fn delete_withdraw(
-    Extension(service): Extension<DynWithdrawCommandGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_permanent(id).await?;
@@ -260,7 +250,7 @@ pub async fn delete_withdraw(
     )
 )]
 pub async fn restore_all_withdraw_handler(
-    Extension(service): Extension<DynWithdrawCommandGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.restore_all().await?;
     Ok(Json(json!({
@@ -280,7 +270,7 @@ pub async fn restore_all_withdraw_handler(
     )
 )]
 pub async fn delete_all_withdraw_handler(
-    Extension(service): Extension<DynWithdrawCommandGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_all().await?;
     Ok(Json(json!({
@@ -294,7 +284,7 @@ pub async fn delete_all_withdraw_handler(
     path = "/api/withdraws/stats/amount/monthly",
     tag = "Withdraw Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly withdraw amount", body = ApiResponse<Vec<WithdrawMonthlyAmountResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -302,10 +292,10 @@ pub async fn delete_all_withdraw_handler(
     )
 )]
 pub async fn get_monthly_withdraws(
-    Extension(service): Extension<DynWithdrawStatsAmountGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_withdraws(year).await?;
+    let response = service.get_monthly_withdraws(req.year).await?;
     Ok(Json(response))
 }
 
@@ -314,7 +304,7 @@ pub async fn get_monthly_withdraws(
     path = "/api/withdraws/stats/amount/yearly",
     tag = "Withdraw Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly withdraw amount", body = ApiResponse<Vec<WithdrawYearlyAmountResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -322,10 +312,10 @@ pub async fn get_monthly_withdraws(
     )
 )]
 pub async fn get_yearly_withdraws(
-    Extension(service): Extension<DynWithdrawStatsAmountGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    Query(query): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_withdraws(year).await?;
+    let response = service.get_yearly_withdraws(query.year).await?;
     Ok(Json(response))
 }
 
@@ -342,7 +332,7 @@ pub async fn get_yearly_withdraws(
     )
 )]
 pub async fn get_month_status_success(
-    Extension(service): Extension<DynWithdrawStatsStatusGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<MonthStatusWithdraw>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_month_status_success(&params).await?;
@@ -354,7 +344,7 @@ pub async fn get_month_status_success(
     path = "/api/withdraws/stats/status/success/yearly",
     tag = "Withdraw Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly successful withdraw status", body = ApiResponse<Vec<WithdrawResponseYearStatusSuccess>>),
         (status = 401, description = "Unauthorized"),
@@ -362,10 +352,10 @@ pub async fn get_month_status_success(
     )
 )]
 pub async fn get_yearly_status_success(
-    Extension(service): Extension<DynWithdrawStatsStatusGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_status_success(year).await?;
+    let response = service.get_yearly_status_success(req.year).await?;
     Ok(Json(response))
 }
 
@@ -382,7 +372,7 @@ pub async fn get_yearly_status_success(
     )
 )]
 pub async fn get_month_status_failed(
-    Extension(service): Extension<DynWithdrawStatsStatusGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<MonthStatusWithdraw>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_month_status_failed(&params).await?;
@@ -394,7 +384,7 @@ pub async fn get_month_status_failed(
     path = "/api/withdraws/stats/status/failed/yearly",
     tag = "Withdraw Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly failed withdraw status", body = ApiResponse<Vec<WithdrawResponseYearStatusFailed>>),
         (status = 401, description = "Unauthorized"),
@@ -402,10 +392,10 @@ pub async fn get_month_status_failed(
     )
 )]
 pub async fn get_yearly_status_failed(
-    Extension(service): Extension<DynWithdrawStatsStatusGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_status_failed(year).await?;
+    let response = service.get_yearly_status_failed(req.year).await?;
     Ok(Json(response))
 }
 
@@ -422,10 +412,10 @@ pub async fn get_yearly_status_failed(
     )
 )]
 pub async fn get_monthly_by_card_number(
-    Extension(service): Extension<DynWithdrawStatsAmountByCardNumberGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<YearMonthCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_by_card_number(&params).await?;
+    let response = service.get_monthly_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -442,10 +432,10 @@ pub async fn get_monthly_by_card_number(
     )
 )]
 pub async fn get_yearly_by_card_number(
-    Extension(service): Extension<DynWithdrawStatsAmountByCardNumberGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<YearMonthCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_by_card_number(&params).await?;
+    let response = service.get_yearly_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -462,10 +452,10 @@ pub async fn get_yearly_by_card_number(
     )
 )]
 pub async fn get_month_status_success_by_card(
-    Extension(service): Extension<DynWithdrawStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<MonthStatusWithdrawCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_month_status_success_by_card(&params).await?;
+    let response = service.get_month_status_success_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -482,10 +472,10 @@ pub async fn get_month_status_success_by_card(
     )
 )]
 pub async fn get_yearly_status_success_by_card(
-    Extension(service): Extension<DynWithdrawStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<YearStatusWithdrawCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_status_success_by_card(&params).await?;
+    let response = service.get_yearly_status_success_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -502,10 +492,10 @@ pub async fn get_yearly_status_success_by_card(
     )
 )]
 pub async fn get_month_status_failed_by_card(
-    Extension(service): Extension<DynWithdrawStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<MonthStatusWithdrawCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_month_status_failed_by_card(&params).await?;
+    let response = service.get_month_status_failed_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -522,10 +512,10 @@ pub async fn get_month_status_failed_by_card(
     )
 )]
 pub async fn get_yearly_status_failed_by_card(
-    Extension(service): Extension<DynWithdrawStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynWithdrawGrpcClientService>,
     Query(params): Query<YearStatusWithdrawCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_status_failed_by_card(&params).await?;
+    let response = service.get_yearly_status_failed_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -537,17 +527,20 @@ pub fn withdraw_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/withdraws/active", get(get_active_withdraws))
         .route("/api/withdraws/trashed", get(get_trashed_withdraws))
         .route("/api/withdraws", post(create_withdraw))
-        .route("/api/withdraws/{id}", put(update_withdraw))
-        .route("/api/withdraws/trash/{id}", delete(trash_withdraw_handler))
-        .route("/api/withdraws/restore/{id}", put(restore_withdraw_handler))
+        .route("/api/withdraws/{id}", post(update_withdraw))
+        .route("/api/withdraws/trash/{id}", post(trash_withdraw_handler))
+        .route(
+            "/api/withdraws/restore/{id}",
+            post(restore_withdraw_handler),
+        )
         .route("/api/withdraws/delete/{id}", delete(delete_withdraw))
         .route(
             "/api/withdraws/restore-all",
-            put(restore_all_withdraw_handler),
+            post(restore_all_withdraw_handler),
         )
         .route(
             "/api/withdraws/delete-all",
-            delete(delete_all_withdraw_handler),
+            post(delete_all_withdraw_handler),
         )
         .route(
             "/api/withdraws/stats/amount/monthly",

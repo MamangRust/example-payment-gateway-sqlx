@@ -7,29 +7,25 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
-
-pub type DynTransferStatsAmountByCardNumberGrpcClient =
-    Arc<dyn TransferStatsAmountByCardNumberGrpcClientTrait + Send + Sync>;
 
 #[async_trait]
 pub trait TransferStatsAmountByCardNumberGrpcClientTrait {
-    async fn get_monthly_amounts_by_sender(
+    async fn get_monthly_amounts_sender_bycard(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, AppErrorHttp>;
 
-    async fn get_monthly_amounts_by_receiver(
+    async fn get_monthly_amounts_receiver_bycard(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, AppErrorHttp>;
 
-    async fn get_yearly_amounts_by_sender(
+    async fn get_yearly_amounts_sender_bycard(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, AppErrorHttp>;
 
-    async fn get_yearly_amounts_by_receiver(
+    async fn get_yearly_amounts_receiver_bycard(
         &self,
         req: &MonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, AppErrorHttp>;

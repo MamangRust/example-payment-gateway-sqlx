@@ -271,7 +271,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                 ServiceError::Custom("saldo not found".into())
             })?;
 
-        saldo.total_balance += transaction.amount;
+        saldo.total_balance += transaction.amount as i64;
         if let Err(e) = self
             .saldo_command
             .update_balance(&UpdateSaldoBalance {
@@ -318,7 +318,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                 ServiceError::Custom("failed to update saldo".into())
             })?;
 
-        transaction.amount = req.amount;
+        transaction.amount = req.amount as i32;
         transaction.payment_method = req.payment_method.clone();
 
         let updated = self
@@ -326,7 +326,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             .update(&UpdateTransactionRequest {
                 transaction_id: req.transaction_id,
                 card_number: transaction.card_number.clone(),
-                amount: transaction.amount,
+                amount: transaction.amount as i64,
                 payment_method: transaction.payment_method.clone(),
                 merchant_id: Some(transaction.merchant_id),
                 transaction_time: transaction.transaction_time,

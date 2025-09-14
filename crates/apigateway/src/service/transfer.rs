@@ -8,15 +8,10 @@ use genproto::transfer::{
 };
 use shared::{
     abstract_trait::transfer::http::{
-        command::TransferCommandGrpcClientTrait,
-        query::TransferQueryGrpcClientTrait,
-        stats::{
-            amount::TransferStatsAmountGrpcClientTrait, status::TransferStatsStatusGrpcClientTrait,
-        },
-        statsbycard::{
-            amount::TransferStatsAmountByCardNumberGrpcClientTrait,
-            status::TransferStatsStatusByCardNumberGrpcClientTrait,
-        },
+        TransferCommandGrpcClientTrait, TransferGrpcClientServiceTrait,
+        TransferQueryGrpcClientTrait, TransferStatsAmountByCardNumberGrpcClientTrait,
+        TransferStatsAmountGrpcClientTrait, TransferStatsStatusByCardNumberGrpcClientTrait,
+        TransferStatsStatusGrpcClientTrait,
     },
     domain::{
         requests::transfer::{
@@ -43,18 +38,6 @@ use tokio::sync::Mutex;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
-#[async_trait]
-#[allow(dead_code)]
-pub trait TransferGrpcClientServiceTrait:
-    TransferCommandGrpcClientTrait
-    + TransferQueryGrpcClientTrait
-    + TransferStatsAmountGrpcClientTrait
-    + TransferStatsStatusGrpcClientTrait
-    + TransferStatsAmountByCardNumberGrpcClientTrait
-    + TransferStatsStatusByCardNumberGrpcClientTrait
-{
-}
-
 #[derive(Debug)]
 pub struct TransferGrpcClientService {
     client: Arc<Mutex<TransferServiceClient<Channel>>>,
@@ -65,6 +48,9 @@ impl TransferGrpcClientService {
         Self { client }
     }
 }
+
+#[async_trait]
+impl TransferGrpcClientServiceTrait for TransferGrpcClientService {}
 
 #[async_trait]
 impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
@@ -752,7 +738,7 @@ impl TransferStatsStatusGrpcClientTrait for TransferGrpcClientService {
 #[async_trait]
 impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_amounts_by_sender(
+    async fn get_monthly_amounts_sender_bycard(
         &self,
         req: &DomainMonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, AppErrorHttp> {
@@ -799,7 +785,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_amounts_by_receiver(
+    async fn get_monthly_amounts_receiver_bycard(
         &self,
         req: &DomainMonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, AppErrorHttp> {
@@ -846,7 +832,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_amounts_by_sender(
+    async fn get_yearly_amounts_sender_bycard(
         &self,
         req: &DomainMonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, AppErrorHttp> {
@@ -893,7 +879,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_amounts_by_receiver(
+    async fn get_yearly_amounts_receiver_bycard(
         &self,
         req: &DomainMonthYearCardNumber,
     ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, AppErrorHttp> {
@@ -1134,6 +1120,3 @@ impl TransferStatsStatusByCardNumberGrpcClientTrait for TransferGrpcClientServic
         }
     }
 }
-
-#[async_trait]
-impl TransferGrpcClientServiceTrait for TransferGrpcClientService {}

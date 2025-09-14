@@ -1,0 +1,12 @@
+{"timestamp":"2025-09-13T08:54:09.682713Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-13T08:54:09.688938Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50054"},"target":"role"}
+{"timestamp":"2025-09-13T09:40:15.986913Z","level":"INFO","fields":{"message":"🛑 Shutdown signal received."},"target":"role"}
+{"timestamp":"2025-09-13T09:40:15.987169Z","level":"INFO","fields":{"message":"gRPC server received shutdown signal"},"target":"role"}
+{"timestamp":"2025-09-13T09:40:15.987161Z","level":"INFO","fields":{"message":"🛑 Shutting down all servers..."},"target":"role"}
+{"timestamp":"2025-09-13T09:40:15.989723Z","level":"INFO","fields":{"message":"gRPC server stopped gracefully"},"target":"role"}
+{"timestamp":"2025-09-13T09:40:15.989859Z","level":"INFO","fields":{"message":"✅ All servers shutdown gracefully"},"target":"role"}
+{"timestamp":"2025-09-13T09:40:15.989921Z","level":"INFO","fields":{"message":"✅ Role Service shutdown complete."},"target":"role"}
+{"timestamp":"2025-09-13T09:48:11.637312Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-13T09:48:11.643616Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50054"},"target":"role"}
+{"timestamp":"2025-09-13T21:45:50.339293Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-13T21:45:50.345419Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50054"},"target":"role"}

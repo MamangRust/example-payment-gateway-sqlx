@@ -7,9 +7,6 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
-
-pub type DynSaldoQueryGrpcClient = Arc<dyn SaldoQueryGrpcClientTrait + Send + Sync>;
 
 #[async_trait]
 pub trait SaldoQueryGrpcClientTrait {
@@ -26,4 +23,8 @@ pub trait SaldoQueryGrpcClientTrait {
         request: &FindAllSaldos,
     ) -> Result<ApiResponsePagination<Vec<SaldoResponseDeleteAt>>, AppErrorHttp>;
     async fn find_by_id(&self, id: i32) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp>;
+    async fn find_by_card(
+        &self,
+        card_number: &str,
+    ) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp>;
 }

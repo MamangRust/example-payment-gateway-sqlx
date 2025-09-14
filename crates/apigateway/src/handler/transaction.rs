@@ -8,29 +8,19 @@ use axum::{
     http::StatusCode,
     middleware,
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::transaction::http::{
-        command::DynTransactionCommandGrpcClient,
-        query::DynTransactionGrpcClientService,
-        stats::{
-            amount::DynTransactionStatsAmountGrpcClient,
-            method::DynTransactionStatsMethodGrpcClient,
-            status::DynTransactionStatsStatusGrpcClient,
-        },
-        statsbycard::{
-            amount::DynTransactionStatsAmountByCardNumberGrpcClient,
-            method::DynTransactionStatsMethodByCardNumberGrpcClient,
-            status::DynTransactionStatsStatusByCardNumberGrpcClient,
-        },
-    },
+    abstract_trait::transaction::http::DynTransactionGrpcClientService,
     domain::{
-        requests::transaction::{
-            CreateTransactionRequest, FindAllTransactionCardNumber, FindAllTransactions,
-            MonthStatusTransaction, MonthStatusTransactionCardNumber, MonthYearPaymentMethod,
-            UpdateTransactionRequest, YearStatusTransactionCardNumber,
+        requests::{
+            transaction::{
+                CreateTransactionRequest, FindAllTransactionCardNumber, FindAllTransactions,
+                MonthStatusTransaction, MonthStatusTransactionCardNumber, MonthYearPaymentMethod,
+                UpdateTransactionRequest, YearStatusTransactionCardNumber,
+            },
+            withdraw::YearQuery,
         },
         responses::{
             ApiResponse, ApiResponsePagination, TransactionMonthAmountResponse,
@@ -167,7 +157,7 @@ pub async fn get_transactions_by_merchant_id(
 
 #[utoipa::path(
     post,
-    path = "/api/transactions",
+    path = "/api/transactions/create",
     tag = "Transaction",
     security(("bearer_auth" = [])),
     request_body = CreateTransactionRequest,
@@ -180,7 +170,7 @@ pub async fn get_transactions_by_merchant_id(
 )]
 pub async fn create_transaction(
     ApiKey(key): ApiKey,
-    Extension(service): Extension<DynTransactionCommandGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateTransactionRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.create(&key, &body).await?;
@@ -188,8 +178,8 @@ pub async fn create_transaction(
 }
 
 #[utoipa::path(
-    put,
-    path = "/api/transactions/{id}",
+    post,
+    path = "/api/transactions/update/{id}",
     tag = "Transaction",
     security(("bearer_auth" = [])),
     params(("id" = i32, Path, description = "Transaction ID")),
@@ -203,7 +193,7 @@ pub async fn create_transaction(
 )]
 pub async fn update_transaction(
     ApiKey(key): ApiKey,
-    Extension(service): Extension<DynTransactionCommandGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTransactionRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
@@ -225,7 +215,7 @@ pub async fn update_transaction(
     )
 )]
 pub async fn trash_transaction_handler(
-    Extension(service): Extension<DynTransactionCommandGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.trashed(id).await?;
@@ -245,7 +235,7 @@ pub async fn trash_transaction_handler(
     )
 )]
 pub async fn restore_transaction_handler(
-    Extension(service): Extension<DynTransactionCommandGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.restore(id).await?;
@@ -265,7 +255,7 @@ pub async fn restore_transaction_handler(
     )
 )]
 pub async fn delete_transaction(
-    Extension(service): Extension<DynTransactionCommandGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_permanent(id).await?;
@@ -286,7 +276,7 @@ pub async fn delete_transaction(
     )
 )]
 pub async fn restore_all_transaction_handler(
-    Extension(service): Extension<DynTransactionCommandGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.restore_all().await?;
     Ok(Json(json!({
@@ -306,7 +296,7 @@ pub async fn restore_all_transaction_handler(
     )
 )]
 pub async fn delete_all_transaction_handler(
-    Extension(service): Extension<DynTransactionCommandGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_all().await?;
     Ok(Json(json!({
@@ -320,7 +310,7 @@ pub async fn delete_all_transaction_handler(
     path = "/api/transactions/stats/amount/monthly",
     tag = "Transaction Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly transaction amount", body = ApiResponse<Vec<TransactionMonthAmountResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -328,10 +318,10 @@ pub async fn delete_all_transaction_handler(
     )
 )]
 pub async fn get_monthly_amounts(
-    Extension(service): Extension<DynTransactionStatsAmountGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amounts(year).await?;
+    let response = service.get_monthly_amounts(req.year).await?;
     Ok(Json(response))
 }
 
@@ -340,7 +330,7 @@ pub async fn get_monthly_amounts(
     path = "/api/transactions/stats/amount/yearly",
     tag = "Transaction Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly transaction amount", body = ApiResponse<Vec<TransactionYearlyAmountResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -348,10 +338,10 @@ pub async fn get_monthly_amounts(
     )
 )]
 pub async fn get_yearly_amounts(
-    Extension(service): Extension<DynTransactionStatsAmountGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amounts(year).await?;
+    let response = service.get_yearly_amounts(req.year).await?;
     Ok(Json(response))
 }
 
@@ -360,7 +350,7 @@ pub async fn get_yearly_amounts(
     path = "/api/transactions/stats/method/monthly",
     tag = "Transaction Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Monthly transaction method", body = ApiResponse<Vec<TransactionMonthMethodResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -368,10 +358,10 @@ pub async fn get_yearly_amounts(
     )
 )]
 pub async fn get_monthly_method(
-    Extension(service): Extension<DynTransactionStatsMethodGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_method(year).await?;
+    let response = service.get_monthly_method(req.year).await?;
     Ok(Json(response))
 }
 
@@ -380,7 +370,7 @@ pub async fn get_monthly_method(
     path = "/api/transactions/stats/method/yearly",
     tag = "Transaction Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly transaction method", body = ApiResponse<Vec<TransactionYearMethodResponse>>),
         (status = 401, description = "Unauthorized"),
@@ -388,10 +378,10 @@ pub async fn get_monthly_method(
     )
 )]
 pub async fn get_yearly_method(
-    Extension(service): Extension<DynTransactionStatsMethodGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_method(year).await?;
+    let response = service.get_yearly_method(req.year).await?;
     Ok(Json(response))
 }
 
@@ -408,7 +398,7 @@ pub async fn get_yearly_method(
     )
 )]
 pub async fn get_month_status_success(
-    Extension(service): Extension<DynTransactionStatsStatusGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Query(params): Query<MonthStatusTransaction>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_month_status_success(&params).await?;
@@ -420,7 +410,7 @@ pub async fn get_month_status_success(
     path = "/api/transactions/stats/status/success/yearly",
     tag = "Transaction Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly successful transaction status", body = ApiResponse<Vec<TransactionResponseYearStatusSuccess>>),
         (status = 401, description = "Unauthorized"),
@@ -428,10 +418,10 @@ pub async fn get_month_status_success(
     )
 )]
 pub async fn get_yearly_status_success(
-    Extension(service): Extension<DynTransactionStatsStatusGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_status_success(year).await?;
+    let response = service.get_yearly_status_success(req.year).await?;
     Ok(Json(response))
 }
 
@@ -448,7 +438,7 @@ pub async fn get_yearly_status_success(
     )
 )]
 pub async fn get_month_status_failed(
-    Extension(service): Extension<DynTransactionStatsStatusGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Query(params): Query<MonthStatusTransaction>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.get_month_status_failed(&params).await?;
@@ -460,7 +450,7 @@ pub async fn get_month_status_failed(
     path = "/api/transactions/stats/status/failed/yearly",
     tag = "Transaction Stats",
     security(("bearer_auth" = [])),
-    params(("year" = i32, Query, description = "Tahun")),
+    params(YearQuery),
     responses(
         (status = 200, description = "Yearly failed transaction status", body = ApiResponse<Vec<TransactionResponseYearStatusFailed>>),
         (status = 401, description = "Unauthorized"),
@@ -468,10 +458,10 @@ pub async fn get_month_status_failed(
     )
 )]
 pub async fn get_yearly_status_failed(
-    Extension(service): Extension<DynTransactionStatsStatusGrpcClient>,
-    Query(year): Query<i32>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
+    Query(req): Query<YearQuery>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_status_failed(year).await?;
+    let response = service.get_yearly_status_failed(req.year).await?;
     Ok(Json(response))
 }
 
@@ -488,10 +478,10 @@ pub async fn get_yearly_status_failed(
     )
 )]
 pub async fn get_monthly_amounts_by_card(
-    Extension(service): Extension<DynTransactionStatsAmountByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Query(params): Query<MonthYearPaymentMethod>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_amounts(&params).await?;
+    let response = service.get_monthly_amounts_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -508,10 +498,10 @@ pub async fn get_monthly_amounts_by_card(
     )
 )]
 pub async fn get_yearly_amounts_by_card(
-    Extension(service): Extension<DynTransactionStatsAmountByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Query(params): Query<MonthYearPaymentMethod>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_amounts(&params).await?;
+    let response = service.get_yearly_amounts_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -528,10 +518,10 @@ pub async fn get_yearly_amounts_by_card(
     )
 )]
 pub async fn get_monthly_method_by_card(
-    Extension(service): Extension<DynTransactionStatsMethodByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Query(params): Query<MonthYearPaymentMethod>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_monthly_method(&params).await?;
+    let response = service.get_monthly_method_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -548,10 +538,10 @@ pub async fn get_monthly_method_by_card(
     )
 )]
 pub async fn get_yearly_method_by_card(
-    Extension(service): Extension<DynTransactionStatsMethodByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Query(params): Query<MonthYearPaymentMethod>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_method(&params).await?;
+    let response = service.get_yearly_method_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -568,10 +558,10 @@ pub async fn get_yearly_method_by_card(
     )
 )]
 pub async fn get_month_status_success_by_card(
-    Extension(service): Extension<DynTransactionStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Query(params): Query<MonthStatusTransactionCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_month_status_success(&params).await?;
+    let response = service.get_month_status_success_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -588,10 +578,10 @@ pub async fn get_month_status_success_by_card(
     )
 )]
 pub async fn get_yearly_status_success_by_card(
-    Extension(service): Extension<DynTransactionStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Query(params): Query<YearStatusTransactionCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_status_success(&params).await?;
+    let response = service.get_yearly_status_success_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -608,10 +598,10 @@ pub async fn get_yearly_status_success_by_card(
     )
 )]
 pub async fn get_month_status_failed_by_card(
-    Extension(service): Extension<DynTransactionStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Query(params): Query<MonthStatusTransactionCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_month_status_failed(&params).await?;
+    let response = service.get_month_status_failed_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -628,10 +618,10 @@ pub async fn get_month_status_failed_by_card(
     )
 )]
 pub async fn get_yearly_status_failed_by_card(
-    Extension(service): Extension<DynTransactionStatsStatusByCardNumberGrpcClient>,
+    Extension(service): Extension<DynTransactionGrpcClientService>,
     Query(params): Query<YearStatusTransactionCardNumber>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.get_yearly_status_failed(&params).await?;
+    let response = service.get_yearly_status_failed_bycard(&params).await?;
     Ok(Json(response))
 }
 
@@ -649,24 +639,24 @@ pub fn transaction_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/transactions/merchant/{merchant_id}",
             get(get_transactions_by_merchant_id),
         )
-        .route("/api/transactions", post(create_transaction))
-        .route("/api/transactions/{id}", put(update_transaction))
+        .route("/api/transactions/create", post(create_transaction))
+        .route("/api/transactions/update/{id}", post(update_transaction))
         .route(
             "/api/transactions/trash/{id}",
-            delete(trash_transaction_handler),
+            post(trash_transaction_handler),
         )
         .route(
             "/api/transactions/restore/{id}",
-            put(restore_transaction_handler),
+            post(restore_transaction_handler),
         )
         .route("/api/transactions/delete/{id}", delete(delete_transaction))
         .route(
             "/api/transactions/restore-all",
-            put(restore_all_transaction_handler),
+            post(restore_all_transaction_handler),
         )
         .route(
             "/api/transactions/delete-all",
-            delete(delete_all_transaction_handler),
+            post(delete_all_transaction_handler),
         )
         .route(
             "/api/transactions/stats/amount/monthly",

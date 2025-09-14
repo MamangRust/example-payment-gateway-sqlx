@@ -1,0 +1,50 @@
+{"timestamp":"2025-09-14T05:16:50.883856Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-14T05:16:50.889611Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50053"},"target":"merchant"}
+{"timestamp":"2025-09-14T05:21:28.820505Z","level":"INFO","fields":{"message":"🔍 Searching all merchants | Page: 1, Size: 10, Search: \"None\""},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:21:28.829208Z","level":"INFO","fields":{"message":"✅ Found 10 merchants"},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:21:28.842185Z","level":"INFO","fields":{"message":"🔍 Searching all merchants | Page: 1, Size: 10, Search: \"None\""},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:21:28.845259Z","level":"INFO","fields":{"message":"✅ Found 10 merchants"},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:21:37.082015Z","level":"INFO","fields":{"message":"🗑️  Fetching trashed merchants | Page: 1, Size: 10, Search: \"None\""},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:21:37.084315Z","level":"INFO","fields":{"message":"🗑️  Found 10 trashed merchants"},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:21:37.092139Z","level":"INFO","fields":{"message":"🗑️  Fetching trashed merchants | Page: 1, Size: 10, Search: \"None\""},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:21:37.093928Z","level":"INFO","fields":{"message":"🗑️  Found 10 trashed merchants"},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:39:27.719743Z","level":"INFO","fields":{"message":"🔍 Searching all merchants | Page: 1, Size: 10, Search: \"None\""},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:39:27.892035Z","level":"INFO","fields":{"message":"✅ Found 10 merchants"},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:39:27.901822Z","level":"INFO","fields":{"message":"🔍 Searching all merchants | Page: 1, Size: 10, Search: \"None\""},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T05:39:27.903911Z","level":"INFO","fields":{"message":"✅ Found 10 merchants"},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T06:28:45.676614Z","level":"INFO","fields":{"message":"🔍 Searching all merchants | Page: 1, Size: 10, Search: \"None\""},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T06:28:45.854097Z","level":"INFO","fields":{"message":"✅ Found 10 merchants"},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T06:28:45.860254Z","level":"INFO","fields":{"message":"🔍 Searching all merchant transactions | Page: 1, Size: 10, Search: \"None\""},"target":"shared::service::merchant::transactions"}
+{"timestamp":"2025-09-14T06:28:45.869678Z","level":"INFO","fields":{"message":"✅ Found 10 merchant transactions"},"target":"shared::service::merchant::transactions"}
+{"timestamp":"2025-09-14T06:28:45.983479Z","level":"INFO","fields":{"message":"🔍 Searching all merchants | Page: 1, Size: 10, Search: \"None\""},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T06:28:45.986264Z","level":"INFO","fields":{"message":"✅ Found 10 merchants"},"target":"shared::service::merchant::query"}
+{"timestamp":"2025-09-14T06:28:45.993873Z","level":"INFO","fields":{"message":"🔍 Searching all merchant transactions | Page: 1, Size: 10, Search: \"None\""},"target":"shared::service::merchant::transactions"}
+{"timestamp":"2025-09-14T06:28:45.996615Z","level":"INFO","fields":{"message":"✅ Found 10 merchant transactions"},"target":"shared::service::merchant::transactions"}
+{"timestamp":"2025-09-14T06:28:48.490300Z","level":"INFO","fields":{"message":"📅💳 Fetching monthly payment method statistics for merchant (Year: 2025)"},"target":"shared::service::merchant::stats::method"}
+{"timestamp":"2025-09-14T06:28:48.505510Z","level":"INFO","fields":{"message":"✅ Retrieved 36 monthly payment method records for year 2025"},"target":"shared::service::merchant::stats::method"}
+{"timestamp":"2025-09-14T06:28:48.681639Z","level":"INFO","fields":{"message":"📆💳 Fetching yearly payment method statistics for merchant (Year: 2025)"},"target":"shared::service::merchant::stats::method"}
+{"timestamp":"2025-09-14T06:28:48.687982Z","level":"INFO","fields":{"message":"✅ Retrieved 3 yearly payment method records for year 2025"},"target":"shared::service::merchant::stats::method"}
+{"timestamp":"2025-09-14T06:28:48.883659Z","level":"INFO","fields":{"message":"📅📊 Fetching monthly transaction amounts for merchant (Year: 2025)"},"target":"shared::service::merchant::stats::amount"}
+{"timestamp":"2025-09-14T06:28:48.886432Z","level":"INFO","fields":{"message":"✅ Successfully retrieved 12 monthly merchant records for year 2025"},"target":"shared::service::merchant::stats::amount"}
+{"timestamp":"2025-09-14T06:28:48.997700Z","level":"INFO","fields":{"message":"📆📈 Fetching yearly transaction amounts for merchant (Year: 2025)"},"target":"shared::service::merchant::stats::amount"}
+{"timestamp":"2025-09-14T06:28:49.000698Z","level":"INFO","fields":{"message":"✅ Successfully retrieved 1 yearly merchant records for year 2025"},"target":"shared::service::merchant::stats::amount"}
+{"timestamp":"2025-09-14T06:28:49.030537Z","level":"INFO","fields":{"message":"📅💰 Fetching monthly total transaction amounts for merchants (Year: 2025)"},"target":"shared::service::merchant::stats::totalamount"}
+{"timestamp":"2025-09-14T06:28:49.038632Z","level":"INFO","fields":{"message":"✅ Retrieved 2 monthly total amount records for year 2025"},"target":"shared::service::merchant::stats::totalamount"}
+{"timestamp":"2025-09-14T06:28:49.072584Z","level":"INFO","fields":{"message":"📆💰 Fetching yearly total transaction amounts for merchants (Year: 2025)"},"target":"shared::service::merchant::stats::totalamount"}
+{"timestamp":"2025-09-14T06:28:49.078230Z","level":"INFO","fields":{"message":"✅ Retrieved 2 yearly total amount records for year 2025"},"target":"shared::service::merchant::stats::totalamount"}
+{"timestamp":"2025-09-14T06:57:10.517782Z","level":"INFO","fields":{"message":"🛑 Shutdown signal received."},"target":"merchant"}
+{"timestamp":"2025-09-14T06:57:10.520385Z","level":"INFO","fields":{"message":"🛑 Shutting down all servers..."},"target":"merchant"}
+{"timestamp":"2025-09-14T06:57:10.520786Z","level":"INFO","fields":{"message":"gRPC server received shutdown signal"},"target":"merchant"}
+{"timestamp":"2025-09-14T06:57:10.523583Z","level":"INFO","fields":{"message":"gRPC server stopped gracefully"},"target":"merchant"}
+{"timestamp":"2025-09-14T06:57:10.524778Z","level":"INFO","fields":{"message":"✅ All servers shutdown gracefully"},"target":"merchant"}
+{"timestamp":"2025-09-14T06:57:10.525005Z","level":"INFO","fields":{"message":"✅ Merchant Service shutdown complete."},"target":"merchant"}
+{"timestamp":"2025-09-14T07:35:50.271715Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-14T07:35:50.277668Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50053"},"target":"merchant"}
+{"timestamp":"2025-09-14T07:39:07.814534Z","level":"INFO","fields":{"message":"🛑 Shutdown signal received."},"target":"merchant"}
+{"timestamp":"2025-09-14T07:39:07.814722Z","level":"INFO","fields":{"message":"🛑 Shutting down all servers..."},"target":"merchant"}
+{"timestamp":"2025-09-14T07:39:07.814737Z","level":"INFO","fields":{"message":"gRPC server received shutdown signal"},"target":"merchant"}
+{"timestamp":"2025-09-14T07:39:07.814904Z","level":"INFO","fields":{"message":"gRPC server stopped gracefully"},"target":"merchant"}
+{"timestamp":"2025-09-14T07:39:07.815031Z","level":"INFO","fields":{"message":"✅ All servers shutdown gracefully"},"target":"merchant"}
+{"timestamp":"2025-09-14T07:39:07.815105Z","level":"INFO","fields":{"message":"✅ Merchant Service shutdown complete."},"target":"merchant"}
+{"timestamp":"2025-09-14T07:39:13.971734Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-09-14T07:39:13.979547Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50053"},"target":"merchant"}

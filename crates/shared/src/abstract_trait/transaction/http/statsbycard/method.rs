@@ -7,19 +7,15 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
-
-pub type DynTransactionStatsMethodByCardNumberGrpcClient =
-    Arc<dyn TransactionStatsMethodByCardNumberGrpcClientTrait + Send + Sync>;
 
 #[async_trait]
 pub trait TransactionStatsMethodByCardNumberGrpcClientTrait {
-    async fn get_monthly_method(
+    async fn get_monthly_method_bycard(
         &self,
         req: &MonthYearPaymentMethod,
     ) -> Result<ApiResponse<Vec<TransactionMonthMethodResponse>>, AppErrorHttp>;
 
-    async fn get_yearly_method(
+    async fn get_yearly_method_bycard(
         &self,
         req: &MonthYearPaymentMethod,
     ) -> Result<ApiResponse<Vec<TransactionYearMethodResponse>>, AppErrorHttp>;

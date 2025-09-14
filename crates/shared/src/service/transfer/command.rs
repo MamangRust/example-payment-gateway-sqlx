@@ -222,7 +222,7 @@ impl TransferCommandServiceTrait for TransferCommandService {
             ServiceError::Custom(format!("failed to find transfer {}", req.transfer_id))
         })?;
 
-        let amount_difference = req.transfer_amount - transfer.transfer_amount;
+        let amount_difference = req.transfer_amount - transfer.transfer_amount as i64;
 
         let mut sender_saldo = self
             .saldo_query

@@ -8,13 +8,11 @@ use axum::{
     http::StatusCode,
     middleware,
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::user::http::{
-        command::DynUserCommandGrpcClient, query::DynUserQueryGrpcClient,
-    },
+    abstract_trait::user::http::DynUserGrpcServiceClient,
     domain::{
         requests::user::{CreateUserRequest, FindAllUserRequest, UpdateUserRequest},
         responses::{ApiResponse, ApiResponsePagination, UserResponse, UserResponseDeleteAt},
@@ -37,7 +35,7 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_users(
-    Extension(service): Extension<DynUserQueryGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
     Query(params): Query<FindAllUserRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_all(&params).await?;
@@ -57,7 +55,7 @@ pub async fn get_users(
     )
 )]
 pub async fn get_user(
-    Extension(service): Extension<DynUserQueryGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_id(id).await?;
@@ -77,7 +75,7 @@ pub async fn get_user(
     )
 )]
 pub async fn get_active_users(
-    Extension(service): Extension<DynUserQueryGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
     Query(params): Query<FindAllUserRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_active(&params).await?;
@@ -97,7 +95,7 @@ pub async fn get_active_users(
     )
 )]
 pub async fn get_trashed_users(
-    Extension(service): Extension<DynUserQueryGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
     Query(params): Query<FindAllUserRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.find_by_trashed(&params).await?;
@@ -106,7 +104,7 @@ pub async fn get_trashed_users(
 
 #[utoipa::path(
     post,
-    path = "/api/users",
+    path = "/api/users/create",
     tag = "User",
     security(("bearer_auth" = [])),
     request_body = CreateUserRequest,
@@ -118,7 +116,7 @@ pub async fn get_trashed_users(
     )
 )]
 pub async fn create_user(
-    Extension(service): Extension<DynUserCommandGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateUserRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.create(&body).await?;
@@ -126,8 +124,8 @@ pub async fn create_user(
 }
 
 #[utoipa::path(
-    put,
-    path = "/api/users/{id}",
+    post,
+    path = "/api/users/update/{id}",
     tag = "User",
     security(("bearer_auth" = [])),
     params(("id" = i32, Path, description = "User ID")),
@@ -140,7 +138,7 @@ pub async fn create_user(
     )
 )]
 pub async fn update_user(
-    Extension(service): Extension<DynUserCommandGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateUserRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
@@ -162,7 +160,7 @@ pub async fn update_user(
     )
 )]
 pub async fn trash_user_handler(
-    Extension(service): Extension<DynUserCommandGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.trashed(id).await?;
@@ -182,7 +180,7 @@ pub async fn trash_user_handler(
     )
 )]
 pub async fn restore_user_handler(
-    Extension(service): Extension<DynUserCommandGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     let response = service.restore(id).await?;
@@ -202,7 +200,7 @@ pub async fn restore_user_handler(
     )
 )]
 pub async fn delete_user(
-    Extension(service): Extension<DynUserCommandGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_permanent(id).await?;
@@ -223,7 +221,7 @@ pub async fn delete_user(
     )
 )]
 pub async fn restore_all_user_handler(
-    Extension(service): Extension<DynUserCommandGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.restore_all().await?;
     Ok(Json(json!({
@@ -243,7 +241,7 @@ pub async fn restore_all_user_handler(
     )
 )]
 pub async fn delete_all_user_handler(
-    Extension(service): Extension<DynUserCommandGrpcClient>,
+    Extension(service): Extension<DynUserGrpcServiceClient>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
     service.delete_all().await?;
     Ok(Json(json!({
@@ -258,13 +256,13 @@ pub fn user_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/users/{id}", get(get_user))
         .route("/api/users/active", get(get_active_users))
         .route("/api/users/trashed", get(get_trashed_users))
-        .route("/api/users", post(create_user))
-        .route("/api/users/{id}", put(update_user))
-        .route("/api/users/trash/{id}", delete(trash_user_handler))
-        .route("/api/users/restore/{id}", put(restore_user_handler))
+        .route("/api/users/create", post(create_user))
+        .route("/api/users/update/{id}", post(update_user))
+        .route("/api/users/trash/{id}", post(trash_user_handler))
+        .route("/api/users/restore/{id}", post(restore_user_handler))
         .route("/api/users/delete/{id}", delete(delete_user))
-        .route("/api/users/restore-all", put(restore_all_user_handler))
-        .route("/api/users/delete-all", delete(delete_all_user_handler))
+        .route("/api/users/restore-all", post(restore_all_user_handler))
+        .route("/api/users/delete-all", post(delete_all_user_handler))
         .layer(middleware::from_fn(jwt::auth))
         .layer(Extension(app_state.di_container.user_clients.clone()))
         .layer(Extension(app_state.jwt_config.clone()))

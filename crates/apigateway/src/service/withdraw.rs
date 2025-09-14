@@ -8,15 +8,10 @@ use genproto::withdraw::{
 
 use shared::{
     abstract_trait::withdraw::http::{
-        command::WithdrawCommandGrpcClientTrait,
-        query::WithdrawQueryGrpcClientTrait,
-        stats::{
-            amount::WithdrawStatsAmountGrpcClientTrait, status::WithdrawStatsStatusGrpcClientTrait,
-        },
-        statsbycard::{
-            amount::WithdrawStatsAmountByCardNumberGrpcClientTrait,
-            status::WithdrawStatsStatusByCardNumberGrpcClientTrait,
-        },
+        WithdrawCommandGrpcClientTrait, WithdrawGrpcClientServiceTrait,
+        WithdrawQueryGrpcClientTrait, WithdrawStatsAmountByCardNumberGrpcClientTrait,
+        WithdrawStatsAmountGrpcClientTrait, WithdrawStatsStatusByCardNumberGrpcClientTrait,
+        WithdrawStatsStatusGrpcClientTrait,
     },
     domain::{
         requests::withdraw::{
@@ -44,18 +39,6 @@ use tokio::sync::Mutex;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
-#[async_trait]
-#[allow(dead_code)]
-pub trait WithdrawGrpcClientServiceTrait:
-    WithdrawCommandGrpcClientTrait
-    + WithdrawQueryGrpcClientTrait
-    + WithdrawStatsAmountGrpcClientTrait
-    + WithdrawStatsStatusGrpcClientTrait
-    + WithdrawStatsAmountByCardNumberGrpcClientTrait
-    + WithdrawStatsStatusByCardNumberGrpcClientTrait
-{
-}
-
 #[derive(Debug)]
 pub struct WithdrawGrpcClientService {
     client: Arc<Mutex<WithdrawServiceClient<Channel>>>,
@@ -66,6 +49,9 @@ impl WithdrawGrpcClientService {
         Self { client }
     }
 }
+
+#[async_trait]
+impl WithdrawGrpcClientServiceTrait for WithdrawGrpcClientService {}
 
 #[async_trait]
 impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
@@ -732,7 +718,7 @@ impl WithdrawStatsStatusGrpcClientTrait for WithdrawGrpcClientService {
 #[async_trait]
 impl WithdrawStatsAmountByCardNumberGrpcClientTrait for WithdrawGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_by_card_number(
+    async fn get_monthly_bycard(
         &self,
         req: &DomainYearMonthCardNumber,
     ) -> Result<ApiResponse<Vec<WithdrawMonthlyAmountResponse>>, AppErrorHttp> {
@@ -776,7 +762,7 @@ impl WithdrawStatsAmountByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_by_card_number(
+    async fn get_yearly_bycard(
         &self,
         req: &DomainYearMonthCardNumber,
     ) -> Result<ApiResponse<Vec<WithdrawYearlyAmountResponse>>, AppErrorHttp> {
@@ -823,7 +809,7 @@ impl WithdrawStatsAmountByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
 #[async_trait]
 impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_month_status_success_by_card(
+    async fn get_month_status_success_bycard(
         &self,
         req: &DomainMonthStatusWithdrawCardNumber,
     ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusSuccess>>, AppErrorHttp> {
@@ -872,7 +858,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_status_success_by_card(
+    async fn get_yearly_status_success_bycard(
         &self,
         req: &DomainYearStatusWithdrawCardNumber,
     ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusSuccess>>, AppErrorHttp> {
@@ -919,7 +905,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_month_status_failed_by_card(
+    async fn get_month_status_failed_bycard(
         &self,
         req: &DomainMonthStatusWithdrawCardNumber,
     ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusFailed>>, AppErrorHttp> {
@@ -968,7 +954,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_status_failed_by_card(
+    async fn get_yearly_status_failed_bycard(
         &self,
         req: &DomainYearStatusWithdrawCardNumber,
     ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusFailed>>, AppErrorHttp> {
@@ -1014,6 +1000,3 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
         }
     }
 }
-
-#[async_trait]
-impl WithdrawGrpcClientServiceTrait for WithdrawGrpcClientService {}

@@ -11,11 +11,17 @@ mod withdraw;
 
 use crate::state::AppState;
 use anyhow::Result;
-use axum::extract::DefaultBodyLimit;
+use axum::{
+    extract::DefaultBodyLimit,
+    http::{Method, header},
+};
 use shared::utils::shutdown_signal;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    limit::RequestBodyLimitLayer,
+};
 use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_swagger_ui::SwaggerUi;
@@ -44,6 +50,8 @@ pub use self::withdraw::withdraw_routes;
         card::get_active_cards,
         card::get_trashed_cards,
         card::get_card,
+        card::get_card_by_user,
+        card::get_card_by_number,
         card::update_card,
         card::trash_card_handler,
         card::restore_card_handler,
@@ -56,8 +64,10 @@ pub use self::withdraw::withdraw_routes;
         card::get_yearly_topup_amount,
         card::get_monthly_transaction_amount,
         card::get_yearly_transaction_amount,
-        card::get_monthly_transfer_amount,
-        card::get_yearly_transfer_amount,
+        card::get_monthly_transfer_amount_sender,
+        card::get_yearly_transfer_amount_sender,
+        card::get_monthly_transfer_amount_receiver,
+        card::get_yearly_transfer_amount_receiver,
         card::get_monthly_withdraw_amount,
         card::get_yearly_withdraw_amount,
         card::get_monthly_balance_by_card,
@@ -66,8 +76,10 @@ pub use self::withdraw::withdraw_routes;
         card::get_yearly_topup_amount_by_card,
         card::get_monthly_transaction_amount_by_card,
         card::get_yearly_transaction_amount_by_card,
-        card::get_monthly_transfer_amount_by_card,
-        card::get_yearly_transfer_amount_by_card,
+        card::get_monthly_transfer_amount_by_card_sender,
+        card::get_yearly_transfer_amount_by_card_sender,
+        card::get_monthly_transfer_amount_by_card_receiver,
+        card::get_yearly_transfer_amount_by_card_receiver,
         card::get_monthly_withdraw_amount_by_card,
         card::get_yearly_withdraw_amount_by_card,
         card::get_card_dashboard,
@@ -79,6 +91,8 @@ pub use self::withdraw::withdraw_routes;
         merchant::get_trashed_merchants,
         merchant::get_merchant,
         merchant::update_merchant,
+        merchant::get_merchant_by_apikey,
+        merchant::get_merchants_by_user_id,
         merchant::trash_merchant_handler,
         merchant::restore_merchant_handler,
         merchant::delete_merchant,
@@ -312,7 +326,24 @@ impl AppRouter {
             .merge(transfer_routes(shared_state.clone()))
             .merge(withdraw_routes(shared_state.clone()));
 
+        let allowed_origin = "http://localhost:1420"
+            .parse()
+            .expect("invalid CORS origin");
+
+        let cors = CorsLayer::new()
+            .allow_origin(AllowOrigin::exact(allowed_origin))
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::DELETE,
+                Method::OPTIONS,
+            ])
+            .allow_headers([header::CONTENT_TYPE, header::ACCEPT, header::AUTHORIZATION])
+            .allow_credentials(true);
+
         let router_with_layers = api_router
+            .layer(cors)
             .layer(DefaultBodyLimit::disable())
             .layer(RequestBodyLimitLayer::new(250 * 1024 * 1024));
 

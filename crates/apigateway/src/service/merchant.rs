@@ -7,23 +7,13 @@ use genproto::merchant::{
 };
 use shared::{
     abstract_trait::merchant::http::{
-        command::MerchantCommandGrpcClientTrait,
-        query::MerchantQueryGrpcClientTrait,
-        stats::{
-            amount::MerchantStatsAmountGrpcClientTrait, method::MerchantStatsMethodGrpcClientTrait,
-            totalamount::MerchantStatsTotalAmountGrpcClientTrait,
-        },
-        statsbyapikey::{
-            amount::MerchantStatsAmountByApiKeyGrpcClientTrait,
-            method::MerchantStatsMethodByApiKeyGrpcClientTrait,
-            totalamount::MerchantStatsTotalAmountByApiKeyGrpcClientTrait,
-        },
-        statsbymerchant::{
-            amount::MerchantStatsAmountByMerchantGrpcClientTrait,
-            method::MerchantStatsMethodByMerchantGrpcClientTrait,
-            totalamount::MerchantStatsTotalAmountByMerchantGrpcClientTrait,
-        },
-        transactions::MerchantTransactionGrpcClientTrait,
+        MerchantCommandGrpcClientTrait, MerchantGrpcClientServiceTrait,
+        MerchantQueryGrpcClientTrait, MerchantStatsAmountByApiKeyGrpcClientTrait,
+        MerchantStatsAmountByMerchantGrpcClientTrait, MerchantStatsAmountGrpcClientTrait,
+        MerchantStatsMethodByApiKeyGrpcClientTrait, MerchantStatsMethodByMerchantGrpcClientTrait,
+        MerchantStatsMethodGrpcClientTrait, MerchantStatsTotalAmountByApiKeyGrpcClientTrait,
+        MerchantStatsTotalAmountByMerchantGrpcClientTrait, MerchantStatsTotalAmountGrpcClientTrait,
+        MerchantTransactionGrpcClientTrait,
     },
     domain::{
         requests::merchant::{
@@ -55,24 +45,6 @@ use tokio::sync::Mutex;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
-#[async_trait]
-#[allow(dead_code)]
-pub trait MerchantGrpcClientServiceTrait:
-    MerchantQueryGrpcClientTrait
-    + MerchantTransactionGrpcClientTrait
-    + MerchantCommandGrpcClientTrait
-    + MerchantStatsAmountGrpcClientTrait
-    + MerchantStatsMethodGrpcClientTrait
-    + MerchantStatsTotalAmountGrpcClientTrait
-    + MerchantStatsAmountByMerchantGrpcClientTrait
-    + MerchantStatsMethodByMerchantGrpcClientTrait
-    + MerchantStatsTotalAmountByMerchantGrpcClientTrait
-    + MerchantStatsAmountByApiKeyGrpcClientTrait
-    + MerchantStatsMethodByApiKeyGrpcClientTrait
-    + MerchantStatsTotalAmountByApiKeyGrpcClientTrait
-{
-}
-
 #[derive(Debug)]
 pub struct MerchantGrpcClientService {
     client: Arc<Mutex<MerchantServiceClient<Channel>>>,
@@ -83,6 +55,9 @@ impl MerchantGrpcClientService {
         Self { client }
     }
 }
+
+#[async_trait]
+impl MerchantGrpcClientServiceTrait for MerchantGrpcClientService {}
 
 #[async_trait]
 impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
@@ -854,7 +829,7 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
 #[async_trait]
 impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_amount(
+    async fn get_monthly_amount_bymerchant(
         &self,
         req: &DomainMonthYearAmountMerchant,
     ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyAmount>>, AppErrorHttp> {
@@ -898,7 +873,7 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_amount(
+    async fn get_yearly_amount_bymerchant(
         &self,
         req: &DomainMonthYearAmountMerchant,
     ) -> Result<ApiResponse<Vec<MerchantResponseYearlyAmount>>, AppErrorHttp> {
@@ -945,7 +920,7 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
 #[async_trait]
 impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_method(
+    async fn get_monthly_method_bymerchant(
         &self,
         req: &DomainMonthYearPaymentMethodMerchant,
     ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, AppErrorHttp> {
@@ -992,7 +967,7 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_method(
+    async fn get_yearly_method_bymerchant(
         &self,
         req: &DomainMonthYearPaymentMethodMerchant,
     ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, AppErrorHttp> {
@@ -1042,7 +1017,7 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
 #[async_trait]
 impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_total_amount(
+    async fn get_monthly_total_amount_bymerchant(
         &self,
         req: &DomainMonthYearTotalAmountMerchant,
     ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyTotalAmount>>, AppErrorHttp> {
@@ -1089,7 +1064,7 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_total_amount(
+    async fn get_yearly_total_amount_bymerchant(
         &self,
         req: &DomainMonthYearTotalAmountMerchant,
     ) -> Result<ApiResponse<Vec<MerchantResponseYearlyTotalAmount>>, AppErrorHttp> {
@@ -1136,7 +1111,7 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
 #[async_trait]
 impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_amount(
+    async fn get_monthly_amount_byapikey(
         &self,
         req: &DomainMonthYearAmountApiKey,
     ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyAmount>>, AppErrorHttp> {
@@ -1179,7 +1154,7 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_amount(
+    async fn get_yearly_amount_byapikey(
         &self,
         req: &DomainMonthYearAmountApiKey,
     ) -> Result<ApiResponse<Vec<MerchantResponseYearlyAmount>>, AppErrorHttp> {
@@ -1225,7 +1200,7 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
 #[async_trait]
 impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_method(
+    async fn get_monthly_method_byapikey(
         &self,
         req: &DomainMonthYearPaymentMethodApiKey,
     ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, AppErrorHttp> {
@@ -1268,7 +1243,7 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_method(
+    async fn get_yearly_method_byapikey(
         &self,
         req: &DomainMonthYearPaymentMethodApiKey,
     ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, AppErrorHttp> {
@@ -1314,7 +1289,7 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
 #[async_trait]
 impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_total_amount(
+    async fn get_monthly_total_amount_byapikey(
         &self,
         req: &DomainMonthYearTotalAmountApiKey,
     ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyTotalAmount>>, AppErrorHttp> {
@@ -1357,7 +1332,7 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_total_amount(
+    async fn get_yearly_total_amount_byapikey(
         &self,
         req: &DomainMonthYearTotalAmountApiKey,
     ) -> Result<ApiResponse<Vec<MerchantResponseYearlyTotalAmount>>, AppErrorHttp> {
@@ -1399,6 +1374,3 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
         }
     }
 }
-
-#[async_trait]
-impl MerchantGrpcClientServiceTrait for MerchantGrpcClientService {}

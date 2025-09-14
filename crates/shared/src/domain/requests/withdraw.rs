@@ -3,6 +3,11 @@ use serde::Deserialize;
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct YearQuery {
+    pub year: i32,
+}
+
 #[derive(Debug, Deserialize, Validate, IntoParams)]
 pub struct FindAllWithdraws {
     #[serde(default = "default_page")]

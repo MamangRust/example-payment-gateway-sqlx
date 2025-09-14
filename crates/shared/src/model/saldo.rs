@@ -18,13 +18,13 @@ pub struct SaldoModel {
 pub struct SaldoMonthTotalBalance {
     pub year: String,
     pub month: String,
-    pub total_balance: i64,
+    pub total_balance: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct SaldoYearTotalBalance {
     pub year: String,
-    pub total_balance: i64,
+    pub total_balance: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

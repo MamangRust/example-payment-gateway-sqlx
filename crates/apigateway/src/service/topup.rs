@@ -7,17 +7,10 @@ use genproto::topup::{
 };
 use shared::{
     abstract_trait::topup::http::{
-        command::TopupCommandGrpcClientTrait,
-        query::TopupQueryGrpcClientTrait,
-        stats::{
-            amount::TopupStatsAmountGrpcClientTrait, method::TopupStatsMethodGrpcClientTrait,
-            status::TopupStatsStatusGrpcClientTrait,
-        },
-        statsbycard::{
-            amount::TopupStatsAmountByCardNumberGrpcClientTrait,
-            method::TopupStatsMethodByCardNumberGrpcClientTrait,
-            status::TopupStatsStatusByCardNumberGrpcClientTrait,
-        },
+        TopupCommandGrpcClientTrait, TopupGrpcClientServiceTrait, TopupQueryGrpcClientTrait,
+        TopupStatsAmountByCardNumberGrpcClientTrait, TopupStatsAmountGrpcClientTrait,
+        TopupStatsMethodByCardNumberGrpcClientTrait, TopupStatsMethodGrpcClientTrait,
+        TopupStatsStatusByCardNumberGrpcClientTrait, TopupStatsStatusGrpcClientTrait,
     },
     domain::{
         requests::topup::{
@@ -39,24 +32,11 @@ use shared::{
     errors::{AppErrorGrpc, AppErrorHttp},
     utils::{mask_card_number, month_name},
 };
+
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
-
-#[async_trait]
-#[allow(dead_code)]
-pub trait TopupGrpcClientServiceTrait:
-    TopupQueryGrpcClientTrait
-    + TopupCommandGrpcClientTrait
-    + TopupStatsAmountGrpcClientTrait
-    + TopupStatsMethodGrpcClientTrait
-    + TopupStatsStatusGrpcClientTrait
-    + TopupStatsAmountByCardNumberGrpcClientTrait
-    + TopupStatsMethodByCardNumberGrpcClientTrait
-    + TopupStatsStatusByCardNumberGrpcClientTrait
-{
-}
 
 #[derive(Debug)]
 pub struct TopupGrpcClientService {
@@ -68,6 +48,9 @@ impl TopupGrpcClientService {
         Self { client }
     }
 }
+
+#[async_trait]
+impl TopupGrpcClientServiceTrait for TopupGrpcClientService {}
 
 #[async_trait]
 impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
@@ -531,7 +514,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
 #[async_trait]
 impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
     #[instrument(skip(self), level = "info")]
-    async fn get_monthly_topup_amounts(
+    async fn get_monthly_amounts(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TopupMonthAmountResponse>>, AppErrorHttp> {
@@ -564,7 +547,7 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn get_yearly_topup_amounts(
+    async fn get_yearly_amounts(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TopupYearlyAmountResponse>>, AppErrorHttp> {
@@ -600,7 +583,7 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
 #[async_trait]
 impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
     #[instrument(skip(self), level = "info")]
-    async fn get_monthly_topup_methods(
+    async fn get_monthly_methods(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TopupMonthMethodResponse>>, AppErrorHttp> {
@@ -633,7 +616,7 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn get_yearly_topup_methods(
+    async fn get_yearly_methods(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TopupYearlyMethodResponse>>, AppErrorHttp> {
@@ -669,7 +652,7 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
 #[async_trait]
 impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_month_topup_status_success(
+    async fn get_month_status_success(
         &self,
         req: &DomainMonthTopupStatus,
     ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusSuccess>>, AppErrorHttp> {
@@ -713,7 +696,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn get_yearly_topup_status_success(
+    async fn get_yearly_status_success(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TopupResponseYearStatusSuccess>>, AppErrorHttp> {
@@ -746,7 +729,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_month_topup_status_failed(
+    async fn get_month_status_failed(
         &self,
         req: &DomainMonthTopupStatus,
     ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusFailed>>, AppErrorHttp> {
@@ -790,7 +773,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn get_yearly_topup_status_failed(
+    async fn get_yearly_status_failed(
         &self,
         year: i32,
     ) -> Result<ApiResponse<Vec<TopupResponseYearStatusFailed>>, AppErrorHttp> {
@@ -826,7 +809,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
 #[async_trait]
 impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_topup_amounts(
+    async fn get_monthly_amounts_bycard(
         &self,
         req: &DomainYearMonthMethod,
     ) -> Result<ApiResponse<Vec<TopupMonthAmountResponse>>, AppErrorHttp> {
@@ -873,7 +856,7 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_topup_amounts(
+    async fn get_yearly_amounts_bycard(
         &self,
         req: &DomainYearMonthMethod,
     ) -> Result<ApiResponse<Vec<TopupYearlyAmountResponse>>, AppErrorHttp> {
@@ -923,7 +906,7 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
 #[async_trait]
 impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
     #[instrument(skip(self, req), level = "info")]
-    async fn get_monthly_topup_methods(
+    async fn get_monthly_methods_bycard(
         &self,
         req: &DomainYearMonthMethod,
     ) -> Result<ApiResponse<Vec<TopupMonthMethodResponse>>, AppErrorHttp> {
@@ -970,7 +953,7 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
     }
 
     #[instrument(skip(self, req), level = "info")]
-    async fn get_yearly_topup_methods(
+    async fn get_yearly_methods_bycard(
         &self,
         req: &DomainYearMonthMethod,
     ) -> Result<ApiResponse<Vec<TopupYearlyMethodResponse>>, AppErrorHttp> {
@@ -1019,7 +1002,7 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
 
 #[async_trait]
 impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
-    async fn get_month_topup_status_success(
+    async fn get_month_status_success_bycard(
         &self,
         req: &DomainMonthTopupStatusCardNumber,
     ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusSuccess>>, AppErrorHttp> {
@@ -1050,7 +1033,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
         }
     }
 
-    async fn get_yearly_topup_status_success(
+    async fn get_yearly_status_success_bycard(
         &self,
         req: &DomainYearTopupStatusCardNumber,
     ) -> Result<ApiResponse<Vec<TopupResponseYearStatusSuccess>>, AppErrorHttp> {
@@ -1080,7 +1063,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
         }
     }
 
-    async fn get_month_topup_status_failed(
+    async fn get_month_status_failed_bycard(
         &self,
         req: &DomainMonthTopupStatusCardNumber,
     ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusFailed>>, AppErrorHttp> {
@@ -1111,7 +1094,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
         }
     }
 
-    async fn get_yearly_topup_status_failed(
+    async fn get_yearly_status_failed_bycard(
         &self,
         req: &DomainYearTopupStatusCardNumber,
     ) -> Result<ApiResponse<Vec<TopupResponseYearStatusFailed>>, AppErrorHttp> {
@@ -1141,6 +1124,3 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
         }
     }
 }
-
-#[async_trait]
-impl TopupGrpcClientServiceTrait for TopupGrpcClientService {}
