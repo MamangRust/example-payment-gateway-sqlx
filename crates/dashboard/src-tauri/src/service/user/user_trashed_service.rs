@@ -36,7 +36,7 @@ impl UserTrashedService {
         let response = self
             .client
             .get(format!("{}/users/trashed", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("page", req.page), ("page_size", req.page_size)])
             .query(&[(
                 "search",
@@ -64,7 +64,7 @@ impl UserTrashedService {
         let response = self
             .client
             .post(format!("{}/users/restore/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseUser>()
@@ -81,7 +81,7 @@ impl UserTrashedService {
         let response = self
             .client
             .post(format!("{}/users/delete/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseUserDelete>()
@@ -97,7 +97,7 @@ impl UserTrashedService {
         let response = self
             .client
             .post(format!("{}/users/restore-all", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseUserAll>()
@@ -113,7 +113,7 @@ impl UserTrashedService {
         let response = self
             .client
             .post(format!("{}/users/delete-all", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseUserAll>()

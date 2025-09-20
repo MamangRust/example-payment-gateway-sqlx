@@ -1,3 +1,4 @@
+use crate::utils::deserialize_datetime;
 use chrono::NaiveDateTime;
 use serde::Deserialize;
 use utoipa::{IntoParams, ToSchema};
@@ -90,6 +91,7 @@ pub struct CreateWithdrawRequest {
     #[validate(range(min = 50000, message = "Minimal withdraw 50000"))]
     pub withdraw_amount: i64,
 
+    #[serde(deserialize_with = "deserialize_datetime")]
     pub withdraw_time: NaiveDateTime,
 }
 
@@ -98,11 +100,12 @@ pub struct UpdateWithdrawRequest {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
 
-    pub withdraw_id: i32,
+    pub withdraw_id: Option<i32>,
 
     #[validate(range(min = 50000, message = "Minimal withdraw 50000"))]
     pub withdraw_amount: i64,
 
+    #[serde(deserialize_with = "deserialize_datetime")]
     pub withdraw_time: NaiveDateTime,
 }
 

@@ -406,7 +406,7 @@ impl SaldoService for SaldoServiceImpl {
         );
 
         let domain_req = DomainUpdateSaldoRequest {
-            saldo_id: req.saldo_id,
+            saldo_id: Some(req.saldo_id),
             card_number: req.card_number,
             total_balance: req.total_balance as i64,
         };

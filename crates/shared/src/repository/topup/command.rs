@@ -80,6 +80,10 @@ impl TopupCommandRepositoryTrait for TopupCommandRepository {
     async fn update(&self, req: &UpdateTopupRequest) -> Result<TopupModel, RepositoryError> {
         let mut conn = self.get_conn().await?;
 
+        let topup_id = req
+            .topup_id
+            .ok_or_else(|| RepositoryError::Custom("topup_id is required".into()))?;
+
         let topup_time = chrono::Utc::now().naive_utc();
 
         let record = sqlx::query_as!(
@@ -105,7 +109,7 @@ impl TopupCommandRepositoryTrait for TopupCommandRepository {
                 updated_at,
                 deleted_at
             "#,
-            req.topup_id,
+            topup_id,
             req.card_number,
             req.topup_amount as i64,
             req.topup_method,

@@ -40,7 +40,7 @@ impl TopupService {
                 "{}/topups/stats/status/success/monthly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .send()
             .await?
@@ -61,7 +61,7 @@ impl TopupService {
                 "{}/topups/stats/status/success/yearly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -83,7 +83,7 @@ impl TopupService {
                 "{}/topups/stats/status/failed/monthly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .send()
             .await?
@@ -104,7 +104,7 @@ impl TopupService {
                 "{}/topups/stats/status/failed/yearly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -127,7 +127,7 @@ impl TopupService {
                 "{}/topups/stats/status/success/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .query(&[("card_number", card_number)])
             .send()
@@ -150,7 +150,7 @@ impl TopupService {
                 "{}/topups/stats/status/success/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -174,7 +174,7 @@ impl TopupService {
                 "{}/topups/stats/status/failed/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .query(&[("card_number", card_number)])
             .send()
@@ -197,7 +197,7 @@ impl TopupService {
                 "{}/topups/stats/status/failed/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -216,7 +216,7 @@ impl TopupService {
         let response = self
             .client
             .get(format!("{}/topups/stats/method/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -234,7 +234,7 @@ impl TopupService {
         let response = self
             .client
             .get(format!("{}/topups/stats/method/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -252,7 +252,7 @@ impl TopupService {
         let response = self
             .client
             .get(format!("{}/topups/stats/amount/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -270,7 +270,7 @@ impl TopupService {
         let response = self
             .client
             .get(format!("{}/topups/stats/amount/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -292,7 +292,7 @@ impl TopupService {
                 "{}/topups/stats/method/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -315,7 +315,7 @@ impl TopupService {
                 "{}/topups/stats/method/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -338,7 +338,7 @@ impl TopupService {
                 "{}/topups/stats/amount/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -361,7 +361,7 @@ impl TopupService {
                 "{}/topups/stats/amount/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -380,7 +380,7 @@ impl TopupService {
         let response = self
             .client
             .get(format!("{}/topups", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -402,7 +402,7 @@ impl TopupService {
         let response = self
             .client
             .get(format!("{}/topups/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTopup>()
@@ -419,7 +419,7 @@ impl TopupService {
         let response = self
             .client
             .get(format!("{}/topups/active", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -444,7 +444,7 @@ impl TopupService {
                 "{}/topups/by-card/{}",
                 self.base_url, req.card_number
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTopup>()
@@ -461,7 +461,7 @@ impl TopupService {
         let response = self
             .client
             .post(format!("{}/topups/create", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                 "card_number": req.card_number,
                 "topup_amount": req.topup_amount,
@@ -483,7 +483,7 @@ impl TopupService {
         let response = self
             .client
             .post(format!("{}/topups/update/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                 "card_number": req.card_number,
                 "topup_amount": req.topup_amount,
@@ -505,7 +505,7 @@ impl TopupService {
         let response = self
             .client
             .post(format!("{}/topups/trash/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTopup>()

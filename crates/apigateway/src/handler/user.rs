@@ -142,7 +142,7 @@ pub async fn update_user(
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateUserRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    body.id = id;
+    body.id = Some(id);
     let response = service.update(&body).await?;
     Ok(Json(response))
 }

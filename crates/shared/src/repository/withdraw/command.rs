@@ -78,6 +78,10 @@ impl WithdrawCommandRepositoryTrait for WithdrawCommandRepository {
     async fn update(&self, req: &UpdateWithdrawRequest) -> Result<WithdrawModel, RepositoryError> {
         let mut conn = self.get_conn().await?;
 
+        let withdraw_id = req
+            .withdraw_id
+            .ok_or_else(|| RepositoryError::Custom("withdraw_id is required".into()))?;
+
         let record = sqlx::query_as!(
             WithdrawModel,
             r#"
@@ -101,7 +105,7 @@ impl WithdrawCommandRepositoryTrait for WithdrawCommandRepository {
                 updated_at,
                 deleted_at
             "#,
-            req.withdraw_id,
+            withdraw_id,
             req.card_number,
             req.withdraw_amount as i64,
             req.withdraw_time

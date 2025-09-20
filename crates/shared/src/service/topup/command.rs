@@ -148,26 +148,30 @@ impl TopupCommandServiceTrait for TopupCommandService {
             return Err(ServiceError::Custom(error_msg));
         }
 
+        let topup_id = req
+            .topup_id
+            .ok_or_else(|| ServiceError::Custom("topup_id is required".into()))?;
+
         if let Err(e) = self.card_query.find_by_card(&req.card_number).await {
             error!("❌ Card not found: {e:?}");
             let _ = self
                 .command
                 .update_status(&UpdateTopupStatus {
-                    topup_id: req.topup_id,
+                    topup_id: topup_id,
                     status: "failed".to_string(),
                 })
                 .await;
             return Err(ServiceError::Custom("card not found".into()));
         }
 
-        let existing = match self.query.find_by_id(req.topup_id).await {
+        let existing = match self.query.find_by_id(topup_id).await {
             Ok(t) => t,
             _ => {
-                error!("❌ Topup {} not found", req.topup_id);
+                error!("❌ Topup {topup_id} not found");
                 let _ = self
                     .command
                     .update_status(&UpdateTopupStatus {
-                        topup_id: req.topup_id,
+                        topup_id: topup_id,
                         status: "failed".to_string(),
                     })
                     .await;
@@ -182,7 +186,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
             let _ = self
                 .command
                 .update_status(&UpdateTopupStatus {
-                    topup_id: req.topup_id,
+                    topup_id: topup_id,
                     status: "failed".to_string(),
                 })
                 .await;
@@ -196,7 +200,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
                 let _ = self
                     .command
                     .update_status(&UpdateTopupStatus {
-                        topup_id: req.topup_id,
+                        topup_id: topup_id,
                         status: "failed".to_string(),
                     })
                     .await;
@@ -220,14 +224,14 @@ impl TopupCommandServiceTrait for TopupCommandService {
             let _ = self
                 .command
                 .update_amount(&UpdateTopupAmount {
-                    topup_id: req.topup_id,
+                    topup_id: topup_id,
                     topup_amount: existing.topup_amount,
                 })
                 .await;
             let _ = self
                 .command
                 .update_status(&UpdateTopupStatus {
-                    topup_id: req.topup_id,
+                    topup_id: topup_id,
                     status: "failed".to_string(),
                 })
                 .await;
@@ -235,14 +239,14 @@ impl TopupCommandServiceTrait for TopupCommandService {
             return Err(ServiceError::Custom("failed to update saldo".into()));
         }
 
-        let updated_topup = match self.query.find_by_id(req.topup_id).await {
+        let updated_topup = match self.query.find_by_id(topup_id).await {
             Ok(t) => t,
             _ => {
-                error!("❌ Failed to fetch updated topup {}", req.topup_id);
+                error!("❌ Failed to fetch updated topup {topup_id}");
                 let _ = self
                     .command
                     .update_status(&UpdateTopupStatus {
-                        topup_id: req.topup_id,
+                        topup_id: topup_id,
                         status: "failed".to_string(),
                     })
                     .await;
@@ -253,7 +257,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
         if let Err(e) = self
             .command
             .update_status(&UpdateTopupStatus {
-                topup_id: req.topup_id,
+                topup_id: topup_id,
                 status: "success".to_string(),
             })
             .await
@@ -266,7 +270,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
 
         info!(
             "✅ UpdateTopup completed: card={} topup_id={} new_amount={} new_balance={new_balance}",
-            req.card_number, req.topup_id, req.topup_amount,
+            req.card_number, topup_id, req.topup_amount,
         );
 
         Ok(ApiResponse {

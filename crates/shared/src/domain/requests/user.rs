@@ -43,8 +43,7 @@ pub struct CreateUserRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, Validate)]
 pub struct UpdateUserRequest {
-    #[validate(range(min = 1))]
-    pub id: i32,
+    pub id: Option<i32>,
 
     #[validate(length(min = 1, message = "First name is required"))]
     pub firstname: Option<String>,

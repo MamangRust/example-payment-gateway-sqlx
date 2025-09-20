@@ -74,6 +74,10 @@ impl UserCommandRepositoryTrait for UserCommandRepository {
     async fn update(&self, req: &UpdateUserRequest) -> Result<UserModel, RepositoryError> {
         let mut conn = self.get_conn().await?;
 
+        let user_id = req
+            .id
+            .ok_or_else(|| RepositoryError::Custom("user_id is required".into()))?;
+
         let record = sqlx::query_as!(
             UserModel,
             r#"
@@ -97,7 +101,7 @@ impl UserCommandRepositoryTrait for UserCommandRepository {
                 updated_at,
                 deleted_at
             "#,
-            req.id,
+            user_id,
             req.firstname,
             req.lastname,
             req.email,

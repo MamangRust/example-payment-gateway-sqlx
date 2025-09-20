@@ -10,7 +10,10 @@ use axum::{
 use shared::{
     abstract_trait::auth::http::DynAuthGrpcClient,
     domain::{
-        requests::auth::{AuthRequest, RegisterRequest},
+        requests::{
+            auth::{AuthRequest, RegisterRequest},
+            refresh_token::RefreshTokenRequest,
+        },
         responses::{ApiResponse, TokenResponse, UserResponse},
     },
     errors::AppErrorHttp,
@@ -84,7 +87,7 @@ pub async fn get_me_handler(
 
 #[utoipa::path(
     post,
-    path = "/api/auth/refresh",
+    path = "/api/auth/refresh-token",
     request_body(content = String, description = "Refresh token", content_type = "application/json"),
     responses(
         (status = 200, description = "Token refreshed", body = ApiResponse<TokenResponse>),
@@ -94,9 +97,9 @@ pub async fn get_me_handler(
 )]
 pub async fn refresh_token_handler(
     Extension(service): Extension<DynAuthGrpcClient>,
-    Json(token): Json<String>,
+    Json(req): Json<RefreshTokenRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    let response = service.refresh_token(&token).await?;
+    let response = service.refresh_token(&req.refresh_token).await?;
     Ok(Json(response))
 }
 
@@ -109,7 +112,7 @@ pub fn auth_routes(app_state: Arc<AppState>) -> OpenApiRouter {
 
     let private_routes = OpenApiRouter::new()
         .route("/api/auth/me", get(get_me_handler))
-        .route("/api/auth/refresh", post(refresh_token_handler))
+        .route("/api/auth/refresh-token", post(refresh_token_handler))
         .route_layer(middleware::from_fn(jwt::auth))
         .layer(Extension(app_state.di_container.auth_clients.clone()))
         .layer(Extension(app_state.jwt_config.clone()));

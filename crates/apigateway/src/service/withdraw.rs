@@ -301,9 +301,16 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
         req: &DomainUpdateWithdrawRequest,
     ) -> Result<ApiResponse<WithdrawResponse>, AppErrorHttp> {
         let masked_card = mask_card_number(&req.card_number);
+
+        let withdraw_id = req.withdraw_id.ok_or_else(|| {
+            AppErrorHttp(AppErrorGrpc::Unhandled(
+                "widhdraw_id is required".to_string(),
+            ))
+        })?;
+
         info!(
-            "updating withdraw id: {} for card: {masked_card}, new amount: {}",
-            req.withdraw_id, req.withdraw_amount
+            "updating withdraw id: {withdraw_id} for card: {masked_card}, new amount: {}",
+            req.withdraw_amount
         );
 
         let mut client = self.client.lock().await;
@@ -312,7 +319,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
 
         let grpc_req = Request::new(UpdateWithdrawRequest {
             card_number: req.card_number.clone(),
-            withdraw_id: req.withdraw_id,
+            withdraw_id: withdraw_id,
             withdraw_amount: req.withdraw_amount,
             withdraw_time: Some(date),
         });
@@ -323,17 +330,14 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 let data = inner.data.ok_or_else(|| {
                     error!(
                         "update withdraw {} - data missing in gRPC response",
-                        req.withdraw_id
+                        withdraw_id
                     );
                     AppErrorHttp(AppErrorGrpc::Unhandled(
                         "Withdraw data is missing in gRPC response".into(),
                     ))
                 })?;
 
-                info!(
-                    "withdraw {} updated successfully for card: {masked_card}",
-                    req.withdraw_id
-                );
+                info!("withdraw {withdraw_id} updated successfully for card: {masked_card}",);
                 Ok(ApiResponse {
                     data: data.into(),
                     status: inner.status,
@@ -341,7 +345,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 })
             }
             Err(status) => {
-                error!("update withdraw {} failed: {status:?}", req.withdraw_id);
+                error!("update withdraw {withdraw_id} failed: {status:?}");
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }

@@ -189,7 +189,7 @@ pub async fn update_card(
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateCardRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    body.card_id = id;
+    body.card_id = Some(id);
     let response = service.update(&body).await?;
     Ok(Json(response))
 }

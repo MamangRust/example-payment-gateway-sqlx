@@ -13,7 +13,7 @@ use crate::state::AppState;
 use anyhow::Result;
 use axum::{
     extract::DefaultBodyLimit,
-    http::{Method, header},
+    http::{HeaderName, Method, header},
 };
 use shared::utils::shutdown_signal;
 use std::sync::Arc;
@@ -339,7 +339,12 @@ impl AppRouter {
                 Method::DELETE,
                 Method::OPTIONS,
             ])
-            .allow_headers([header::CONTENT_TYPE, header::ACCEPT, header::AUTHORIZATION])
+            .allow_headers([
+                header::CONTENT_TYPE,
+                header::ACCEPT,
+                header::AUTHORIZATION,
+                HeaderName::from_static("x-api-key"),
+            ])
             .allow_credentials(true);
 
         let router_with_layers = api_router

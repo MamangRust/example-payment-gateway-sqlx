@@ -35,7 +35,7 @@ impl RoleService {
         let response = self
             .client
             .get(format!("{}/role", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -57,7 +57,7 @@ impl RoleService {
         let response = self
             .client
             .get(format!("{}/role/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseRole>()
@@ -74,7 +74,7 @@ impl RoleService {
         let response = self
             .client
             .get(format!("{}/role/active", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -96,7 +96,7 @@ impl RoleService {
         let response = self
             .client
             .post(format!("{}/role/create", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                 "name": req.name,
             }))
@@ -116,7 +116,7 @@ impl RoleService {
         let response = self
             .client
             .post(format!("{}/role/update/{}", self.base_url, req.role_id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                 "role_id": req.role_id,
                 "name": req.name,
@@ -137,7 +137,7 @@ impl RoleService {
         let response = self
             .client
             .post(format!("{}/role/trashed/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseRole>()

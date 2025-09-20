@@ -44,7 +44,7 @@ impl TransferService {
                 "{}/transfers/stats/status/success/monthly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .send()
             .await?
@@ -65,7 +65,7 @@ impl TransferService {
                 "{}/transfers/stats/status/success/yearly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -87,7 +87,7 @@ impl TransferService {
                 "{}/tranfers/stats/status/failed/monthly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .send()
             .await?
@@ -108,7 +108,7 @@ impl TransferService {
                 "{}/transfers/stats/status/failed/yearly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -131,7 +131,7 @@ impl TransferService {
                 "{}/transfers/stats/status/success/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .query(&[("card_number", card_number)])
             .send()
@@ -154,7 +154,7 @@ impl TransferService {
                 "{}/transfers/stats/status/success/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -178,7 +178,7 @@ impl TransferService {
                 "{}/tranfers/stats/status/failed/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .query(&[("card_number", card_number)])
             .send()
@@ -201,7 +201,7 @@ impl TransferService {
                 "{}/transfers/stats/status/failed/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -220,7 +220,7 @@ impl TransferService {
         let response = self
             .client
             .get(format!("{}/transfers/stats/amount/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -238,7 +238,7 @@ impl TransferService {
         let response = self
             .client
             .get(format!("{}/transfers/stats/amount/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -260,7 +260,7 @@ impl TransferService {
                 "{}/transfers/stats/amount/monthly/sender",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -283,7 +283,7 @@ impl TransferService {
                 "{}/transfers/stats/amount/yearly/sender",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -306,7 +306,7 @@ impl TransferService {
                 "{}/transfers/amount/monthly/receiver",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -329,7 +329,7 @@ impl TransferService {
                 "{}/transfers/amount/yearly/receiver",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -348,7 +348,7 @@ impl TransferService {
         let response = self
             .client
             .get(format!("{}/transfers", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -370,7 +370,7 @@ impl TransferService {
         let response = self
             .client
             .get(format!("{}/transfers/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransfer>()
@@ -390,7 +390,7 @@ impl TransferService {
                 "{}/transfers/from/{}",
                 self.base_url, req.card_number
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransfers>()
@@ -410,7 +410,7 @@ impl TransferService {
                 "{}/transfers/to/{}",
                 self.base_url, req.card_number
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransfers>()
@@ -427,7 +427,7 @@ impl TransferService {
         let response = self
             .client
             .get(format!("{}/transfers/active", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -449,7 +449,7 @@ impl TransferService {
         let response = self
             .client
             .post(format!("{}/transfers/create", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                 "transfer_from": req.transfer_from,
                 "transfer_to": req.transfer_to,
@@ -471,7 +471,7 @@ impl TransferService {
         let response = self
             .client
             .post(format!("{}/transfers/update/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                 "transfer_from": req.transfer_from,
                 "transfer_to": req.transfer_to,
@@ -493,7 +493,7 @@ impl TransferService {
         let response = self
             .client
             .post(format!("{}/tranfers/trash/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransfer>()

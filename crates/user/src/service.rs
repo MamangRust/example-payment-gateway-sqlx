@@ -200,7 +200,7 @@ impl UserService for UserServiceImpl {
         info!("✏️ Updating user id={} email={}", req.id, req.email);
 
         let domain_req = DomainUserRequest {
-            id: req.id,
+            id: Some(req.id),
             firstname: Some(req.firstname),
             lastname: Some(req.lastname),
             email: Some(req.email.clone()),

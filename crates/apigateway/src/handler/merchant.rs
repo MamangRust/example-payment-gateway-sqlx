@@ -197,7 +197,7 @@ pub async fn update_merchant(
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateMerchantRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    body.merchant_id = id;
+    body.merchant_id = Some(id);
     let response = service.update(&body).await?;
     Ok(Json(response))
 }

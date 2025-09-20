@@ -388,13 +388,17 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
         &self,
         req: &DomainUpdateCardRequest,
     ) -> Result<ApiResponse<CardResponse>, AppErrorHttp> {
-        info!("updating card id: {}", req.card_id);
+        let card_id = req.card_id.ok_or_else(|| {
+            AppErrorHttp(AppErrorGrpc::Unhandled("card_id is required".to_string()))
+        })?;
+
+        info!("updating card id: {card_id}");
 
         let mut client = self.client.lock().await;
         let date = naive_date_to_timestamp(req.expire_date);
 
         let grpc_req = Request::new(UpdateCardRequest {
-            card_id: req.card_id,
+            card_id: card_id,
             user_id: req.user_id,
             card_type: req.card_type.clone(),
             expire_date: Some(date),
@@ -406,13 +410,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
             Ok(response) => {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
-                    error!("card {} - data missing in gRPC response", req.card_id);
+                    error!("card {card_id} - data missing in gRPC response");
                     AppErrorHttp(AppErrorGrpc::Unhandled(
                         "Card data is missing in gRPC response".into(),
                     ))
                 })?;
 
-                info!("card {} updated successfully", req.card_id);
+                info!("card {card_id} updated successfully");
                 Ok(ApiResponse {
                     data: data.into(),
                     status: inner.status,
@@ -420,7 +424,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 })
             }
             Err(status) => {
-                error!("update card {} failed: {status:?}", req.card_id);
+                error!("update card {card_id} failed: {status:?}");
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }

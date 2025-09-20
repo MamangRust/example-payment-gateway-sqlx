@@ -82,10 +82,11 @@ impl CardCommandServiceTrait for CardCommandService {
             return Err(ServiceError::Custom(error_msg));
         }
 
-        info!(
-            "🔄 Updating card id={} for user_id={}",
-            req.card_id, req.user_id
-        );
+        let card_id = req
+            .card_id
+            .ok_or_else(|| ServiceError::Custom("card_id is required".into()))?;
+
+        info!("🔄 Updating card id={card_id} for user_id={}", req.user_id);
 
         let _user = self.user_query.find_by_id(req.user_id).await.map_err(|e| {
             error!(
@@ -96,7 +97,7 @@ impl CardCommandServiceTrait for CardCommandService {
         })?;
 
         let updated_card = self.command.update(req).await.map_err(|e| {
-            error!("💥 Failed to update card id {}: {e:?}", req.card_id);
+            error!("💥 Failed to update card id {card_id}: {e:?}");
             ServiceError::Custom("Failed to update card".into())
         })?;
 

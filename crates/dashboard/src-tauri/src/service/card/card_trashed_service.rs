@@ -29,7 +29,7 @@ impl CardTrashedService {
         let response = self
             .client
             .get(format!("{}/card/trashed", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("page", req.page), ("page_size", req.page_size)])
             .query(&[(
                 "search",
@@ -55,7 +55,7 @@ impl CardTrashedService {
         let response = self
             .client
             .post(format!("{}/card/restore/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseCard>()
@@ -72,7 +72,7 @@ impl CardTrashedService {
         let response = self
             .client
             .post(format!("{}/card/delete/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseCard>()
@@ -88,7 +88,7 @@ impl CardTrashedService {
         let response = self
             .client
             .post(format!("{}/card/restore-all", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseCardAll>()
@@ -104,7 +104,7 @@ impl CardTrashedService {
         let response = self
             .client
             .post(format!("{}/card/delete-all", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseCardAll>()

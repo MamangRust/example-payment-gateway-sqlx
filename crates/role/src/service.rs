@@ -249,7 +249,7 @@ impl RoleService for RoleServiceImpl {
         );
 
         let domain_req = DomainUpdateRoleRequest {
-            id: req.id,
+            id: Some(req.id),
             name: req.name,
         };
 

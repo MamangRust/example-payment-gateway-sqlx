@@ -29,15 +29,16 @@ export default function useCreateCard() {
 
       await new Promise((resolve) => setTimeout(resolve, 1200));
 
+      console.log(validatedValues.expire_date)
+
       const req: CreateCard = {
         user_id: Number(validatedValues.user_id),
         card_type: validatedValues.card_type,
-        expire_date: new Date(validatedValues.expire_date.toISOString()),
+        expire_date: new Date(validatedValues.expire_date),
         cvv: validatedValues.cvv,
         card_provider: validatedValues.card_provider,
         toast: toast,
       };
-      console.log("req", req);
 
       const result = await createCard(req);
 

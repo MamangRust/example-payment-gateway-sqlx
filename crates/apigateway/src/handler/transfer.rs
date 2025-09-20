@@ -194,7 +194,7 @@ pub async fn update_transfer(
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTransferRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    body.transfer_id = id;
+    body.transfer_id = Some(id);
     let response = service.update(&body).await?;
     Ok(Json(response))
 }

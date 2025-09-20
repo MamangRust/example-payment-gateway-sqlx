@@ -43,7 +43,7 @@ pub struct CreateSaldoRequest {
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct UpdateSaldoRequest {
-    pub saldo_id: i32,
+    pub saldo_id: Option<i32>,
 
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,

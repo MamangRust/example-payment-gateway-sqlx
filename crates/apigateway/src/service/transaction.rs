@@ -352,9 +352,16 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
     ) -> Result<ApiResponse<TransactionResponse>, AppErrorHttp> {
         let masked_api = mask_api_key(api_key);
         let masked_card = mask_card_number(&req.card_number);
+
+        let transaction_id = req.transaction_id.ok_or_else(|| {
+            AppErrorHttp(AppErrorGrpc::Unhandled(
+                "transaction_id is required".to_string(),
+            ))
+        })?;
+
         info!(
-            "updating transaction id: {} via api_key: {masked_api} for card: {masked_card}, new amount: {}, method: {}",
-            req.transaction_id, req.amount, req.payment_method
+            "updating transaction id: {transaction_id} via api_key: {masked_api} for card: {masked_card}, new amount: {}, method: {}",
+            req.amount, req.payment_method
         );
 
         let mut client = self.client.lock().await;
@@ -362,7 +369,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
         let date = naive_datetime_to_timestamp(req.transaction_time);
 
         let grpc_req = Request::new(UpdateTransactionRequest {
-            transaction_id: req.transaction_id,
+            transaction_id: transaction_id,
             api_key: api_key.to_string(),
             card_number: req.card_number.clone(),
             amount: req.amount as i32,
@@ -375,18 +382,15 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
             Ok(response) => {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
-                    error!(
-                        "update transaction {} - data missing in gRPC response",
-                        req.transaction_id
-                    );
+                    error!("update transaction {transaction_id} - data missing in gRPC response");
                     AppErrorHttp(AppErrorGrpc::Unhandled(
                         "Transaction data is missing in gRPC response".into(),
                     ))
                 })?;
 
                 info!(
-                    "transaction {} updated successfully for card: {}",
-                    req.transaction_id, masked_card
+                    "transaction {transaction_id} updated successfully for card: {}",
+                    masked_card
                 );
                 Ok(ApiResponse {
                     data: data.into(),
@@ -396,8 +400,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
             }
             Err(status) => {
                 error!(
-                    "update transaction {} via api_key {masked_api} failed: {status:?}",
-                    req.transaction_id
+                    "update transaction {transaction_id} via api_key {masked_api} failed: {status:?}",
                 );
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }

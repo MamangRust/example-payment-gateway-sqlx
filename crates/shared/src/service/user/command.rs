@@ -150,40 +150,55 @@ impl UserCommandServiceTrait for UserCommandService {
     ) -> Result<ApiResponse<UserResponse>, ServiceError> {
         req.validate().map_err(|e| {
             let msg = format!("❌ Validation failed: {e:?}");
-            error!("{}", msg);
-            ServiceError::Custom(msg)
-        })?;
-
-        info!("🔄 Updating user id={}", req.id);
-
-        self.query.find_by_id(req.id).await.map_err(|e| {
-            let msg = format!("👤 User not found with id {}: {e:?}", req.id);
             error!("{msg}");
             ServiceError::Custom(msg)
         })?;
 
-        if let Some(email) = &req.email {
-            if let Some(existing) = self.query.find_by_email(email.clone()).await.map_err(|e| {
-                let msg = format!("💥 Failed to check email {email}: {e:?}");
-                error!("{msg}");
-                ServiceError::Custom(msg)
-            })? {
-                if existing.user_id != req.id {
-                    let msg = format!("📧 Email {email} already used by another user");
-                    error!("{}", msg);
-                    return Err(ServiceError::Custom(msg));
+        let user_id = req
+            .id
+            .ok_or_else(|| ServiceError::Custom("user_id is required".into()))?;
+        info!("🔄 Updating user id={user_id}");
+
+        let user = self.query.find_by_id(user_id).await.map_err(|e| {
+            let msg = format!("👤 User not found with id {user_id}: {e:?}");
+            error!("{msg}");
+            ServiceError::Custom(msg)
+        })?;
+
+        if let Some(new_email) = &req.email {
+            let new_email_norm = new_email.trim().to_lowercase();
+            let old_email_norm = user.email.trim().to_lowercase();
+
+            if new_email_norm == old_email_norm {
+                info!("📧 Email unchanged after normalization, skipping DB check");
+            } else {
+                match self.query.find_by_email(new_email_norm.clone()).await {
+                    Ok(Some(_)) => {
+                        let msg = format!("📧 Email {new_email} already used by another user");
+                        error!("{msg}");
+                        return Err(ServiceError::Custom(msg));
+                    }
+                    Ok(None) => {
+                        info!("📧 Email {new_email} available for use");
+                    }
+                    Err(e) => {
+                        let msg = format!("💥 Failed to check email {new_email}: {e:?}");
+                        error!("{msg}");
+                        return Err(ServiceError::Custom(msg));
+                    }
                 }
             }
+        } else {
+            info!("📧 No email in request, skip email validation");
         }
 
         let updated_user = self.command.update(req).await.map_err(|e| {
-            let msg = format!("💥 Failed to update user {}: {e:?}", req.id);
-            error!("{}", msg);
+            let msg = format!("💥 Failed to update user {user_id}: {e:?}");
+            error!("{msg}");
             ServiceError::Custom(msg)
         })?;
 
         let response = UserResponse::from(updated_user);
-
         info!("✅ User updated successfully with id={}", response.id);
 
         Ok(ApiResponse {

@@ -1,3 +1,4 @@
+use crate::utils::deserialize_date_only;
 use chrono::NaiveDate;
 use serde::Deserialize;
 use utoipa::{IntoParams, ToSchema};
@@ -40,6 +41,7 @@ pub struct CreateCardRequest {
     #[validate(length(min = 1, message = "Card type wajib diisi"))]
     pub card_type: String,
 
+    #[serde(deserialize_with = "deserialize_date_only")]
     pub expire_date: NaiveDate,
 
     #[validate(length(min = 1, message = "CVV wajib diisi"))]
@@ -51,7 +53,7 @@ pub struct CreateCardRequest {
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct UpdateCardRequest {
-    pub card_id: i32,
+    pub card_id: Option<i32>,
 
     #[validate(range(min = 1, message = "User ID minimal 1"))]
     pub user_id: i32,
@@ -59,6 +61,7 @@ pub struct UpdateCardRequest {
     #[validate(length(min = 1, message = "Card type wajib diisi"))]
     pub card_type: String,
 
+    #[serde(deserialize_with = "deserialize_date_only")]
     pub expire_date: NaiveDate,
 
     #[validate(length(min = 1, message = "CVV wajib diisi"))]

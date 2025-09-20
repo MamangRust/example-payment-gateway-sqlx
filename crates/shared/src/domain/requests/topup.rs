@@ -93,7 +93,7 @@ pub struct UpdateTopupRequest {
     #[validate(length(min = 1, message = "Card number wajib diisi"))]
     pub card_number: String,
 
-    pub topup_id: i32,
+    pub topup_id: Option<i32>,
 
     #[validate(range(min = 50000, message = "Minimal topup 50.000"))]
     pub topup_amount: i64,

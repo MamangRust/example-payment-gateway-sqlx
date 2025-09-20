@@ -64,10 +64,14 @@ impl RoleCommandServiceTrait for RoleCommandService {
             return Err(ServiceError::Custom(error_msg));
         }
 
-        info!("🔄 Updating role id={}", req.id);
+        let role_id = req
+            .id
+            .ok_or_else(|| ServiceError::Custom("role_id is required".into()))?;
+
+        info!("🔄 Updating role id={role_id}");
 
         let updated_role = self.command.update(req).await.map_err(|e| {
-            let error_msg = format!("💥 Failed to update role id={}: {e:?}", req.id);
+            let error_msg = format!("💥 Failed to update role id={role_id}: {e:?}");
             error!("{error_msg}");
             ServiceError::Custom(error_msg)
         })?;

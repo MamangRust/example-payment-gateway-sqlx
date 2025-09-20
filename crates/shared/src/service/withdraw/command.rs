@@ -177,6 +177,10 @@ impl WithdrawCommandServiceTrait for WithdrawCommandService {
             return Err(ServiceError::Custom(error_msg));
         }
 
+        let withdraw_id = req
+            .withdraw_id
+            .ok_or_else(|| ServiceError::Custom("withdraw_id is required".into()))?;
+
         let _card = self
             .card_query
             .find_by_card(&req.card_number)
@@ -186,9 +190,9 @@ impl WithdrawCommandServiceTrait for WithdrawCommandService {
                 ServiceError::Custom("failed to find card".into())
             })?;
 
-        let _ = self.query.find_by_id(req.withdraw_id).await.map_err(|e| {
+        let _ = self.query.find_by_id(withdraw_id).await.map_err(|e| {
             error!("error {e:?}");
-            ServiceError::Custom(format!("failed to find withdraw {}", req.withdraw_id))
+            ServiceError::Custom(format!("failed to find withdraw {}", withdraw_id))
         })?;
 
         let saldo = self
@@ -226,7 +230,7 @@ impl WithdrawCommandServiceTrait for WithdrawCommandService {
             if let Err(e2) = self
                 .command
                 .update_status(&UpdateWithdrawStatus {
-                    withdraw_id: req.withdraw_id,
+                    withdraw_id: withdraw_id,
                     status: "failed".to_string(),
                 })
                 .await
@@ -256,7 +260,7 @@ impl WithdrawCommandServiceTrait for WithdrawCommandService {
                 let _ = self
                     .command
                     .update_status(&UpdateWithdrawStatus {
-                        withdraw_id: req.withdraw_id,
+                        withdraw_id: withdraw_id,
                         status: "failed".to_string(),
                     })
                     .await

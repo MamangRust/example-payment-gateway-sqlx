@@ -124,7 +124,7 @@ pub async fn get_roles_by_user_id(
 
 #[utoipa::path(
     post,
-    path = "/api/roles",
+    path = "/api/roles/create",
     tag = "Role",
     security(("bearer_auth" = [])),
     request_body = CreateRoleRequest,
@@ -144,8 +144,8 @@ pub async fn create_role(
 }
 
 #[utoipa::path(
-    put,
-    path = "/api/roles/{id}",
+    post,
+    path = "/api/roles/update/{id}",
     tag = "Role",
     security(("bearer_auth" = [])),
     params(("id" = i32, Path, description = "Role ID")),
@@ -162,14 +162,14 @@ pub async fn update_role(
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateRoleRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    body.id = id;
+    body.id = Some(id);
     let response = service.update(&body).await?;
     Ok(Json(response))
 }
 
 #[utoipa::path(
     delete,
-    path = "/api/roles/trash/{id}",
+    path = "/api/roles/trashed/{id}",
     tag = "Role",
     security(("bearer_auth" = [])),
     params(("id" = i32, Path, description = "Role ID")),
@@ -277,9 +277,9 @@ pub fn role_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/roles/trashed", get(get_trashed_roles))
         .route("/api/roles/{id}", get(get_role))
         .route("/api/roles/user/{user_id}", get(get_roles_by_user_id))
-        .route("/api/roles", post(create_role))
-        .route("/api/roles/{id}", post(update_role))
-        .route("/api/roles/trash/{id}", post(trash_role_handler))
+        .route("/api/roles/create", post(create_role))
+        .route("/api/roles/update/{id}", post(update_role))
+        .route("/api/roles/trashed/{id}", post(trash_role_handler))
         .route("/api/roles/restore/{id}", post(restore_role_handler))
         .route("/api/roles/delete/{id}", delete(delete_role))
         .route("/api/roles/restore-all", post(restore_all_role_handler))

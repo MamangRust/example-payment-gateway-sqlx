@@ -217,9 +217,13 @@ impl TransferCommandServiceTrait for TransferCommandService {
             return Err(ServiceError::Custom(error_msg));
         }
 
-        let transfer = self.query.find_by_id(req.transfer_id).await.map_err(|e| {
+        let transfer_id = req
+            .transfer_id
+            .ok_or_else(|| ServiceError::Custom("transfer_id is required".into()))?;
+
+        let transfer = self.query.find_by_id(transfer_id).await.map_err(|e| {
             error!("error {e:?}");
-            ServiceError::Custom(format!("failed to find transfer {}", req.transfer_id))
+            ServiceError::Custom(format!("failed to find transfer {transfer_id}"))
         })?;
 
         let amount_difference = req.transfer_amount - transfer.transfer_amount as i64;
@@ -240,7 +244,7 @@ impl TransferCommandServiceTrait for TransferCommandService {
             let _ = self
                 .command
                 .update_status(&UpdateTransferStatus {
-                    transfer_id: req.transfer_id,
+                    transfer_id: transfer_id,
                     status: "failed".to_string(),
                 })
                 .await;
@@ -276,7 +280,7 @@ impl TransferCommandServiceTrait for TransferCommandService {
                 let _ = self
                     .command
                     .update_status(&UpdateTransferStatus {
-                        transfer_id: req.transfer_id,
+                        transfer_id: transfer_id,
                         status: "failed".to_string(),
                     })
                     .await;
@@ -317,7 +321,7 @@ impl TransferCommandServiceTrait for TransferCommandService {
             let _ = self
                 .command
                 .update_status(&UpdateTransferStatus {
-                    transfer_id: req.transfer_id,
+                    transfer_id: transfer_id,
                     status: "failed".to_string(),
                 })
                 .await;
@@ -351,7 +355,7 @@ impl TransferCommandServiceTrait for TransferCommandService {
                 let _ = self
                     .command
                     .update_status(&UpdateTransferStatus {
-                        transfer_id: req.transfer_id,
+                        transfer_id: transfer_id,
                         status: "failed".to_string(),
                     })
                     .await;
@@ -363,7 +367,7 @@ impl TransferCommandServiceTrait for TransferCommandService {
         if let Err(e) = self
             .command
             .update_status(&UpdateTransferStatus {
-                transfer_id: req.transfer_id,
+                transfer_id: transfer_id,
                 status: "success".to_string(),
             })
             .await
@@ -374,7 +378,7 @@ impl TransferCommandServiceTrait for TransferCommandService {
             ));
         }
 
-        info!("successfully update transaction: {}", req.transfer_id);
+        info!("successfully update transaction: {transfer_id}");
 
         Ok(ApiResponse {
             data: TransferResponse::from(updated_transfer),

@@ -1,3 +1,4 @@
+use crate::utils::deserialize_datetime;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -81,12 +82,14 @@ pub struct CreateTransactionRequest {
     pub payment_method: String,
     #[validate(range(min = 1))]
     pub merchant_id: Option<i32>,
+
+    #[serde(deserialize_with = "deserialize_datetime")]
     pub transaction_time: NaiveDateTime,
 }
 
 #[derive(Debug, Deserialize, Serialize, Validate, ToSchema, Clone)]
 pub struct UpdateTransactionRequest {
-    pub transaction_id: i32,
+    pub transaction_id: Option<i32>,
     #[validate(length(min = 1))]
     pub card_number: String,
     #[validate(range(min = 50000))]
@@ -95,6 +98,7 @@ pub struct UpdateTransactionRequest {
     pub payment_method: String,
     #[validate(range(min = 1))]
     pub merchant_id: Option<i32>,
+    #[serde(deserialize_with = "deserialize_datetime")]
     pub transaction_time: NaiveDateTime,
 }
 

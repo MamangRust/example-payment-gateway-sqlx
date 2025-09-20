@@ -80,6 +80,10 @@ impl TransferCommandRepositoryTrait for TransferCommandRepository {
     async fn update(&self, req: &UpdateTransferRequest) -> Result<TransferModel, RepositoryError> {
         let mut conn = self.get_conn().await?;
 
+        let transfer_id = req
+            .transfer_id
+            .ok_or_else(|| RepositoryError::Custom("transfer_id is required".into()))?;
+
         let record = sqlx::query_as!(
             TransferModel,
             r#"
@@ -103,7 +107,7 @@ impl TransferCommandRepositoryTrait for TransferCommandRepository {
                 updated_at,
                 deleted_at
             "#,
-            req.transfer_id,
+            transfer_id,
             req.transfer_from,
             req.transfer_to,
             req.transfer_amount as i64

@@ -174,7 +174,7 @@ pub async fn update_topup(
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTopupRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    body.topup_id = id;
+    body.topup_id = Some(id);
     let response = service.update(&body).await?;
     Ok(Json(response))
 }

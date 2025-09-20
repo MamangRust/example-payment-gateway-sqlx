@@ -87,6 +87,10 @@ impl TransactionCommandRepositoryTrait for TransactionCommandRepository {
     ) -> Result<TransactionModel, RepositoryError> {
         let mut conn = self.get_conn().await?;
 
+        let transaction_id = req
+            .transaction_id
+            .ok_or_else(|| RepositoryError::Custom("transaction_id is required".into()))?;
+
         let record = sqlx::query_as!(
             TransactionModel,
             r#"
@@ -112,7 +116,7 @@ impl TransactionCommandRepositoryTrait for TransactionCommandRepository {
                 updated_at,
                 deleted_at
             "#,
-            req.transaction_id,
+            transaction_id,
             req.card_number,
             req.amount as i64,
             req.payment_method,

@@ -89,9 +89,13 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
             return Err(ServiceError::Custom(error_msg));
         }
 
+        let saldo_id = request
+            .saldo_id
+            .ok_or_else(|| ServiceError::Custom("saldo_id is required".into()))?;
+
         info!(
-            "Updating saldo id={} for card={}",
-            request.saldo_id, request.card_number
+            "Updating saldo id={saldo_id} for card={}",
+            request.card_number
         );
 
         let _ = self
@@ -108,8 +112,8 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
 
         let updated_saldo = self.command.update(request).await.map_err(|e| {
             error!(
-                "Failed to update saldo id={} for card {}: {e:?}",
-                request.saldo_id, request.card_number,
+                "Failed to update saldo id={saldo_id} for card {}: {e:?}",
+                request.card_number,
             );
             ServiceError::Custom("Failed to update saldo".into())
         })?;

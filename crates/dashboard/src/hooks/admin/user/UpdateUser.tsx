@@ -33,9 +33,12 @@ export default function useUpdateUser() {
         id: editUserId,
       };
 
+      console.log("hello req",req)
+
       findById(req);
     }
   }, [isModalVisibleEdit, editUserId, findById]);
+
 
   const handleButtonSubmit = () => {
     formRef.current?.requestSubmit();

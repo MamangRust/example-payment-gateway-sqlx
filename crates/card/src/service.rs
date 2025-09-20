@@ -1172,7 +1172,7 @@ impl CardService for CardServiceImpl {
             .ok_or_else(|| Status::invalid_argument("expire_date invalid"))?;
 
         let domain_req = DomainUpdateCardRequest {
-            card_id: req.card_id,
+            card_id: Some(req.card_id),
             user_id: req.user_id,
             card_type: req.card_type,
             expire_date: date,
@@ -1182,7 +1182,7 @@ impl CardService for CardServiceImpl {
 
         match self.command.update(&domain_req).await {
             Ok(api_response) => {
-                info!("✅ Successfully updated card_id={}", domain_req.card_id);
+                info!("✅ Successfully updated card_id={}", req.card_id);
                 let grpc_response = ApiResponseCard {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
@@ -1191,7 +1191,7 @@ impl CardService for CardServiceImpl {
                 Ok(Response::new(grpc_response))
             }
             Err(e) => {
-                error!("❌ Failed to update card_id={}: {e:?}", domain_req.card_id);
+                error!("❌ Failed to update card_id={}: {e:?}", req.card_id);
                 Err(AppErrorGrpc::from(e).into())
             }
         }

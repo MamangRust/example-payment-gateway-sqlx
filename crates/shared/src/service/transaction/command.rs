@@ -222,14 +222,14 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             return Err(ServiceError::Custom(error_msg));
         }
 
-        let mut transaction = self
-            .query
-            .find_by_id(req.transaction_id)
-            .await
-            .map_err(|e| {
-                error!("failed to find transaction: {e:?}");
-                ServiceError::Custom(format!("transaction {} not found", req.transaction_id))
-            })?;
+        let transaction_id = req
+            .transaction_id
+            .ok_or_else(|| ServiceError::Custom("transaction_id is required".into()))?;
+
+        let mut transaction = self.query.find_by_id(transaction_id).await.map_err(|e| {
+            error!("failed to find transaction: {e:?}");
+            ServiceError::Custom(format!("transaction {} not found", transaction_id))
+        })?;
 
         let merchant = self
             .merchant_query
@@ -241,12 +241,12 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             })?;
 
         if transaction.clone().merchant_id != merchant.merchant_id {
-            error!("unauthorized access to transaction {}", req.transaction_id);
+            error!("unauthorized access to transaction {}", transaction_id);
 
             let _ = self
                 .command
                 .update_status(&UpdateTransactionStatus {
-                    transaction_id: req.transaction_id,
+                    transaction_id: transaction_id,
                     status: "failed".into(),
                 })
                 .await;
@@ -284,7 +284,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             let _ = self
                 .command
                 .update_status(&UpdateTransactionStatus {
-                    transaction_id: req.transaction_id,
+                    transaction_id: transaction_id,
                     status: "failed".into(),
                 })
                 .await;
@@ -299,7 +299,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             let _ = self
                 .command
                 .update_status(&UpdateTransactionStatus {
-                    transaction_id: req.transaction_id,
+                    transaction_id: transaction_id,
                     status: "failed".into(),
                 })
                 .await;
@@ -324,7 +324,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         let updated = self
             .command
             .update(&UpdateTransactionRequest {
-                transaction_id: req.transaction_id,
+                transaction_id: Some(transaction_id),
                 card_number: transaction.card_number.clone(),
                 amount: transaction.amount as i64,
                 payment_method: transaction.payment_method.clone(),
@@ -339,7 +339,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
 
         self.command
             .update_status(&UpdateTransactionStatus {
-                transaction_id: req.transaction_id,
+                transaction_id: transaction_id,
                 status: "success".into(),
             })
             .await

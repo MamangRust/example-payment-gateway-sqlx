@@ -283,15 +283,19 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
         request: &DomainUpdateSaldoRequest,
     ) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp> {
         let masked_card = mask_card_number(&request.card_number);
+        let saldo_id = request.saldo_id.ok_or_else(|| {
+            AppErrorHttp(AppErrorGrpc::Unhandled("saldo_id is required".to_string()))
+        })?;
+
         info!(
-            "updating saldo id: {} for card: {} with new balance: {}",
-            request.saldo_id, masked_card, request.total_balance
+            "updating saldo id: {saldo_id} for card: {} with new balance: {}",
+            masked_card, request.total_balance
         );
 
         let mut client = self.client.lock().await;
 
         let grpc_req = UpdateSaldoRequest {
-            saldo_id: request.saldo_id,
+            saldo_id: saldo_id,
             card_number: request.card_number.clone(),
             total_balance: request.total_balance as i32,
         };
@@ -300,19 +304,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
             Ok(response) => {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
-                    error!(
-                        "update saldo {} - data missing in gRPC response",
-                        request.saldo_id
-                    );
+                    error!("update saldo {saldo_id} - data missing in gRPC response",);
                     AppErrorHttp(AppErrorGrpc::Unhandled(
                         "Saldo data is missing in gRPC response".into(),
                     ))
                 })?;
 
-                info!(
-                    "saldo {} updated successfully for card: {}",
-                    request.saldo_id, masked_card
-                );
+                info!("saldo {saldo_id} updated successfully for card: {masked_card}",);
                 Ok(ApiResponse {
                     data: data.into(),
                     status: inner.status,
@@ -320,7 +318,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 })
             }
             Err(status) => {
-                error!("update saldo {} failed: {status:?}", request.saldo_id);
+                error!("update saldo {saldo_id} failed: {status:?}");
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }

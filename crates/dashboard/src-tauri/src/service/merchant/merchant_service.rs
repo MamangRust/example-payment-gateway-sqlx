@@ -45,7 +45,7 @@ impl MerchantService {
         let response = self
             .client
             .get(format!("{}/merchants/stats/method/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -63,7 +63,7 @@ impl MerchantService {
         let response = self
             .client
             .get(format!("{}/merchants/stats/method/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -81,7 +81,7 @@ impl MerchantService {
         let response = self
             .client
             .get(format!("{}/merchants/stats/amount/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -99,7 +99,7 @@ impl MerchantService {
         let response = self
             .client
             .get(format!("{}/merchants/stats/amount/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -121,7 +121,7 @@ impl MerchantService {
                 "{}/merchants/stats/total-amount/monthly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .send()
             .await?
@@ -142,7 +142,7 @@ impl MerchantService {
                 "{}/merchants/stats/total-amount/yearly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -164,7 +164,7 @@ impl MerchantService {
                 "{}/merchants/stats/method/monthly/by-merchant",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("merchant_id", merchant_id)])
             .send()
             .await?
@@ -186,7 +186,7 @@ impl MerchantService {
                 "{}/merchants/stats/method/yearly/by-merchant",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("merchant_id", merchant_id)])
             .send()
             .await?
@@ -208,7 +208,7 @@ impl MerchantService {
                 "{}/merchants/stats/amount/monthly/by-merchant",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("merchant_id", merchant_id)])
             .send()
             .await?
@@ -230,7 +230,7 @@ impl MerchantService {
                 "{}/merchants/stats/amount/yearly/by-merchant",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("merchant_id", merchant_id)])
             .send()
             .await?
@@ -253,7 +253,7 @@ impl MerchantService {
                 "{}/merchants/stats/total-amount/monthly/by-merchant",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("year", year),
                 ("month", month),
@@ -279,7 +279,7 @@ impl MerchantService {
                 "{}/merchants/stats/total-amount/yearly/by-merchant",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("merchant_id", merchant_id)])
             .send()
             .await?
@@ -297,7 +297,7 @@ impl MerchantService {
         let response = self
             .client
             .get(format!("{}/merchants", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -319,7 +319,7 @@ impl MerchantService {
         let response = self
             .client
             .get(format!("{}/merchants/transactions", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -344,7 +344,7 @@ impl MerchantService {
                 "{}/merchants/transactions/{}/",
                 self.base_url, req.merchant_id
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -369,7 +369,7 @@ impl MerchantService {
                 "{}/merchants/transactions/api-key/{}/",
                 self.base_url, req.api_key
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -391,7 +391,7 @@ impl MerchantService {
         let response = self
             .client
             .get(format!("{}/merchants/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseMerchant>()
@@ -411,7 +411,7 @@ impl MerchantService {
                 "{}/merchants/api-key/{}",
                 self.base_url, req.api_key
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseMerchant>()
@@ -431,7 +431,7 @@ impl MerchantService {
                 "{}/merchants/merchant-user/{}",
                 self.base_url, req.user_id
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponsesMerchant>()
@@ -448,7 +448,7 @@ impl MerchantService {
         let response = self
             .client
             .get(format!("{}/merchants/active", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -470,7 +470,7 @@ impl MerchantService {
         let response = self
             .client
             .post(format!("{}/merchants/create", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                 "name": req.name,
                 "user_id": req.user_id,
@@ -494,7 +494,7 @@ impl MerchantService {
                 "{}/merchants/update/{}",
                 self.base_url, req.merchant_id
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                 "merchant_id": req.merchant_id,
                 "name": req.name,
@@ -517,7 +517,7 @@ impl MerchantService {
         let response = self
             .client
             .post(format!("{}/merchants/trash/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseMerchant>()

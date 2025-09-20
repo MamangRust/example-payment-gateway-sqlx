@@ -35,7 +35,7 @@ impl TransactionTrashedService {
         let response = self
             .client
             .get(format!("{}/transactions/trashed", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("page", req.page), ("page_size", req.page_size)])
             .query(&[(
                 "search",
@@ -61,7 +61,7 @@ impl TransactionTrashedService {
         let response = self
             .client
             .post(format!("{}/transactions/restore/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransaction>()
@@ -78,7 +78,7 @@ impl TransactionTrashedService {
         let response = self
             .client
             .post(format!("{}/transactions/delete/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransactionDelete>()
@@ -94,7 +94,7 @@ impl TransactionTrashedService {
         let response = self
             .client
             .post(format!("{}/transactions/restore-all", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransactionAll>()
@@ -110,7 +110,7 @@ impl TransactionTrashedService {
         let response = self
             .client
             .post(format!("{}/transactions/delete-all", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransactionAll>()

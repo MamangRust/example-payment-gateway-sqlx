@@ -323,15 +323,22 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
     ) -> Result<ApiResponse<TransferResponse>, AppErrorHttp> {
         let masked_from = mask_card_number(&req.transfer_from);
         let masked_to = mask_card_number(&req.transfer_to);
+
+        let transfer_id = req.transfer_id.ok_or_else(|| {
+            AppErrorHttp(AppErrorGrpc::Unhandled(
+                "transfer_id is required".to_string(),
+            ))
+        })?;
+
         info!(
-            "updating transfer id: {} FROM {masked_from} TO {masked_to}, new amount: {}",
-            req.transfer_id, req.transfer_amount
+            "updating transfer id: {transfer_id} FROM {masked_from} TO {masked_to}, new amount: {}",
+            req.transfer_amount
         );
 
         let mut client = self.client.lock().await;
 
         let grpc_req = Request::new(UpdateTransferRequest {
-            transfer_id: req.transfer_id,
+            transfer_id: transfer_id,
             transfer_from: req.transfer_from.clone(),
             transfer_to: req.transfer_to.clone(),
             transfer_amount: req.transfer_amount as i32,
@@ -341,18 +348,14 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
             Ok(response) => {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
-                    error!(
-                        "update transfer {} - data missing in gRPC response",
-                        req.transfer_id
-                    );
+                    error!("update transfer {transfer_id} - data missing in gRPC response",);
                     AppErrorHttp(AppErrorGrpc::Unhandled(
                         "Transfer data is missing in gRPC response".into(),
                     ))
                 })?;
 
                 info!(
-                    "transfer {} updated successfully FROM {masked_from} TO {masked_to}",
-                    req.transfer_id
+                    "transfer {transfer_id} updated successfully FROM {masked_from} TO {masked_to}"
                 );
                 Ok(ApiResponse {
                     data: data.into(),
@@ -361,7 +364,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 })
             }
             Err(status) => {
-                error!("update transfer {} failed: {status:?}", req.transfer_id);
+                error!("update transfer {transfer_id} failed: {status:?}");
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }

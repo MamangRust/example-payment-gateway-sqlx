@@ -93,7 +93,11 @@ impl MerchantCommandServiceTrait for MerchantCommandService {
             return Err(ServiceError::Custom(error_msg));
         }
 
-        info!("🔄 Updating merchant id={}", req.merchant_id);
+        let merchant_id = req
+            .merchant_id
+            .ok_or_else(|| ServiceError::Custom("merchant_id is required".into()))?;
+
+        info!("🔄 Updating merchant id={merchant_id}");
 
         let _user = self.user_query.find_by_id(req.user_id).await.map_err(|e| {
             let error_msg = format!(
@@ -105,7 +109,7 @@ impl MerchantCommandServiceTrait for MerchantCommandService {
         })?;
 
         let updated_merchant = self.command.update(req).await.map_err(|e| {
-            let error_msg = format!("💥 Failed to update merchant id={}: {e:?}", req.merchant_id);
+            let error_msg = format!("💥 Failed to update merchant id={merchant_id}: {e:?}");
             error!("{error_msg}");
             ServiceError::Custom(error_msg)
         })?;
@@ -134,15 +138,19 @@ impl MerchantCommandServiceTrait for MerchantCommandService {
             return Err(ServiceError::Custom(error_msg));
         }
 
+        let merchant_id = req
+            .merchant_id
+            .ok_or_else(|| ServiceError::Custom("merchant_id is required".into()))?;
+
         info!(
-            "🔄 Updating status for merchant id={} to {}",
-            req.merchant_id, req.status
+            "🔄 Updating status for merchant id={merchant_id} to {}",
+            req.status
         );
 
         let updated_merchant = self.command.update_status(req).await.map_err(|e| {
             let error_msg = format!(
-                "💥 Failed to update status for merchant id={} to {}: {e:?}",
-                req.merchant_id, req.status
+                "💥 Failed to update status for merchant id={merchant_id} to {}: {e:?}",
+                req.status
             );
             error!("{error_msg}");
             ServiceError::Custom(error_msg)

@@ -83,6 +83,10 @@ impl CardCommandRepositoryTrait for CardCommandRepository {
     async fn update(&self, request: &UpdateCardRequest) -> Result<CardModel, RepositoryError> {
         let mut conn = self.get_conn().await?;
 
+        let card_id = request
+            .card_id
+            .ok_or_else(|| RepositoryError::Custom("card_id is required".into()))?;
+
         let card = sqlx::query_as!(
             CardModel,
             r#"
@@ -108,7 +112,7 @@ impl CardCommandRepositoryTrait for CardCommandRepository {
                 updated_at,
                 deleted_at
             "#,
-            request.card_id,
+            card_id,
             request.card_type,
             request.expire_date,
             request.cvv,

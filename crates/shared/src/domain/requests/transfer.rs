@@ -75,7 +75,7 @@ pub struct CreateTransferRequest {
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct UpdateTransferRequest {
-    pub transfer_id: i32,
+    pub transfer_id: Option<i32>,
 
     #[validate(length(min = 1, message = "Transfer from wajib diisi"))]
     pub transfer_from: String,

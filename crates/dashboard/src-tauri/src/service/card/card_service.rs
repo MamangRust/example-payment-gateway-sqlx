@@ -53,7 +53,7 @@ impl CardService {
         let response = self
             .client
             .get(&url)
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseDashboardCardNumber>()
@@ -70,7 +70,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/stats/balance/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -88,7 +88,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/stats/balance/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -106,7 +106,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/stats/topup/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -124,7 +124,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/stats/topup/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -142,7 +142,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/stats/withdraw/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -160,7 +160,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/stats/withdraw/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -181,7 +181,7 @@ impl CardService {
                 "{}/cards/stats/transfer/monthly/sender",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -202,7 +202,7 @@ impl CardService {
                 "{}/cards/stats/transfer/yearly/sender",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -223,7 +223,7 @@ impl CardService {
                 "{}/cards/stats/transfer/monthly/receiver",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -244,7 +244,7 @@ impl CardService {
                 "{}/cards/stats/transfer/yearly/receiver",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -262,7 +262,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/stats/transaction/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -280,7 +280,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/stats/transaction/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -302,7 +302,7 @@ impl CardService {
                 "{}/cards/stats/balance/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -325,7 +325,7 @@ impl CardService {
                 "{}/cards/stats/balance/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -347,7 +347,7 @@ impl CardService {
                 "{}/cards/stats/topup/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -370,7 +370,7 @@ impl CardService {
                 "{}/cards/stats/topup/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -393,7 +393,7 @@ impl CardService {
                 "{}/cards/stats/withdraw/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -413,7 +413,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/withdraw/yearly/by-card", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -436,7 +436,7 @@ impl CardService {
                 "{}/cards/stats/transfer/monthly/by-card/sender",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -459,7 +459,7 @@ impl CardService {
                 "{}/cards/stats/transfer/yearly/by-card/sender",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -482,7 +482,7 @@ impl CardService {
                 "{}/cards/stats/transfer/monthly/by-card/receiver",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -505,7 +505,7 @@ impl CardService {
                 "{}/cards/stats/transfer/yearly/by-card/receiver",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -528,7 +528,7 @@ impl CardService {
                 "{}/cards/stats/transaction/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -551,7 +551,7 @@ impl CardService {
                 "{}/cards/stats/transaction/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -570,7 +570,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("page", req.page), ("page_size", req.page_size)])
             .query(&[("search", req.search)])
             .send()
@@ -589,7 +589,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseCard>()
@@ -606,7 +606,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/user/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseCard>()
@@ -626,7 +626,7 @@ impl CardService {
                 "{}/cards/cards_number/{}",
                 self.base_url, req.card_number
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseCard>()
@@ -643,7 +643,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/active", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("page", req.page), ("page_size", req.page_size)])
             .query(&[("search", req.search)])
             .send()
@@ -662,7 +662,7 @@ impl CardService {
         let response = self
             .client
             .post(format!("{}/cards/create", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&serde_json::json!({
                 "user_id": req.user_id,
                 "card_type": req.card_type,
@@ -686,7 +686,7 @@ impl CardService {
         let response = self
             .client
             .post(format!("{}/cards/update/{}", self.base_url, req.card_id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&serde_json::json!({
                 "user_id": req.user_id,
                 "card_type": req.card_type,
@@ -710,7 +710,7 @@ impl CardService {
         let response = self
             .client
             .get(format!("{}/cards/trash/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseCard>()

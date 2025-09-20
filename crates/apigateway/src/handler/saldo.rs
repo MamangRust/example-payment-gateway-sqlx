@@ -171,7 +171,7 @@ pub async fn update_saldo(
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateSaldoRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    body.saldo_id = id;
+    body.saldo_id = Some(id);
     let response = service.update(&body).await?;
     Ok(Json(response))
 }

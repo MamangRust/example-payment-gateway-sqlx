@@ -325,16 +325,21 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
         req: &DomainUpdateTopupRequest,
     ) -> Result<ApiResponse<TopupResponse>, AppErrorHttp> {
         let masked_card = mask_card_number(&req.card_number);
+
+        let topup_id = req.topup_id.ok_or_else(|| {
+            AppErrorHttp(AppErrorGrpc::Unhandled("topup_id is required".to_string()))
+        })?;
+
         info!(
-            "updating topup id: {} for card: {}, new amount: {}, method: {}",
-            req.topup_id, masked_card, req.topup_amount, req.topup_method
+            "updating topup id: {topup_id} for card: {}, new amount: {}, method: {}",
+            masked_card, req.topup_amount, req.topup_method
         );
 
         let mut client = self.client.lock().await;
 
         let grpc_req = Request::new(UpdateTopupRequest {
             card_number: req.card_number.clone(),
-            topup_id: req.topup_id,
+            topup_id: topup_id,
             topup_amount: req.topup_amount as i32,
             topup_method: req.topup_method.clone(),
         });
@@ -343,19 +348,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
             Ok(response) => {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
-                    error!(
-                        "update topup {} - data missing in gRPC response",
-                        req.topup_id
-                    );
+                    error!("update topup {topup_id} - data missing in gRPC response",);
                     AppErrorHttp(AppErrorGrpc::Unhandled(
                         "Topup data is missing in gRPC response".into(),
                     ))
                 })?;
 
-                info!(
-                    "topup {} updated successfully for card: {}",
-                    req.topup_id, masked_card
-                );
+                info!("topup {topup_id} updated successfully for card: {masked_card}",);
                 Ok(ApiResponse {
                     data: data.into(),
                     status: inner.status,
@@ -363,7 +362,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 })
             }
             Err(status) => {
-                error!("update topup {} failed: {status:?}", req.topup_id);
+                error!("update topup {topup_id} failed: {status:?}");
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }

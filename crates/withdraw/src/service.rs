@@ -891,13 +891,13 @@ impl WithdrawService for WithdrawServiceImpl {
 
         let date = timestamp_to_naive_datetime(req.withdraw_time).ok_or_else(|| {
             let err_msg = "Invalid withdraw_time timestamp";
-            error!("{} for withdraw_id={}", err_msg, req.withdraw_id);
+            error!("{err_msg} for withdraw_id={}", req.withdraw_id);
             Status::invalid_argument(err_msg)
         })?;
 
         let domain_req = DomainUpdateWithdrawRequest {
             card_number: req.card_number,
-            withdraw_id: req.withdraw_id,
+            withdraw_id: Some(req.withdraw_id),
             withdraw_amount: req.withdraw_amount,
             withdraw_time: date,
         };

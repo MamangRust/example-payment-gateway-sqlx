@@ -1,5 +1,6 @@
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use prost_types::Timestamp;
+use serde::{Deserialize, Deserializer};
 
 pub fn parse_datetime(value: &str) -> Option<String> {
     if value.is_empty() {
@@ -10,6 +11,25 @@ pub fn parse_datetime(value: &str) -> Option<String> {
             .ok()
     }
 }
+
+pub fn deserialize_date_only<'de, D>(deserializer: D) -> Result<NaiveDate, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    let dt = DateTime::parse_from_rfc3339(&s).map_err(serde::de::Error::custom)?;
+    Ok(dt.date_naive())
+}
+
+pub fn deserialize_datetime<'de, D>(deserializer: D) -> Result<NaiveDateTime, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    let dt = DateTime::parse_from_rfc3339(&s).map_err(serde::de::Error::custom)?;
+    Ok(dt.naive_utc())
+}
+
 pub fn parse_expiration_datetime(input: &str) -> Result<NaiveDateTime, chrono::ParseError> {
     NaiveDateTime::parse_from_str(input, "%Y-%m-%d %H:%M:%S")
 }

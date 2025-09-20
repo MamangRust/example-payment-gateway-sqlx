@@ -133,7 +133,7 @@ pub async fn get_trashed_withdraws(
 
 #[utoipa::path(
     post,
-    path = "/api/withdraws",
+    path = "/api/withdraws/create",
     tag = "Withdraw",
     security(("bearer_auth" = [])),
     request_body = CreateWithdrawRequest,
@@ -154,7 +154,7 @@ pub async fn create_withdraw(
 
 #[utoipa::path(
     put,
-    path = "/api/withdraws/{id}",
+    path = "/api/withdraws/update/{id}",
     tag = "Withdraw",
     security(("bearer_auth" = [])),
     params(("id" = i32, Path, description = "Withdraw ID")),
@@ -171,7 +171,7 @@ pub async fn update_withdraw(
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateWithdrawRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    body.withdraw_id = id;
+    body.withdraw_id = Some(id);
     let response = service.update(&body).await?;
     Ok(Json(response))
 }
@@ -526,8 +526,8 @@ pub fn withdraw_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/withdraws/{id}", get(get_withdraw))
         .route("/api/withdraws/active", get(get_active_withdraws))
         .route("/api/withdraws/trashed", get(get_trashed_withdraws))
-        .route("/api/withdraws", post(create_withdraw))
-        .route("/api/withdraws/{id}", post(update_withdraw))
+        .route("/api/withdraws/create", post(create_withdraw))
+        .route("/api/withdraws/update/{id}", post(update_withdraw))
         .route("/api/withdraws/trash/{id}", post(trash_withdraw_handler))
         .route(
             "/api/withdraws/restore/{id}",

@@ -460,12 +460,18 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
         &self,
         request: &DomainUpdateMerchantRequest,
     ) -> Result<ApiResponse<MerchantResponse>, AppErrorHttp> {
-        info!("updating merchant id: {}", request.merchant_id);
+        let merchant_id = request.merchant_id.ok_or_else(|| {
+            AppErrorHttp(AppErrorGrpc::Unhandled(
+                "merchant_id is required".to_string(),
+            ))
+        })?;
+
+        info!("updating merchant id: {merchant_id}");
 
         let mut client = self.client.lock().await;
 
         let grpc_req = Request::new(UpdateMerchantRequest {
-            merchant_id: request.merchant_id,
+            merchant_id: merchant_id,
             user_id: request.user_id,
             name: request.name.clone(),
             status: request.status.clone(),
@@ -475,16 +481,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
             Ok(response) => {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
-                    error!(
-                        "update merchant {} - data missing in gRPC response",
-                        request.merchant_id
-                    );
+                    error!("update merchant {merchant_id} - data missing in gRPC response",);
                     AppErrorHttp(AppErrorGrpc::Unhandled(
                         "Merchant data is missing in gRPC response".into(),
                     ))
                 })?;
 
-                info!("merchant {} updated successfully", request.merchant_id);
+                info!("merchant {merchant_id} updated successfully");
                 Ok(ApiResponse {
                     data: data.into(),
                     status: inner.status,
@@ -492,7 +495,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 })
             }
             Err(status) => {
-                error!("update merchant {} failed: {status:?}", request.merchant_id);
+                error!("update merchant {merchant_id} failed: {status:?}");
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }

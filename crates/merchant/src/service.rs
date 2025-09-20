@@ -801,7 +801,7 @@ impl MerchantService for MerchantServiceImpl {
     ) -> Result<Response<ApiResponseMerchant>, Status> {
         let req = request.into_inner();
         let domain_req = DomainUpdateMerchantRequest {
-            merchant_id: req.merchant_id,
+            merchant_id: Some(req.merchant_id),
             user_id: req.user_id,
             name: req.name,
             status: "pending".to_string(),

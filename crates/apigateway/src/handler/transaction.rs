@@ -197,7 +197,7 @@ pub async fn update_transaction(
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTransactionRequest>,
 ) -> Result<impl IntoResponse, AppErrorHttp> {
-    body.transaction_id = id;
+    body.transaction_id = Some(id);
     let response = service.update(&key, &body).await?;
     Ok(Json(response))
 }

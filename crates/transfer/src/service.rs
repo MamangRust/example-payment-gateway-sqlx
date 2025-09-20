@@ -795,7 +795,7 @@ impl TransferService for TransferServiceImpl {
         );
 
         let domain_req = DomainUpdateTransferRequest {
-            transfer_id: req.transfer_id,
+            transfer_id: Some(req.transfer_id),
             transfer_from: req.transfer_from,
             transfer_to: req.transfer_to,
             transfer_amount: req.transfer_amount as i64,

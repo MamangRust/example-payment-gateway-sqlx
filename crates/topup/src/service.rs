@@ -929,7 +929,7 @@ impl TopupService for TopupServiceImpl {
 
         let domain_req = DomainUpdateTopupRequst {
             card_number: req.card_number,
-            topup_id: req.topup_id,
+            topup_id: Some(req.topup_id),
             topup_amount: req.topup_amount as i64,
             topup_method: req.topup_method,
         };

@@ -51,8 +51,12 @@ impl RoleCommandRepositoryTrait for RoleCommandRepository {
         Ok(result)
     }
 
-    async fn update(&self, role: &UpdateRoleRequest) -> Result<RoleModel, RepositoryError> {
+    async fn update(&self, req: &UpdateRoleRequest) -> Result<RoleModel, RepositoryError> {
         let mut conn = self.get_conn().await?;
+
+        let role_id = req
+            .id
+            .ok_or_else(|| RepositoryError::Custom("role_id is required".into()))?;
 
         let result = sqlx::query_as!(
             RoleModel,
@@ -62,13 +66,13 @@ impl RoleCommandRepositoryTrait for RoleCommandRepository {
             WHERE role_id = $1
             RETURNING role_id, role_name, created_at, updated_at, deleted_at
             "#,
-            role.id,
-            role.name
+            role_id,
+            req.name
         )
         .fetch_one(&mut *conn)
         .await
         .map_err(|err| {
-            error!("❌ Failed to update role ID {}: {err:?}", role.name);
+            error!("❌ Failed to update role ID {}: {err:?}", req.name);
             RepositoryError::from(err)
         })?;
 

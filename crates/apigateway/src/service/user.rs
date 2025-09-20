@@ -247,15 +247,19 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
         &self,
         req: &DomainUpdateUserRequest,
     ) -> Result<ApiResponse<UserResponse>, AppErrorHttp> {
+        let user_id = req.id.ok_or_else(|| {
+            AppErrorHttp(AppErrorGrpc::Unhandled("user id is required".to_string()))
+        })?;
+
         info!(
-            "updating user id: {} - firstname: {:?}, lastname: {:?}, email: {:?}",
-            req.id, req.firstname, req.lastname, req.email
+            "updating user id: {user_id} - firstname: {:?}, lastname: {:?}, email: {:?}",
+            req.firstname, req.lastname, req.email
         );
 
         let mut client = self.client.lock().await;
 
         let grpc_req = UpdateUserRequest {
-            id: req.id,
+            id: user_id,
             firstname: req.firstname.clone().unwrap_or_default(),
             lastname: req.lastname.clone().unwrap_or_default(),
             email: req.email.clone().unwrap_or_default(),
@@ -267,13 +271,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
             Ok(response) => {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
-                    error!("update user {} - data missing in gRPC response", req.id);
+                    error!("update user {user_id} - data missing in gRPC response");
                     AppErrorHttp(AppErrorGrpc::Unhandled(
                         "User data is missing in gRPC response".into(),
                     ))
                 })?;
 
-                info!("user {} updated successfully", req.id);
+                info!("user {user_id} updated successfully");
                 Ok(ApiResponse {
                     data: data.into(),
                     status: inner.status,
@@ -281,7 +285,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 })
             }
             Err(status) => {
-                error!("update user {} failed: {status:?}", req.id);
+                error!("update user {user_id} failed: {status:?}");
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }

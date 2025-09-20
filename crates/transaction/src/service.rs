@@ -891,7 +891,7 @@ impl TransactionService for TransactionServiceImpl {
             .ok_or_else(|| Status::invalid_argument("transaction_time invalid"))?;
 
         let domain_req = DomainUpdateTransactionRequest {
-            transaction_id: req.transaction_id,
+            transaction_id: Some(req.transaction_id),
             card_number: req.card_number.clone(),
             amount: req.amount as i64,
             payment_method: req.payment_method.clone(),

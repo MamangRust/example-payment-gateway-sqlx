@@ -45,7 +45,7 @@ impl WithdrawService {
                 "{}/withdraws/stats/status/success/monthly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .send()
             .await?
@@ -66,7 +66,7 @@ impl WithdrawService {
                 "{}/withdraws/stats/status/success/yearly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -88,7 +88,7 @@ impl WithdrawService {
                 "{}/withdraws/stats/status/failed/monthly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .send()
             .await?
@@ -109,7 +109,7 @@ impl WithdrawService {
                 "{}/withdraws/stats/status/failed/yearly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -132,7 +132,7 @@ impl WithdrawService {
                 "{}/withdraws/stats/status/success/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .query(&[("card_number", card_number)])
             .send()
@@ -155,7 +155,7 @@ impl WithdrawService {
                 "{}/withdraws/stats/status/success/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -179,7 +179,7 @@ impl WithdrawService {
                 "{}/withdraws/stats/status/failed/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .query(&[("card_number", card_number)])
             .send()
@@ -202,7 +202,7 @@ impl WithdrawService {
                 "{}/withdraws/stats/status/failed/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -221,7 +221,7 @@ impl WithdrawService {
         let response = self
             .client
             .get(format!("{}/withdraws/stats/amount/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -239,7 +239,7 @@ impl WithdrawService {
         let response = self
             .client
             .get(format!("{}/withdraws/stats/amount/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -261,7 +261,7 @@ impl WithdrawService {
                 "{}/withdraws/stats/amount/monthly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -284,7 +284,7 @@ impl WithdrawService {
                 "{}/withdraws/stats/amount/yearly/by-card",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .query(&[("card_number", card_number)])
             .send()
@@ -303,7 +303,7 @@ impl WithdrawService {
         let response = self
             .client
             .get(format!("{}/withdraws", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("page", req.page), ("page_size", req.page_size)])
             .query(&[(
                 "search",
@@ -331,7 +331,7 @@ impl WithdrawService {
         let response = self
             .client
             .get(format!("{}/withdraws/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseWithdraw>()
@@ -351,7 +351,7 @@ impl WithdrawService {
                 "{}/withdraws/by-card/{}",
                 self.base_url, req.card_number
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseWithdraw>()
@@ -368,7 +368,7 @@ impl WithdrawService {
         let response = self
             .client
             .get(format!("{}/withdraws/active", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -390,7 +390,7 @@ impl WithdrawService {
         let response = self
             .client
             .post(format!("{}/withdraws/create", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                "card_number": req.card_number,
                 "withdraw_amount": req.withdraw_amount,
@@ -412,7 +412,7 @@ impl WithdrawService {
         let response = self
             .client
             .post(format!("{}/withdraws/update/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                 "card_number": req.card_number,
                 "withdraw_amount": req.withdraw_amount,
@@ -434,7 +434,7 @@ impl WithdrawService {
         let response = self
             .client
             .post(format!("{}/withdraws/trash/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseWithdraw>()

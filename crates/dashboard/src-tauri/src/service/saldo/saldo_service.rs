@@ -40,7 +40,7 @@ impl SaldoService {
                 "{}/saldos/stats/total-balance/monthly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year), ("month", month)])
             .send()
             .await?
@@ -61,7 +61,7 @@ impl SaldoService {
                 "{}/saldos/stats/total-balance/yearly",
                 self.base_url
             ))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -79,7 +79,7 @@ impl SaldoService {
         let response = self
             .client
             .get(format!("{}/saldos/stats/balance/monthly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -97,7 +97,7 @@ impl SaldoService {
         let response = self
             .client
             .get(format!("{}/saldos/stats/balance/yearly", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("year", year)])
             .send()
             .await?
@@ -115,7 +115,7 @@ impl SaldoService {
         let response = self
             .client
             .get(format!("{}/saldos", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -139,7 +139,7 @@ impl SaldoService {
         let response = self
             .client
             .get(format!("{}/saldos/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseSaldo>()
@@ -156,7 +156,7 @@ impl SaldoService {
         let response = self
             .client
             .get(format!("{}/saldos/active", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[
                 ("page", req.page.to_string()),
                 ("page_size", req.page_size.to_string()),
@@ -178,7 +178,7 @@ impl SaldoService {
         let response = self
             .client
             .post(format!("{}/saldos/create", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                 "card_number": req.card_number,
                 "total_balance": req.total_balance,
@@ -199,7 +199,7 @@ impl SaldoService {
         let response = self
             .client
             .post(format!("{}/saldos/update/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .json(&json!({
                  "card_number": req.card_number,
                 "total_balance": req.total_balance,
@@ -220,7 +220,7 @@ impl SaldoService {
         let response = self
             .client
             .post(format!("{}/saldos/trash/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseSaldo>()

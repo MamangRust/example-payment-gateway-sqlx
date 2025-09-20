@@ -1,7 +1,0 @@
-{"timestamp":"2025-09-13T08:55:01.577882Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
-{"timestamp":"2025-09-13T08:55:01.583890Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50057"},"target":"transaction"}
-{"timestamp":"2025-09-13T09:40:28.177653Z","level":"INFO","fields":{"message":"🛑 Shutdown signal received."},"target":"transaction"}
-{"timestamp":"2025-09-13T09:48:26.422311Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
-{"timestamp":"2025-09-13T09:48:26.428494Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50057"},"target":"transaction"}
-{"timestamp":"2025-09-13T21:44:09.500717Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
-{"timestamp":"2025-09-13T21:44:09.507501Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50057"},"target":"transaction"}

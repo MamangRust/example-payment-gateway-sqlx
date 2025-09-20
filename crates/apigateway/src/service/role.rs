@@ -263,15 +263,16 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         &self,
         request: &DomainUpdateRoleRequest,
     ) -> Result<ApiResponse<RoleResponse>, AppErrorHttp> {
-        info!(
-            "updating role id: {} with name: {}",
-            request.id, request.name
-        );
+        let role_id = request.id.ok_or_else(|| {
+            AppErrorHttp(AppErrorGrpc::Unhandled("role_id is required".to_string()))
+        })?;
+
+        info!("updating role id: {role_id} with name: {}", request.name);
 
         let mut client = self.client.lock().await;
 
         let grpc_req = Request::new(UpdateRoleRequest {
-            id: request.id,
+            id: role_id,
             name: request.name.clone(),
         });
 
@@ -279,15 +280,15 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
             Ok(response) => {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
-                    error!("update role {} - data missing in gRPC response", request.id);
+                    error!("update role {role_id} - data missing in gRPC response");
                     AppErrorHttp(AppErrorGrpc::Unhandled(
                         "Role data is missing in gRPC response".into(),
                     ))
                 })?;
 
                 info!(
-                    "role {} updated successfully to name '{}'",
-                    request.id, request.name
+                    "role {role_id} updated successfully to name '{}'",
+                    request.name
                 );
                 Ok(ApiResponse {
                     data: data.into(),
@@ -296,7 +297,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
                 })
             }
             Err(status) => {
-                error!("update role {} failed: {status:?}", request.id);
+                error!("update role {role_id} failed: {status:?}");
                 Err(AppErrorHttp(AppErrorGrpc::from(status)))
             }
         }

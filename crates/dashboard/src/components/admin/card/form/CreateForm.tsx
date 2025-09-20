@@ -269,7 +269,7 @@ const CreateCardForm = forwardRef<HTMLFormElement, CardCreateFormProps>(
           </Label>
           <Input
             id="expireDate"
-            type="text"
+            type="date"
             placeholder="MM/YY"
             className="mt-1"
             {...register("expire_date")}

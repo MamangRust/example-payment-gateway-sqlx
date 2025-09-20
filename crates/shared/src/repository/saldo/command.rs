@@ -71,6 +71,10 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
     async fn update(&self, req: &UpdateSaldoRequest) -> Result<SaldoModel, RepositoryError> {
         let mut conn = self.get_conn().await?;
 
+        let saldo_id = req
+            .saldo_id
+            .ok_or_else(|| RepositoryError::Custom("saldo_id is required".into()))?;
+
         let saldo = sqlx::query_as!(
             SaldoModel,
             r#"
@@ -90,7 +94,7 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
                 updated_at,
                 deleted_at
             "#,
-            req.saldo_id,
+            saldo_id,
             req.card_number,
             req.total_balance as i32
         )
@@ -98,11 +102,11 @@ impl SaldoCommandRepositoryTrait for SaldoCommandRepository {
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
-                error!("❌ Saldo not found or deleted: {}", req.saldo_id);
+                error!("❌ Saldo not found or deleted: {saldo_id}");
                 RepositoryError::NotFound
             }
             _ => {
-                error!("❌ Failed to update saldo {}: {e:?}", req.saldo_id);
+                error!("❌ Failed to update saldo {saldo_id}: {e:?}");
                 RepositoryError::Sqlx(e)
             }
         })?;

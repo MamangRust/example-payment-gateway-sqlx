@@ -82,6 +82,10 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
     ) -> Result<MerchantModel, RepositoryError> {
         let mut conn = self.get_conn().await?;
 
+        let merchant_id = request
+            .merchant_id
+            .ok_or_else(|| RepositoryError::Custom("merchant_id is required".into()))?;
+
         let merchant = sqlx::query_as!(
             MerchantModel,
             r#"
@@ -111,17 +115,11 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
-                error!(
-                    "❌ Merchant not found or already deleted: {}",
-                    request.merchant_id
-                );
+                error!("❌ Merchant not found or already deleted: {merchant_id}");
                 RepositoryError::NotFound
             }
             _ => {
-                error!(
-                    "❌ Failed to update merchant {}: {e:?}",
-                    request.merchant_id,
-                );
+                error!("❌ Failed to update merchant {merchant_id}: {e:?}",);
                 RepositoryError::Sqlx(e)
             }
         })?;
@@ -135,10 +133,11 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
     ) -> Result<MerchantModel, RepositoryError> {
         let mut conn = self.get_conn().await?;
 
-        info!(
-            "🔄 Updating status for merchant ID: {}",
-            request.merchant_id
-        );
+        let merchant_id = request
+            .merchant_id
+            .ok_or_else(|| RepositoryError::Custom("merchant_id is required".into()))?;
+
+        info!("🔄 Updating status for merchant ID: {merchant_id}");
 
         let merchant = sqlx::query_as!(
             MerchantModel,
@@ -163,17 +162,11 @@ impl MerchantCommandRepositoryTrait for MerchantCommandRepository {
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
-                error!(
-                    "❌ Merchant not found or already deleted: {}",
-                    request.merchant_id
-                );
+                error!("❌ Merchant not found or already deleted: {merchant_id}",);
                 RepositoryError::NotFound
             }
             _ => {
-                error!(
-                    "❌ Failed to update status for merchant {}: {e:?}",
-                    request.merchant_id,
-                );
+                error!("❌ Failed to update status for merchant {merchant_id}: {e:?}",);
                 RepositoryError::Sqlx(e)
             }
         })?;

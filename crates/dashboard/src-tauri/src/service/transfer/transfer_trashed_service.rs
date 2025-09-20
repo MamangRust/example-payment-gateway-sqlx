@@ -35,7 +35,7 @@ impl TransferTrashedService {
         let response = self
             .client
             .get(format!("{}/transfers/trashed", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .query(&[("page", req.page), ("page_size", req.page_size)])
             .query(&[(
                 "search",
@@ -61,7 +61,7 @@ impl TransferTrashedService {
         let response = self
             .client
             .post(format!("{}/transfers/restore/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransfer>()
@@ -78,7 +78,7 @@ impl TransferTrashedService {
         let response = self
             .client
             .post(format!("{}/transfers/delete/{}", self.base_url, req.id))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransferDelete>()
@@ -94,7 +94,7 @@ impl TransferTrashedService {
         let response = self
             .client
             .post(format!("{}/transfers/restore-all", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransferAll>()
@@ -110,7 +110,7 @@ impl TransferTrashedService {
         let response = self
             .client
             .post(format!("{}/transfers/permanent-all", self.base_url))
-            .header("Authorization", format!("Bearer {}", access_token))
+            .bearer_auth(access_token)
             .send()
             .await?
             .json::<ApiResponseTransferAll>()
