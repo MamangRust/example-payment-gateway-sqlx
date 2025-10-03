@@ -1,34 +1,43 @@
 # Example Payment Gateway System (Modular Monolith)
 
+Proyek ini adalah contoh implementasi sistem payment gateway yang dibangun dengan arsitektur **modular monolith**. Backend dikembangkan menggunakan **Rust** dengan runtime `tokio`, `tonic` untuk gRPC, dan `sqlx` untuk interaksi database. Dashboard frontend dibangun dengan **React**, **TypeScript**, **Vite**, dan **Tauri** untuk versi desktop.
 
-This project is an example implementation of a payment gateway system built with a **modular monolith** architecture. The backend is developed in **Rust** using the `tokio` runtime, `tonic` for gRPC, and `sqlx` for database interaction. The frontend dashboard is built with **React**, **TypeScript**, **Vite**, and **Tauri** for the desktop version.
 
-## Application Preview
+## Tentang Project Ini
 
-Here are a few screenshots of the application:
+Proyek ini merupakan sebuah contoh sistem *payment gateway* yang dirancang untuk mensimulasikan proses transaksi keuangan digital. Dibangun dengan arsitektur monolit modular, sistem ini memisahkan setiap domain bisnis (seperti pengguna, saldo, transaksi) ke dalam modul-modul (crate) yang independen namun tetap berada dalam satu basis kode. Komunikasi antar modul dilakukan secara efisien menggunakan gRPC.
 
-**Main Dashboard:**
-![Example Dashboard](./images/example-dashboard.png)
+Tujuan utama dari proyek ini adalah untuk menyediakan contoh nyata penerapan arsitektur modern di ekosistem Rust, lengkap dengan backend, frontend, dan versi aplikasi desktop.
 
-**API Documentation (Swagger UI):**
-![Swagger UI](./images/swagger-ui.png)
+## Fitur Utama
 
-## Architecture Overview
+- **Manajemen Pengguna & Autentikasi berbasis JWT**: Proses registrasi, login, dan manajemen sesi pengguna yang aman.
+- **Kontrol Akses Berbasis Peran (RBAC)**: Pembatasan akses fitur berdasarkan peran pengguna (misalnya, admin vs. pengguna biasa).
+- **Manajemen Dompet Digital (Saldo)**: Setiap pengguna memiliki saldo digital yang dapat diisi ulang dan digunakan untuk transaksi.
+- **Transaksi Keuangan**:
+  - **Top-up**: Menambah saldo dari sumber eksternal.
+  - **Transfer**: Mengirim saldo antar pengguna di dalam sistem.
+  - **Withdraw**: Menarik saldo ke rekening eksternal.
+- **Manajemen Kartu Pembayaran**: Pengguna dapat menautkan dan mengelola kartu pembayaran mereka.
+- **Dashboard Administratif**: Antarmuka untuk memantau dan mengelola aktivitas sistem.
+- **Komunikasi Antar-Layanan**: Komunikasi yang efisien dan *type-safe* dengan gRPC.
 
-This system is designed as a modular monolith. While it resides in a single repository, it is composed of multiple services (crates) that communicate with each other via gRPC. This design provides clear separation of concerns while simplifying deployment and development compared to a full microservices setup.
+## Arsitektur
 
-The `APIGateway` is the single entry point for all external HTTP requests. It authenticates requests and routes them to the appropriate internal service over gRPC. All services share a single PostgreSQL database.
+Sistem ini dirancang sebagai monolit modular. Meskipun berada dalam satu repositori, sistem ini terdiri dari beberapa layanan (crate) yang berkomunikasi satu sama lain melalui gRPC. Desain ini memberikan pemisahan tanggung jawab yang jelas sambil menyederhanakan proses deployment dan pengembangan dibandingkan dengan arsitektur microservices penuh.
+
+`APIGateway` adalah satu-satunya titik masuk untuk semua permintaan HTTP eksternal. Gateway ini melakukan autentikasi permintaan dan meneruskannya ke layanan internal yang sesuai melalui gRPC. Semua layanan berbagi satu database PostgreSQL.
 
 ```mermaid
 graph TD
-    subgraph "Client (Web/Desktop)"
+    subgraph "Klien (Web/Desktop)"
         A[Dashboard / API Client]
     end
 
-    subgraph "Payment Gateway System"
+    subgraph "Sistem Payment Gateway"
         B(API Gateway <br> HTTP/REST)
 
-        subgraph "gRPC Services (Internal Modules)"
+        subgraph "Layanan gRPC (Modul Internal)"
             C[Auth Service]
             D[User Service]
             E[Card Service]
@@ -69,107 +78,167 @@ graph TD
     L --> M
 ```
 
-### Services
+## Entity Relationship Diagram (ERD)
 
-- **`apigateway`**: The main gateway that accepts HTTP requests from clients and forwards them to the appropriate service via gRPC.
-- **`auth`**: Manages authentication (login, register) and authorization (token management).
-- **`user`**: Manages user data.
-- **`card`**: Manages payment cards linked to users.
-- **`saldo`**: Manages user digital wallets or balances.
-- **`merchant`**: Manages merchant/store data.
-- **`role`**: Manages user roles and permissions.
-- **`topup`**: Manages the balance top-up process.
-- **`transaction`**: Records and manages transaction history.
-- **`transfer`**: Manages balance transfers between users.
-- **`withdraw`**: Manages the balance withdrawal process.
-- **`genproto`**: A dedicated crate for compiling `.proto` files into Rust code for gRPC.
-- **`dashboard`**: A frontend application (React + Tauri) for administration and data visualization.
+Diagram berikut menggambarkan hubungan antar tabel dalam database.
 
-## Key Features
+```mermaid
+erDiagram
+    users {
+        INT user_id PK
+        VARCHAR firstname
+        VARCHAR lastname
+        VARCHAR email
+        VARCHAR password
+    }
+    roles {
+        INT role_id PK
+        VARCHAR role_name
+    }
+    user_roles {
+        INT user_role_id PK
+        INT user_id FK
+        INT role_id FK
+    }
+    refresh_tokens {
+        INT refresh_token_id PK
+        INT user_id FK
+        VARCHAR token
+        TIMESTAMP expiration
+    }
+    cards {
+        INT card_id PK
+        INT user_id FK
+        VARCHAR card_number
+        VARCHAR card_type
+        DATE expire_date
+    }
+    saldos {
+        INT saldo_id PK
+        VARCHAR card_number FK
+        INT total_balance
+    }
+    merchants {
+        INT merchant_id PK
+        UUID merchant_no
+        VARCHAR name
+        VARCHAR api_key
+        INT user_id FK
+    }
+    topups {
+        INT topup_id PK
+        UUID topup_no
+        VARCHAR card_number FK
+        INT topup_amount
+        VARCHAR topup_method
+    }
+    transactions {
+        INT transaction_id PK
+        UUID transaction_no
+        VARCHAR card_number FK
+        INT amount
+        INT merchant_id FK
+    }
+    transfers {
+        INT transfer_id PK
+        UUID transfer_no
+        VARCHAR transfer_from FK
+        VARCHAR transfer_to FK
+        INT transfer_amount
+    }
+    withdraws {
+        INT withdraw_id PK
+        UUID withdraw_no
+        VARCHAR card_number FK
+        INT withdraw_amount
+    }
 
-- User Management & JWT-based Authentication.
-- Role-Based Access Control (RBAC).
-- Digital Wallet Management.
-- Financial Transactions: Top-up, Transfer, and Withdraw.
-- Payment Card Management.
-- Administrative Dashboard.
-- Efficient, type-safe inter-service communication with gRPC.
+    users ||--o{ user_roles : "has"
+    roles ||--o{ user_roles : "has"
+    users ||--o{ refresh_tokens : "has"
+    users ||--o{ cards : "has"
+    users ||--o{ merchants : "owns"
+    cards ||--o{ saldos : "has"
+    cards ||--o{ topups : "has"
+    cards ||--o{ transactions : "has"
+    merchants ||--o{ transactions : "receives"
+    cards ||--o{ transfers : "sends"
+    cards ||--o{ transfers : "receives"
+    cards ||--o{ withdraws : "has"
+```
 
-## Tech Stack
+## Teknologi yang Digunakan
 
 **Backend:**
-- **Language**: Rust (Stable)
+- **Bahasa**: Rust (Stable)
 - **Async Runtime**: `tokio`
-- **Communication**: `tonic` (gRPC) & `prost`
-- **Database ORM**: `sqlx` (with PostgreSQL)
+- **Komunikasi**: `tonic` (gRPC) & `prost`
+- **Database ORM**: `sqlx` (dengan PostgreSQL)
 - **Web Framework (API Gateway)**: `axum`
 - **Logging**: `tracing`
-- **Validation**: `validator`
+- **Validasi**: `validator`
 
 **Frontend (Dashboard):**
 - **Framework**: React.js
-- **Language**: TypeScript
+- **Bahasa**: TypeScript
 - **Build Tool**: Vite
 - **Styling**: Tailwind CSS
-- **Desktop App**: Tauri
+- **Aplikasi Desktop**: Tauri
 
-**Other:**
+**Lainnya:**
 - **Database**: PostgreSQL
-- **API Definition**: Protocol Buffers (gRPC)
-- **Containerization**: Docker (via `docker-compose.yml`)
+- **Definisi API**: Protocol Buffers (gRPC)
 
-## Prerequisites
+## Prasyarat
 
-Before you begin, ensure you have the following software installed:
+Sebelum memulai, pastikan perangkat lunak berikut sudah terinstal:
 - [Rust & Cargo](https://www.rust-lang.org/tools/install)
-- [Node.js & npm](https://nodejs.org/) (or `bun`)
+- [Node.js & npm](https://nodejs.org/) (atau `bun`)
 - [`sqlx-cli`](https://github.com/launchbadge/sqlx/tree/main/sqlx-cli) (`cargo install sqlx-cli`)
 - [`protoc`](https://grpc.io/docs/protoc-installation/) (Protocol Buffers Compiler)
 
-## Installation & Setup
+## Instalasi & Setup (Lokal)
 
-1.  **Clone the Repository**
+1.  **Clone Repositori**
     ```bash
     git clone https://github.com/MamangRust/example-payment-gateway-sqlx.git
     cd example-payment-gateway-sqlx
     ```
 
-2.  **Configure Environment Variables**
-    Copy the `.env.example` file (if it exists) or create a new `.env` file in the project root and fill in your local configuration details.
+2.  **Konfigurasi Variabel Lingkungan**
+    Salin file `.env.example` (jika ada) atau buat file `.env` baru di root proyek dan isi detail konfigurasi lokal Anda.
 
     ```env
-    # Example .env content
+    # Contoh isi file .env
     DATABASE_URL="postgres://user:password@localhost:5432/payment_gateway"
     APP_PORT=8000
-    # URLs for each service...
+    # URL untuk setiap layanan...
     AUTH_SERVICE_URL="http://127.0.0.1:50051"
     USER_SERVICE_URL="http://127.0.0.1:50052"
-    # ...and so on
+    # ...dan seterusnya
     ```
 
-
-
-3.  **Run Database Migrations**
-    Ensure the `DATABASE_URL` in your `.env` file is correct, then run the migrations.
+3.  **Jalankan Migrasi Database**
+    Pastikan `DATABASE_URL` di file `.env` Anda sudah benar, lalu jalankan migrasi.
     ```bash
     sqlx migrate run
     ```
 
-4.  **Build Protobuf Definitions**
-    Compile the `.proto` files to be used by all services.
+4.  **Build Definisi Protobuf**
+    Kompilasi file `.proto` untuk digunakan oleh semua layanan.
     ```bash
     cargo build -p genproto
     ```
 
-5.  **Build All Backend Services**
+5.  **Build Semua Layanan Backend**
     ```bash
     cargo build --workspace
     ```
 
-## Running the Application
+## Menjalankan Aplikasi
 
-1.  **Run Backend Services**
-    Open multiple terminal tabs and run each service individually.
+1.  **Jalankan Layanan Backend**
+    Buka beberapa tab terminal dan jalankan setiap layanan secara terpisah.
 
     ```bash
     # Terminal 1: API Gateway
@@ -181,28 +250,38 @@ Before you begin, ensure you have the following software installed:
     # Terminal 3: User Service
     cargo run -p user
 
-    # ...run other services as needed
+    # ...jalankan layanan lain sesuai kebutuhan
     ```
 
-2.  **Run the Frontend Dashboard**
-    Open a new terminal in the dashboard directory.
+2.  **Jalankan Dashboard Frontend**
+    Buka terminal baru di direktori `crates/dashboard`.
 
     ```bash
     cd crates/dashboard
     npm install
     npm run dev
     ```
-    The frontend application will be available at `http://localhost:1420`.
+    Aplikasi frontend akan tersedia di `http://localhost:1420`.
 
-3.  **Run the Dashboard as a Desktop App (Tauri)**
+3.  **Jalankan Dashboard sebagai Aplikasi Desktop (Tauri)**
     ```bash
     cd crates/dashboard
     npm install
     npm run tauri dev
     ```
 
-## API Documentation
+## Dokumentasi API
 
-Once the `apigateway` is running, the API documentation (generated with Swagger UI) can be accessed at:
+Setelah `apigateway` berjalan, dokumentasi API (dihasilkan dengan Swagger UI) dapat diakses di:
 [http://127.0.0.1:5000/swagger-ui/](http://127.0.0.1:5000/swagger-ui/)
 
+
+## Tampilan Aplikasi
+
+Berikut adalah beberapa tangkapan layar dari aplikasi:
+
+**Dashboard Utama:**
+![Example Dashboard](./images/example-dashboard.png)
+
+**Dokumentasi API (Swagger UI):**
+![Swagger UI](./images/swagger-ui.png)

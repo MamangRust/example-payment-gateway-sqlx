@@ -26,3 +26,8 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 serde = { version = "1.0.214", features = ["derive"] }
 reqwest = { version = "0.12.12", features = ["cookies", "json"] }
 chrono = { version = "0.4.39", features = ["serde"] }
+openssl.workspace = true
+
+
+[features]
+vendored-openssl = []
