@@ -6,11 +6,14 @@ on:
     tags:
       - v*
 
+defaults:
+  run:
+    working-directory: dashboard
+
 jobs:
   publish-tauri:
     permissions:
       contents: write
-
     runs-on: ubuntu-22.04
 
     steps:
@@ -40,9 +43,10 @@ jobs:
       - name: Build & Publish with Tauri
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.MY_TOKEN }} 
+          GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}
         with:
           tauriScript: "npm run tauri"
+          projectPath: "dashboard"
           tagName: app-v__VERSION__
           releaseName: "App v__VERSION__"
           releaseBody: "See the assets to download this version and install."
