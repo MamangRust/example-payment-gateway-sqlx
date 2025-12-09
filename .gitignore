@@ -2,3 +2,9 @@
 .sqlx
 .vscode
 .idea
+clippy.json
+clippy.md
+clipy.py
+k6
+hurl
+observability/grafana

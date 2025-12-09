@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transaction
+  namespace: payment-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transaction
+  template:
+    metadata:
+      labels:
+        app: transaction
+    spec:
+      containers:
+      - name: transaction
+        image: payment-gateway-sqlx/transaction:latest
+        imagePullPolicy: Never
+        envFrom:
+        - configMapRef:
+            name: app-env-config
+        ports:
+        - containerPort: 50057
+        volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+      volumes:
+      - name: logs
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction
+  namespace: payment-gateway
+spec:
+  selector:
+    app: transaction
+  ports:
+  - name: grpc
+    port: 50057
+    targetPort: 50057
+  - name: metrics
+    port: 8087
+    targetPort: 8087
+  type: ClusterIP

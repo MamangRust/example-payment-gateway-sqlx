@@ -1,0 +1,7 @@
+{"timestamp":"2025-12-02T02:55:46.381428Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2025-12-02T02:55:46.385577Z","level":"INFO","fields":{"message":"Creating redis client"},"target":"shared::config::redis"}
+{"timestamp":"2025-12-02T02:55:46.386468Z","level":"INFO","fields":{"message":"Pinging redis"},"target":"shared::config::redis"}
+{"timestamp":"2025-12-02T02:55:46.386642Z","level":"INFO","fields":{"message":"Pinged redis"},"target":"shared::config::redis"}
+{"timestamp":"2025-12-02T02:55:46.386808Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50054"},"target":"role"}
+{"timestamp":"2025-12-02T02:55:46.386857Z","level":"INFO","fields":{"message":"🔧 Starting metrics server on 0.0.0.0:8084"},"target":"role"}
+{"timestamp":"2025-12-02T02:55:46.386939Z","level":"INFO","fields":{"message":"Starting metrics server on 0.0.0.0:8084"},"target":"role"}

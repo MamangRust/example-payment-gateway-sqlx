@@ -1,0 +1,411 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: example_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: example_sqlx_payment_gateway
+    volumes:
+      - postgres_payment_tonic-data:/var/lib/postgresql/data
+    networks:
+      - app_payment_tonic
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d example_sqlx_payment_gateway"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4
+    container_name: redis
+    command: ["redis-server", "--requirepass", "dragon_knight"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_payment_tonic-data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger-payment-tonic
+    ports:
+      - "16686:16686"
+      - "14250:14250"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter-tonic
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - '/:/host:ro,rslave'
+    networks:
+      - app_payment_tonic
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus-payment-tonic
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-payment-tonic
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      - grafana-payment-tonic-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector-tonic
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "13133:13133"
+      - "8889:8889"
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otel-collector-config.yaml:ro
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    ports:
+      - "9093:9093"
+    networks:
+      - app_payment_tonic
+
+  loki:
+    container_name: loki
+    image: grafana/loki:2.9.0
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_payment_tonic_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - app_payment_tonic
+
+  promtail:
+    container_name: promtail
+    image: grafana/promtail:2.9.0
+    volumes:
+      - ./observability/promtail-config.yaml:/etc/promtail/config.yaml
+      - ./logs:/var/log/app
+    command: -config.file=/etc/promtail/config.yaml
+    networks:
+      - app_payment_tonic
+
+  auth:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/auth:latest
+    container_name: auth_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50051:50051
+      - 8081:8081
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+  user:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/user:latest
+    container_name: user_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50059:50059
+      - 8089:8089
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+  card:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/card:latest
+    container_name: card_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50052:50052
+      - 8082:8082
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+  merchant:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/merchant:latest
+    container_name: merchant_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50053:50053
+      - 8083:8083
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+  role:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/role:latest
+    container_name: role_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50054:50054
+      - 8084:8084
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+  saldo:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/saldo:latest
+    container_name: saldo_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50055:50055
+      - 8085:8085
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+  transaction:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/transaction:latest
+    container_name: transaction_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50057:50057
+      - 8087:8087
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+  topup:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/topup:latest
+    container_name: topup_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50056:50056
+      - 8086:8086
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+  transfer:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/transfer:latest
+    container_name: transfer_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50058:50058
+      - 8088:8088
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+  withdraw:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/withdraw:latest
+    container_name: withdraw_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50060:50060
+      - 8090:8090
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+  apigateway:
+    image: ghcr.io/mamangrust/example-payment-gateway-sqlx/apigateway:latest
+    container_name: apigateway_production
+    restart: unless-stopped
+    env_file:
+        - .env
+    ports:
+      - "5000:5000"
+    depends_on:
+      otel-collector:
+        condition: service_started
+      auth:
+        condition: service_started
+      user:
+        condition: service_started
+      role:
+        condition: service_started
+      card:
+        condition: service_started
+      merchant:
+        condition: service_started
+      saldo:
+        condition: service_started
+      topup:
+        condition: service_started
+      transaction:
+        condition: service_started
+      transfer:
+        condition: service_started
+      withdraw:
+        condition: service_started
+      db:
+        condition: service_healthy
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic
+
+
+networks:
+  app_payment_tonic:
+    driver: bridge
+
+volumes:
+  grafana-payment-tonic-data:
+  postgres_payment_tonic-data:
+  redis_payment_tonic-data:
+  loki_payment_tonic_data:

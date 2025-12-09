@@ -1,2 +1,0 @@
-{"timestamp":"2025-09-20T03:36:26.971515Z","level":"INFO","fields":{"message":"relation \"_sqlx_migrations\" already exists, skipping"},"target":"sqlx::postgres::notice"}
-{"timestamp":"2025-09-20T03:36:26.977445Z","level":"INFO","fields":{"message":"Starting gRPC server on 0.0.0.0:50052"},"target":"card"}

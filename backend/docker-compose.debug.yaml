@@ -1,0 +1,452 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: example_postgres_debug
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: example_sqlx_payment_gateway
+    volumes:
+      - postgres_payment_tonic-debug-data:/var/lib/postgresql/data
+    networks:
+      - app_payment_tonic_debug
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d example_sqlx_payment_gateway" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: pgbouncer_debug
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: example_sqlx_payment_gateway
+
+      AUTH_TYPE: scram-sha-256
+
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 250
+      DEFAULT_POOL_SIZE: 15
+      MIN_POOL_SIZE: 5
+      RESERVE_POOL_SIZE: 5
+      RESERVE_POOL_TIMEOUT: 5
+      SERVER_RESET_QUERY: DISCARD ALL
+
+      ADMIN_USERS: postgres
+      STATS_USERS: postgres
+    ports:
+      - "6432:5432"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app_payment_tonic_debug
+    healthcheck:
+      test: "pg_isready -h db -p 5432 -U postgres"
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+  redis:
+    image: redis:7.4
+    container_name: redis_debug
+    command: [ "redis-server", "--requirepass", "dragon_knight" ]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_payment_tonic-debug-data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger-payment-tonic_debug
+    ports:
+      - "16686:16686"
+      - "14250:14250"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter-tonic_debug
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - '/:/host:ro,rslave'
+    networks:
+      - app_payment_tonic_debug
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus-payment-tonic_debug
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-payment-tonic_debug
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-payment-tonic-debug-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "13133:13133"
+      - "8889:8889"
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otel-collector-config.yaml:ro
+    command: [ "--config=/etc/otel-collector-config.yaml" ]
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager_debug
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    ports:
+      - "9093:9093"
+    networks:
+      - app_payment_tonic_debug
+
+  loki:
+    container_name: loki_debug
+    image: grafana/loki:3.5.8
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_payment_tonic_debug_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - app_payment_tonic_debug
+
+  auth:
+    image: payment-gateway-sqlx/auth:latest
+    container_name: auth_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50051:50051
+      - 8081:8081
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+  user:
+    image: payment-gateway-sqlx/user:latest
+    container_name: user_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50059:50059
+      - 8089:8089
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+  card:
+    image: payment-gateway-sqlx/card:latest
+    container_name: card_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50052:50052
+      - 8082:8082
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+  merchant:
+    image: payment-gateway-sqlx/merchant:latest
+    container_name: merchant_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50053:50053
+      - 8083:8083
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+  role:
+    image: payment-gateway-sqlx/role:latest
+    container_name: role_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50054:50054
+      - 8084:8084
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+  saldo:
+    image: payment-gateway-sqlx/saldo:latest
+    container_name: saldo_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50055:50055
+      - 8085:8085
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+  transaction:
+    image: payment-gateway-sqlx/transaction:latest
+    container_name: transaction_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50057:50057
+      - 8087:8087
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+  topup:
+    image: payment-gateway-sqlx/topup:latest
+    container_name: topup_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50056:50056
+      - 8086:8086
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+  transfer:
+    image: payment-gateway-sqlx/transfer:latest
+    container_name: transfer_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50058:50058
+      - 8088:8088
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+  withdraw:
+    image: payment-gateway-sqlx/withdraw:latest
+    container_name: withdraw_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 50060:50060
+      - 8090:8090
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx_debug
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      apigateway:
+        condition: service_started
+    networks:
+      - app_payment_tonic_debug
+
+  apigateway:
+    image: payment-gateway-sqlx/apigateway:latest
+    container_name: apigateway_debug
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"
+    depends_on:
+      otel-collector:
+        condition: service_started
+      auth:
+        condition: service_started
+      user:
+        condition: service_started
+      role:
+        condition: service_started
+      card:
+        condition: service_started
+      merchant:
+        condition: service_started
+      saldo:
+        condition: service_started
+      topup:
+        condition: service_started
+      transaction:
+        condition: service_started
+      transfer:
+        condition: service_started
+      withdraw:
+        condition: service_started
+      db:
+        condition: service_healthy
+    volumes:
+      - ./logs:/var/log/app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app_payment_tonic_debug
+
+networks:
+  app_payment_tonic_debug:
+    driver: bridge
+
+volumes:
+  grafana-payment-tonic-debug-data:
+  postgres_payment_tonic-debug-data:
+  redis_payment_tonic-debug-data:
+  loki_payment_tonic_debug_data:

@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: withdraw
+  namespace: payment-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: withdraw
+  template:
+    metadata:
+      labels:
+        app: withdraw
+    spec:
+      containers:
+      - name: withdraw
+        image: payment-gateway-sqlx/withdraw:latest
+        imagePullPolicy: Never
+        envFrom:
+        - configMapRef:
+            name: app-env-config
+        ports:
+        - containerPort: 50060
+        volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+      volumes:
+      - name: logs
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: withdraw
+  namespace: payment-gateway
+spec:
+  selector:
+    app: withdraw
+  ports:
+  - name: grpc
+    port: 50060
+    targetPort: 50060
+  - name: metrics
+    port: 8090
+    targetPort: 8090
+  type: ClusterIP

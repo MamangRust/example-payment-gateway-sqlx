@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: topup
+  namespace: payment-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: topup
+  template:
+    metadata:
+      labels:
+        app: topup
+    spec:
+      containers:
+      - name: topup
+        image: payment-gateway-sqlx/topup:latest
+        imagePullPolicy: Never
+        envFrom:
+        - configMapRef:
+            name: app-env-config
+        ports:
+        - containerPort: 50056
+        volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+      volumes:
+      - name: logs
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: topup
+  namespace: payment-gateway
+spec:
+  selector:
+    app: topup
+  ports:
+  - name: grpc
+    port: 50056
+    targetPort: 50056
+  - name: metrics
+    port: 8086
+    targetPort: 8086
+  type: ClusterIP

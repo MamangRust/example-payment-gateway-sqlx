@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: merchant
+  namespace: payment-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: merchant
+  template:
+    metadata:
+      labels:
+        app: merchant
+    spec:
+      containers:
+      - name: merchant
+        image: payment-gateway-sqlx/merchant:latest
+        imagePullPolicy: Never
+        envFrom:
+        - configMapRef:
+            name: app-env-config
+        ports:
+        - containerPort: 50053
+        volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+      volumes:
+      - name: logs
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: merchant
+  namespace: payment-gateway
+spec:
+  selector:
+    app: merchant
+  ports:
+  - name: grpc
+    port: 50053
+    targetPort: 50053
+  - name: metrics
+    port: 8083
+    targetPort: 8083
+  type: ClusterIP

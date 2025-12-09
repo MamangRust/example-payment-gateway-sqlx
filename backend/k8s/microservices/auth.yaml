@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  namespace: payment-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      containers:
+      - name: auth
+        image: payment-gateway-sqlx/auth:latest
+        imagePullPolicy: Never
+        envFrom:
+        - configMapRef:
+            name: app-env-config
+        ports:
+        - containerPort: 50051
+        volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+      volumes:
+      - name: logs
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth
+  namespace: payment-gateway
+spec:
+  selector:
+    app: auth
+  ports:
+  - name: grpc
+    port: 50051
+    targetPort: 50051
+  - name: metrics
+    port: 8081
+    targetPort: 8081
+  type: ClusterIP

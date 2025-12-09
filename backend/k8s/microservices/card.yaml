@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: card
+  namespace: payment-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: card
+  template:
+    metadata:
+      labels:
+        app: card
+    spec:
+      containers:
+      - name: card
+        image: payment-gateway-sqlx/card:latest
+        imagePullPolicy: Never
+        envFrom:
+        - configMapRef:
+            name: app-env-config
+        ports:
+        - containerPort: 50052
+        volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+      volumes:
+      - name: logs
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: card
+  namespace: payment-gateway
+spec:
+  selector:
+    app: card
+  ports:
+  - name: grpc
+    port: 50052
+    targetPort: 50052
+  - name: metrics
+    port: 8082
+    targetPort: 8082
+  type: ClusterIP

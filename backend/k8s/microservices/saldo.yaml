@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saldo
+  namespace: payment-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: saldo
+  template:
+    metadata:
+      labels:
+        app: saldo
+    spec:
+      containers:
+      - name: saldo
+        image: payment-gateway-sqlx/saldo:latest
+        imagePullPolicy: Never
+        envFrom:
+        - configMapRef:
+            name: app-env-config
+        ports:
+        - containerPort: 50055
+        volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+      volumes:
+      - name: logs
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: saldo
+  namespace: payment-gateway
+spec:
+  selector:
+    app: saldo
+  ports:
+  - name: grpc
+    port: 50055
+    targetPort: 50055
+  - name: metrics
+    port: 8085
+    targetPort: 8085
+  type: ClusterIP

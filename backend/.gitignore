@@ -1,0 +1,6 @@
+/target
+.sqlx
+.vscode
+.idea
+k6
+hurl
