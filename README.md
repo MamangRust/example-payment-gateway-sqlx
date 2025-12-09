@@ -20,7 +20,6 @@ The primary goal is to provide a comprehensive, real-world reference for buildin
 -   ✅ **Complete Transaction Lifecycle** (Top-up, Transfer, Withdraw, Payment)
 -   ✅ **Payment Card Management**
 -   ✅ **Merchant API Key Management**
--   ✅ **Type-Safe gRPC Communication** between internal modules
 -   ✅ **Comprehensive Observability** with metrics, logging, and distributed tracing
 -   ✅ **Containerized Deployment** with Docker and Kubernetes
 -   ✅ **API Documentation** with Swagger UI
@@ -201,7 +200,7 @@ The `docker-compose` and `minikube` setups include a full observability stack. H
 | **Loki**       | `http://localhost:3100`         | Log aggregation system.                                |
 | **Alertmanager**| `http://localhost:9093`        | Manages alerts sent by Prometheus.                     |
 
-![Example Dashboard](./images/example-dashboard.png)
+![Example Dashboard](./backend/images/example-dashboard.png)
 
 ## API Documentation
 
@@ -209,7 +208,7 @@ The API Gateway provides OpenAPI documentation via Swagger UI. Once the system i
 
 -   `http://localhost:5000/swagger-ui/`
 
-![Swagger UI](./images/swagger-ui.png)
+![Swagger UI](./backend/images/swagger-ui.png)
 
 ## Project Structure
 
