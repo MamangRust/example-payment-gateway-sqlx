@@ -1,5 +1,5 @@
 use crate::{
-    middleware::{jwt,  validate::SimpleValidatedJson, rate_limit::rate_limit_middleware},
+    middleware::{jwt, rate_limit::rate_limit_middleware, validate::SimpleValidatedJson},
     state::AppState,
 };
 use axum::{

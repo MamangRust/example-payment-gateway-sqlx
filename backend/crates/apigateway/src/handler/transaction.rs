@@ -1,5 +1,7 @@
 use crate::{
-    middleware::{api_key::ApiKey, jwt, validate::SimpleValidatedJson, rate_limit::rate_limit_middleware},
+    middleware::{
+        api_key::ApiKey, jwt, rate_limit::rate_limit_middleware, validate::SimpleValidatedJson,
+    },
     state::AppState,
 };
 use axum::{

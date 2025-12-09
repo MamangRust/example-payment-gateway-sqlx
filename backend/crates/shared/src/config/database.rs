@@ -17,8 +17,8 @@ impl ConnectionManager {
             .min_connections(min_conn)
             .max_connections(max_conn)
             .acquire_timeout(Duration::from_secs(2))
-            .idle_timeout(Duration::from_secs(300)) 
-            .max_lifetime(Duration::from_secs(1800)) 
+            .idle_timeout(Duration::from_secs(300))
+            .max_lifetime(Duration::from_secs(1800))
             .test_before_acquire(false)
             .connect(connection_string)
             .await

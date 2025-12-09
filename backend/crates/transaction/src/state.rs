@@ -31,7 +31,7 @@ impl AppState {
 
         redis.ping().await.context("Failed to ping Redis server")?;
 
-        let di_container = DependenciesInject::new(pool.clone(),  redis.clone())
+        let di_container = DependenciesInject::new(pool.clone(), redis.clone())
             .context("Failed to initialize dependency injection container")?;
 
         tokio::spawn(run_metrics_collector(system_metrics.clone()));

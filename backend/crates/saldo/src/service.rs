@@ -22,7 +22,6 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use tracing::{error, info, instrument};
 
-
 #[derive(Clone)]
 pub struct SaldoServiceImpl {
     pub di: Arc<DependenciesInject>,
