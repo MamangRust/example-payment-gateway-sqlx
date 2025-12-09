@@ -1,0 +1,84 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                t.topup_id,\n                t.card_number,\n                t.topup_no,\n                t.topup_amount,\n                t.topup_method,\n                t.topup_time,\n                t.status,\n                t.created_at,\n                t.updated_at,\n                t.deleted_at,\n                COUNT(*) OVER() AS total_count\n            FROM topups t\n            WHERE deleted_at IS NULL\n              AND ($1::TEXT IS NULL OR \n                   t.card_number ILIKE '%' || $1 || '%' OR \n                   t.topup_no::TEXT ILIKE '%' || $1 || '%' OR \n                   t.topup_method ILIKE '%' || $1 || '%' OR\n                   t.status ILIKE '%' || $1 || '%')\n            ORDER BY t.topup_time DESC\n            LIMIT $2 OFFSET $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "topup_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "topup_no",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "topup_amount",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "topup_method",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "topup_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 9,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 10,
+        "name": "total_count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "e9e8c4133a3ca67d1823ed6dedd2381051d2db7bd740ddef77cb60b4609adef7"
+}

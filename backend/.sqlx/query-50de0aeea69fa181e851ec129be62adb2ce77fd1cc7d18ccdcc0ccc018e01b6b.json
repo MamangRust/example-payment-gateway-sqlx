@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE roles\n            SET deleted_at = NULL\n            WHERE deleted_at IS NOT NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "50de0aeea69fa181e851ec129be62adb2ce77fd1cc7d18ccdcc0ccc018e01b6b"
+}

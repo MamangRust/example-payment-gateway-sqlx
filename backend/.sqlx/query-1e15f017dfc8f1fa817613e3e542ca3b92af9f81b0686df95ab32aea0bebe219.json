@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT SUM(t.topup_amount) AS total_topup_amount\n            FROM topups t\n            JOIN cards c ON t.card_number = c.card_number\n            WHERE t.deleted_at IS NULL \n              AND c.deleted_at IS NULL \n              AND c.card_number = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total_topup_amount",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1e15f017dfc8f1fa817613e3e542ca3b92af9f81b0686df95ab32aea0bebe219"
+}

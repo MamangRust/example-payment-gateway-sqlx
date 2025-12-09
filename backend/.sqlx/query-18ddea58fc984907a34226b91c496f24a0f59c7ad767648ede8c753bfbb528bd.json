@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO transactions (\n            card_number,\n            amount,\n            payment_method,\n            merchant_id,\n            transaction_time,\n            status,\n            created_at,\n            updated_at\n        )\n        VALUES ($1, $2, $3, $4, $5, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n        RETURNING\n            transaction_id ,\n            card_number,\n            transaction_no,\n            amount as \"amount!\",\n            payment_method,\n            merchant_id,\n            transaction_time,\n            status,\n            created_at,\n            updated_at,\n            deleted_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "transaction_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "transaction_no",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "amount!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "payment_method",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "merchant_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "transaction_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 10,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int4",
+        "Varchar",
+        "Int4",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "18ddea58fc984907a34226b91c496f24a0f59c7ad767648ede8c753bfbb528bd"
+}

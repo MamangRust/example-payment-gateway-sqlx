@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM topups\n            WHERE topup_id = $1 AND deleted_at IS NOT NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4feb415191bb46c95ac7c2ae13d45a4bdb3698b1f762a3f4ae8d92682e3244be"
+}

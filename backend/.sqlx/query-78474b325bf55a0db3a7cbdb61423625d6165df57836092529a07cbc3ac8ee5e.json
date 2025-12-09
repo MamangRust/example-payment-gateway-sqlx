@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE saldos\n            SET deleted_at = NULL\n            WHERE deleted_at IS NOT NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "78474b325bf55a0db3a7cbdb61423625d6165df57836092529a07cbc3ac8ee5e"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                DELETE FROM merchants\n                WHERE merchant_id = $1 AND deleted_at IS NOT NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "83d37b5f3c9e611b0cc8b0422afbafff37dec0e9b475be87be79abba74c1d77a"
+}

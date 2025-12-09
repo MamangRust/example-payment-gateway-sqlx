@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(SUM(s.withdraw_amount), 0) AS \"total_withdraw_amount!\"\n            FROM withdraws s\n            JOIN cards c ON s.card_number = c.card_number\n            WHERE s.deleted_at IS NULL \n              AND c.deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total_withdraw_amount!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "17408fcc375f86911ce86746573f2fc813f243e02a5ef24d6364e109a83aa4f2"
+}

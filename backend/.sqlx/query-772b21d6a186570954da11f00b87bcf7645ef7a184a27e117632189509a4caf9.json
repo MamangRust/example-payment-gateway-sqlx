@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE withdraws\n            SET\n                deleted_at = NULL\n            WHERE\n                withdraw_id = $1\n                AND deleted_at IS NOT NULL\n            RETURNING\n                withdraw_id,\n                withdraw_no,\n                card_number,\n                withdraw_amount as \"withdraw_amount!\",\n                withdraw_time,\n                status,\n                created_at,\n                updated_at,\n                deleted_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "withdraw_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "withdraw_no",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "withdraw_amount!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "withdraw_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 8,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "772b21d6a186570954da11f00b87bcf7645ef7a184a27e117632189509a4caf9"
+}

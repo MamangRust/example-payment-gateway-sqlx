@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE topups\n            SET\n                status = $2,\n                updated_at = CURRENT_TIMESTAMP\n            WHERE topup_id = $1 AND deleted_at IS NULL\n            RETURNING\n                topup_id,\n                card_number,\n                topup_no,\n                topup_amount as \"topup_amount!\",\n                topup_method,\n                topup_time,\n                status,\n                created_at,\n                updated_at,\n                deleted_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "topup_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "topup_no",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "topup_amount!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "topup_method",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "topup_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 9,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e0213423ea29e083591087cadb89e70ba776e87024f99a5608df0cc8cc6b7a71"
+}

@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE topups\n            SET\n                card_number = $2,\n                topup_amount = $3,\n                topup_method = $4,\n                topup_time = $5,\n                updated_at = CURRENT_TIMESTAMP\n            WHERE topup_id = $1 AND deleted_at IS NULL\n            RETURNING\n                topup_id,\n                card_number,\n                topup_no,\n                topup_amount as \"topup_amount!\",\n                topup_method,\n                topup_time,\n                status,\n                created_at,\n                updated_at,\n                deleted_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "topup_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "topup_no",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "topup_amount!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "topup_method",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "topup_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 9,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Varchar",
+        "Int4",
+        "Varchar",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "7b63132e9ec5929e9a182e18a5a4dbb3ceca97e87bc447721e125f7d41465053"
+}

@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO withdraws (\n                card_number,\n                withdraw_amount,\n                withdraw_time,\n                created_at,\n                updated_at\n            )\n            VALUES ($1, $2, $3, $4, $5)\n            RETURNING\n                withdraw_id,\n                withdraw_no,\n                card_number,\n                withdraw_amount as \"withdraw_amount!\",\n                status,\n                withdraw_time,\n                created_at,\n                updated_at,\n                deleted_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "withdraw_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "withdraw_no",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "withdraw_amount!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "withdraw_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 8,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int4",
+        "Timestamp",
+        "Timestamp",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "370e42a2437d4932e37a667db29f512622d6a58e4311563bded71cb08d7d65c8"
+}

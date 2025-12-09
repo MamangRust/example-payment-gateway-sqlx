@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO saldos (\n                card_number,\n                total_balance,\n                created_at,\n                updated_at\n            )\n            VALUES ($1, $2, NOW(), NOW())\n            RETURNING\n                saldo_id,\n                card_number,\n                total_balance as \"total_balance!: i64\",\n                NULL::TIMESTAMP AS \"withdraw_time\",\n                NULL::INT AS \"withdraw_amount\",\n                created_at,\n                updated_at,\n                deleted_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "saldo_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "card_number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_balance!: i64",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "withdraw_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 4,
+        "name": "withdraw_amount",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 7,
+        "name": "deleted_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "386feb811ee820e34ebfedd7bcf1fe2711be49d29e6e1dc4c4cf20b04bb792f5"
+}
