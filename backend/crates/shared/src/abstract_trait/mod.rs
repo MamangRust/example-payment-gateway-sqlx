@@ -7,6 +7,7 @@ pub mod rate_limit;
 pub mod refresh_token;
 pub mod role;
 pub mod saldo;
+pub mod session;
 pub mod token;
 pub mod topup;
 pub mod transaction;

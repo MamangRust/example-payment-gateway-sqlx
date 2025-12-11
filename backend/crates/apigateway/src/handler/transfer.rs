@@ -1,5 +1,8 @@
 use crate::{
-    middleware::{jwt, rate_limit::rate_limit_middleware, validate::SimpleValidatedJson},
+    middleware::{
+        jwt, rate_limit::rate_limit_middleware, session::session_middleware,
+        validate::SimpleValidatedJson,
+    },
     state::AppState,
 };
 use axum::{
@@ -12,7 +15,7 @@ use axum::{
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::transfer::http::DynTransferGrpcClientService,
+    abstract_trait::{session::DynSessionMiddleware, transfer::http::DynTransferGrpcClientService},
     domain::{
         requests::{
             transfer::{
@@ -29,7 +32,7 @@ use shared::{
             TransferResponseYearStatusSuccess, TransferYearAmountResponse,
         },
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use std::sync::Arc;
 use utoipa_axum::router::OpenApiRouter;
@@ -49,7 +52,7 @@ use utoipa_axum::router::OpenApiRouter;
 pub async fn get_transfers(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<FindAllTransfers>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -71,7 +74,7 @@ pub async fn get_transfers(
 pub async fn get_transfer(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -93,7 +96,7 @@ pub async fn get_transfer(
 pub async fn get_active_transfers(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<FindAllTransfers>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -115,7 +118,7 @@ pub async fn get_active_transfers(
 pub async fn get_trashed_transfers(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<FindAllTransfers>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -137,7 +140,7 @@ pub async fn get_trashed_transfers(
 pub async fn get_transfers_by_transfer_from(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Path(transfer_from): Path<String>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_transfer_from(&transfer_from).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -159,7 +162,7 @@ pub async fn get_transfers_by_transfer_from(
 pub async fn get_transfers_by_transfer_to(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Path(transfer_to): Path<String>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_transfer_to(&transfer_to).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -182,7 +185,7 @@ pub async fn get_transfers_by_transfer_to(
 pub async fn create_transfer(
     Extension(service): Extension<DynTransferGrpcClientService>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateTransferRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
@@ -207,7 +210,7 @@ pub async fn update_transfer(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTransferRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     body.transfer_id = Some(id);
     match service.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
@@ -230,7 +233,26 @@ pub async fn update_transfer(
 pub async fn trash_transfer_handler(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.trashed(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -252,7 +274,26 @@ pub async fn trash_transfer_handler(
 pub async fn restore_transfer_handler(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -274,7 +315,26 @@ pub async fn restore_transfer_handler(
 pub async fn delete_transfer(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.delete_permanent(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -299,7 +359,26 @@ pub async fn delete_transfer(
 )]
 pub async fn restore_all_transfer_handler(
     Extension(service): Extension<DynTransferGrpcClientService>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -324,7 +403,26 @@ pub async fn restore_all_transfer_handler(
 )]
 pub async fn delete_all_transfer_handler(
     Extension(service): Extension<DynTransferGrpcClientService>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -352,7 +450,26 @@ pub async fn delete_all_transfer_handler(
 pub async fn get_monthly_amounts(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_monthly_amounts(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -374,7 +491,26 @@ pub async fn get_monthly_amounts(
 pub async fn get_yearly_amounts(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_amounts(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -396,7 +532,26 @@ pub async fn get_yearly_amounts(
 pub async fn get_month_status_success(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthStatusTransfer>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_month_status_success(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -418,7 +573,26 @@ pub async fn get_month_status_success(
 pub async fn get_yearly_status_success(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_status_success(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -440,7 +614,26 @@ pub async fn get_yearly_status_success(
 pub async fn get_month_status_failed(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthStatusTransfer>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_month_status_failed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -462,7 +655,26 @@ pub async fn get_month_status_failed(
 pub async fn get_yearly_status_failed(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_status_failed(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -484,7 +696,26 @@ pub async fn get_yearly_status_failed(
 pub async fn get_monthly_amounts_by_sender(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthYearCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_monthly_amounts_sender_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -506,7 +737,26 @@ pub async fn get_monthly_amounts_by_sender(
 pub async fn get_monthly_amounts_by_receiver(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthYearCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_monthly_amounts_receiver_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -528,7 +778,26 @@ pub async fn get_monthly_amounts_by_receiver(
 pub async fn get_yearly_amounts_by_sender(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthYearCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_amounts_sender_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -550,7 +819,26 @@ pub async fn get_yearly_amounts_by_sender(
 pub async fn get_yearly_amounts_by_receiver(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthYearCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_amounts_receiver_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -572,7 +860,26 @@ pub async fn get_yearly_amounts_by_receiver(
 pub async fn get_month_status_success_by_card(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthStatusTransferCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_month_status_success_by_card(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -594,7 +901,26 @@ pub async fn get_month_status_success_by_card(
 pub async fn get_yearly_status_success_by_card(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<YearStatusTransferCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_status_success_by_card(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -616,7 +942,26 @@ pub async fn get_yearly_status_success_by_card(
 pub async fn get_month_status_failed_by_card(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<MonthStatusTransferCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_month_status_failed_by_card(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -638,7 +983,26 @@ pub async fn get_month_status_failed_by_card(
 pub async fn get_yearly_status_failed_by_card(
     Extension(service): Extension<DynTransferGrpcClientService>,
     Query(params): Query<YearStatusTransferCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_status_failed_by_card(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -730,9 +1094,12 @@ pub fn transfer_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/transfers/stats/status/failed/yearly/by-card",
             get(get_yearly_status_failed_by_card),
         )
+        .route_layer(middleware::from_fn(session_middleware))
         .route_layer(middleware::from_fn(rate_limit_middleware))
         .route_layer(middleware::from_fn(jwt::auth))
+        .layer(Extension(app_state.di_container.role_clients.clone()))
         .layer(Extension(app_state.di_container.transfer_clients.clone()))
+        .layer(Extension(app_state.session.clone()))
         .layer(Extension(app_state.rate_limit.clone()))
         .layer(Extension(app_state.jwt_config.clone()))
 }

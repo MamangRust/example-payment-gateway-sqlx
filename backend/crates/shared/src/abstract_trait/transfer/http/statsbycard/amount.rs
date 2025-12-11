@@ -3,7 +3,7 @@ use crate::{
         requests::transfer::MonthYearCardNumber,
         responses::{ApiResponse, TransferMonthAmountResponse, TransferYearAmountResponse},
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -13,20 +13,20 @@ pub trait TransferStatsAmountByCardNumberGrpcClientTrait {
     async fn get_monthly_amounts_sender_bycard(
         &self,
         req: &MonthYearCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, HttpError>;
 
     async fn get_monthly_amounts_receiver_bycard(
         &self,
         req: &MonthYearCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, HttpError>;
 
     async fn get_yearly_amounts_sender_bycard(
         &self,
         req: &MonthYearCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, HttpError>;
 
     async fn get_yearly_amounts_receiver_bycard(
         &self,
         req: &MonthYearCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, HttpError>;
 }

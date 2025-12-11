@@ -37,7 +37,7 @@ use shared::{
             TopupResponseYearStatusSuccess, TopupYearlyAmountResponse, TopupYearlyMethodResponse,
         },
     },
-    errors::{AppErrorGrpc, AppErrorHttp},
+    errors::{AppErrorGrpc, HttpError},
     utils::{
         MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_card_number,
         month_name,
@@ -162,7 +162,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
     async fn find_all(
         &self,
         req: &DomainFindAllTopups,
-    ) -> Result<ApiResponsePagination<Vec<TopupResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TopupResponse>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -237,7 +237,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch topups")
                     .await;
                 error!("fetch all topups failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -246,7 +247,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
     async fn find_all_by_card_number(
         &self,
         req: &DomainFindAllTopupsByCardNumber,
-    ) -> Result<ApiResponsePagination<Vec<TopupResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TopupResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
 
         let page = req.page;
@@ -346,7 +347,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 )
                 .await;
                 error!("fetch topups for card {} failed: {status:?}", masked_card);
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -355,7 +356,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
     async fn find_active(
         &self,
         req: &DomainFindAllTopups,
-    ) -> Result<ApiResponsePagination<Vec<TopupResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TopupResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -434,7 +435,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch active topups")
                     .await;
                 error!("fetch active topups failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -443,7 +444,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
     async fn find_trashed(
         &self,
         req: &DomainFindAllTopups,
-    ) -> Result<ApiResponsePagination<Vec<TopupResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TopupResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -523,7 +524,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed topups")
                     .await;
                 error!("fetch trashed topups failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -532,7 +533,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
     async fn find_by_card(
         &self,
         card_number: &str,
-    ) -> Result<ApiResponse<Vec<TopupResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupResponse>>, HttpError> {
         let masked_card = mask_card_number(card_number);
         info!("fetching topups by card: {masked_card}");
 
@@ -603,13 +604,13 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch topups by card")
                     .await;
                 error!("fetch topups by card {masked_card} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn find_by_id(&self, topup_id: i32) -> Result<ApiResponse<TopupResponse>, AppErrorHttp> {
+    async fn find_by_id(&self, topup_id: i32) -> Result<ApiResponse<TopupResponse>, HttpError> {
         info!("fetching topup by id: {topup_id}");
 
         let method = Method::Get;
@@ -651,9 +652,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("topup {topup_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Topup data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Topup data is missing in gRPC response".into())
                 })?;
 
                 let topup_response: TopupResponse = data.into();
@@ -676,7 +675,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch topup by id")
                     .await;
                 error!("find topup {topup_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -688,7 +687,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
     async fn create(
         &self,
         req: &DomainCreateTopupRequest,
-    ) -> Result<ApiResponse<TopupResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TopupResponse>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "creating topup for card: {masked_card}, amount: {}, method: {}",
@@ -721,7 +720,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("topup creation failed - data missing in gRPC response for card: {masked_card}");
-                    AppErrorHttp(AppErrorGrpc::Unhandled("Topup data is missing in gRPC response".into()))
+                    HttpError::Internal("Topup data is missing in gRPC response".into())
                 })?;
 
                 let topup_response: TopupResponse = data.into();
@@ -757,7 +756,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to create topup")
                     .await;
                 error!("create topup for card {masked_card} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -766,12 +765,12 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
     async fn update(
         &self,
         req: &DomainUpdateTopupRequest,
-    ) -> Result<ApiResponse<TopupResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TopupResponse>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
 
-        let topup_id = req.topup_id.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled("topup_id is required".to_string()))
-        })?;
+        let topup_id = req
+            .topup_id
+            .ok_or_else(|| HttpError::Internal("topup_id is required".to_string()))?;
 
         info!(
             "updating topup id: {topup_id} for card: {}, new amount: {}, method: {}",
@@ -806,9 +805,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("update topup {topup_id} - data missing in gRPC response",);
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Topup data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Topup data is missing in gRPC response".into())
                 })?;
 
                 let topup_response: TopupResponse = data.into();
@@ -845,7 +842,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to update topup")
                     .await;
                 error!("update topup {topup_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -854,7 +851,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
     async fn trashed(
         &self,
         topup_id: i32,
-    ) -> Result<ApiResponse<TopupResponseDeleteAt>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TopupResponseDeleteAt>, HttpError> {
         info!("trashing topup id: {topup_id}");
 
         let method = Method::Post;
@@ -879,9 +876,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("trash topup {topup_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Topup data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Topup data is missing in gRPC response".into())
                 })?;
 
                 let topup_response: TopupResponseDeleteAt = data.into();
@@ -912,7 +907,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to trash topup")
                     .await;
                 error!("trash topup {topup_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -921,7 +916,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
     async fn restore(
         &self,
         topup_id: i32,
-    ) -> Result<ApiResponse<TopupResponseDeleteAt>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TopupResponseDeleteAt>, HttpError> {
         info!("restoring topup id: {topup_id}");
 
         let method = Method::Post;
@@ -946,9 +941,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("restore topup {topup_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Topup data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Topup data is missing in gRPC response".into())
                 })?;
 
                 let cache_keys = vec![
@@ -980,13 +973,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to restore topup")
                     .await;
                 error!("restore topup {topup_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_permanent(&self, topup_id: i32) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_permanent(&self, topup_id: i32) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting topup id: {topup_id}");
 
         let method = Method::Delete;
@@ -1044,13 +1037,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 )
                 .await;
                 error!("delete topup {topup_id} permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("restoring all trashed topups");
 
         let method = Method::Post;
@@ -1108,13 +1101,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 )
                 .await;
                 error!("restore all topups failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_all_permanent(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_all_permanent(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting all topups");
 
         let method = Method::Post;
@@ -1177,7 +1170,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 )
                 .await;
                 error!("delete all topups permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1189,7 +1182,7 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
     async fn get_monthly_amounts(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TopupMonthAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupMonthAmountResponse>>, HttpError> {
         info!("fetching monthly topup AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1265,7 +1258,7 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly topup AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1274,7 +1267,7 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
     async fn get_yearly_amounts(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TopupYearlyAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupYearlyAmountResponse>>, HttpError> {
         info!("fetching yearly topup AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1351,7 +1344,7 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly topup AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1363,7 +1356,7 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
     async fn get_monthly_methods(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TopupMonthMethodResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupMonthMethodResponse>>, HttpError> {
         info!("fetching monthly topup METHOD stats for year: {year}");
 
         let method = Method::Get;
@@ -1440,7 +1433,7 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly topup METHOD for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1449,7 +1442,7 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
     async fn get_yearly_methods(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TopupYearlyMethodResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupYearlyMethodResponse>>, HttpError> {
         info!("fetching yearly topup METHOD stats for year: {year}");
 
         let method = Method::Get;
@@ -1525,7 +1518,7 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly topup METHOD for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1537,7 +1530,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
     async fn get_month_status_success(
         &self,
         req: &DomainMonthTopupStatus,
-    ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusSuccess>>, HttpError> {
         let month_str = month_name(req.month);
         info!(
             "fetching monthly topup SUCCESS status for {month_str} {}",
@@ -1631,7 +1624,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
                     "fetch monthly SUCCESS topup status for {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1640,7 +1633,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
     async fn get_yearly_status_success(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TopupResponseYearStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupResponseYearStatusSuccess>>, HttpError> {
         info!("fetching yearly topup SUCCESS status for year: {year}");
 
         let method = Method::Get;
@@ -1716,7 +1709,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly SUCCESS topup status for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1725,7 +1718,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
     async fn get_month_status_failed(
         &self,
         req: &DomainMonthTopupStatus,
-    ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusFailed>>, HttpError> {
         let month_str = month_name(req.month);
         info!(
             "fetching monthly topup FAILED status for {month_str} {}",
@@ -1820,7 +1813,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
                     "fetch monthly FAILED topup status for {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1829,7 +1822,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
     async fn get_yearly_status_failed(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TopupResponseYearStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupResponseYearStatusFailed>>, HttpError> {
         info!("fetching yearly topup FAILED status for year: {year}");
 
         let method = Method::Get;
@@ -1906,7 +1899,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly FAILED topup status for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1918,7 +1911,7 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
     async fn get_monthly_amounts_bycard(
         &self,
         req: &DomainYearMonthMethod,
-    ) -> Result<ApiResponse<Vec<TopupMonthAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupMonthAmountResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching monthly topup AMOUNT for card: {masked_card}, year: {}",
@@ -2012,7 +2005,7 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
                     "fetch monthly topup AMOUNT for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2021,7 +2014,7 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
     async fn get_yearly_amounts_bycard(
         &self,
         req: &DomainYearMonthMethod,
-    ) -> Result<ApiResponse<Vec<TopupYearlyAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupYearlyAmountResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly topup AMOUNT for card: {masked_card}, year: {}",
@@ -2116,7 +2109,7 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
                     "fetch yearly topup AMOUNT for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2128,7 +2121,7 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
     async fn get_monthly_methods_bycard(
         &self,
         req: &DomainYearMonthMethod,
-    ) -> Result<ApiResponse<Vec<TopupMonthMethodResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupMonthMethodResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching monthly topup METHOD for card: {masked_card}, year: {}",
@@ -2222,7 +2215,7 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
                     "fetch monthly topup METHOD for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2231,7 +2224,7 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
     async fn get_yearly_methods_bycard(
         &self,
         req: &DomainYearMonthMethod,
-    ) -> Result<ApiResponse<Vec<TopupYearlyMethodResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupYearlyMethodResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly topup METHOD for card: {masked_card}, year: {}",
@@ -2326,7 +2319,7 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
                     "fetch yearly topup METHOD for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2338,7 +2331,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
     async fn get_month_status_success_bycard(
         &self,
         req: &DomainMonthTopupStatusCardNumber,
-    ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusSuccess>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         let month_str = month_name(req.month);
         info!(
@@ -2435,7 +2428,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                     "fetch monthly SUCCESS topup status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2444,7 +2437,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
     async fn get_yearly_status_success_bycard(
         &self,
         req: &DomainYearTopupStatusCardNumber,
-    ) -> Result<ApiResponse<Vec<TopupResponseYearStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupResponseYearStatusSuccess>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly topup SUCCESS status for card: {masked_card}, year: {}",
@@ -2539,7 +2532,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                     "fetch yearly SUCCESS topup status for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2548,7 +2541,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
     async fn get_month_status_failed_bycard(
         &self,
         req: &DomainMonthTopupStatusCardNumber,
-    ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupResponseMonthStatusFailed>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         let month_str = month_name(req.month);
         info!(
@@ -2642,7 +2635,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                     "fetch monthly FAILED topup status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2651,7 +2644,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
     async fn get_yearly_status_failed_bycard(
         &self,
         req: &DomainYearTopupStatusCardNumber,
-    ) -> Result<ApiResponse<Vec<TopupResponseYearStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TopupResponseYearStatusFailed>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly topup FAILED status for card: {masked_card}, year: {}",
@@ -2745,7 +2738,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                     "fetch yearly FAILED topup status for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }

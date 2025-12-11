@@ -22,7 +22,7 @@ use shared::{
         },
         responses::{ApiResponse, ApiResponsePagination, RoleResponse, RoleResponseDeleteAt},
     },
-    errors::{AppErrorGrpc, AppErrorHttp},
+    errors::{AppErrorGrpc, HttpError},
     utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
 };
 use std::sync::Arc;
@@ -144,7 +144,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
     async fn find_all(
         &self,
         req: &DomainFindAllRoles,
-    ) -> Result<ApiResponsePagination<Vec<RoleResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<RoleResponse>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -199,7 +199,8 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
@@ -230,7 +231,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
     async fn find_active(
         &self,
         req: &DomainFindAllRoles,
-    ) -> Result<ApiResponsePagination<Vec<RoleResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<RoleResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -285,7 +286,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
@@ -315,7 +316,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
     async fn find_trashed(
         &self,
         req: &DomainFindAllRoles,
-    ) -> Result<ApiResponsePagination<Vec<RoleResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<RoleResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -370,7 +371,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
@@ -398,7 +399,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
         Ok(api_response)
     }
     #[instrument(skip(self), level = "info")]
-    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<RoleResponse>, AppErrorHttp> {
+    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<RoleResponse>, HttpError> {
         info!("Retrieving Role: {}", id);
 
         let method = Method::Get;
@@ -437,17 +438,15 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch Role")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
         let inner = response.into_inner();
 
-        let role_data = inner.data.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled(
-                "Role data is missing in gRPC response".into(),
-            ))
-        })?;
+        let role_data = inner
+            .data
+            .ok_or_else(|| HttpError::Internal("Role data is missing in gRPC response".into()))?;
 
         let data: RoleResponse = role_data.into();
 
@@ -470,7 +469,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
     async fn find_by_user_id(
         &self,
         user_id: i32,
-    ) -> Result<ApiResponse<Vec<RoleResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<RoleResponse>>, HttpError> {
         info!("Fetching Roles by user_id: {}", user_id);
 
         let method = Method::Get;
@@ -513,7 +512,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
@@ -546,7 +545,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
     async fn create(
         &self,
         req: &DomainCreateRoleRequest,
-    ) -> Result<ApiResponse<RoleResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<RoleResponse>, HttpError> {
         info!("Creating new Role: {}", req.name.clone());
 
         let method = Method::Post;
@@ -574,17 +573,15 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to create Role")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
         let inner = response.into_inner();
 
-        let role_data = inner.data.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled(
-                "Role data is missing in gRPC response".into(),
-            ))
-        })?;
+        let role_data = inner
+            .data
+            .ok_or_else(|| HttpError::Internal("Role data is missing in gRPC response".into()))?;
 
         let data: RoleResponse = role_data.into();
 
@@ -617,10 +614,10 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
     async fn update(
         &self,
         req: &DomainUpdateRoleRequest,
-    ) -> Result<ApiResponse<RoleResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<RoleResponse>, HttpError> {
         let id = req
             .id
-            .ok_or_else(|| AppErrorHttp(AppErrorGrpc::Unhandled("id is required".to_string())))?;
+            .ok_or_else(|| HttpError::Internal("id is required".to_string()))?;
 
         info!("Updating Role: {id}");
 
@@ -651,17 +648,15 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to update Role")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
         let inner = response.into_inner();
 
-        let role_data = inner.data.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled(
-                "Role data is missing in gRPC response".into(),
-            ))
-        })?;
+        let role_data = inner
+            .data
+            .ok_or_else(|| HttpError::Internal("Role data is missing in gRPC response".into()))?;
 
         let data: RoleResponse = role_data.into();
 
@@ -696,7 +691,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn trash(&self, id: i32) -> Result<ApiResponse<RoleResponseDeleteAt>, AppErrorHttp> {
+    async fn trash(&self, id: i32) -> Result<ApiResponse<RoleResponseDeleteAt>, HttpError> {
         info!("Soft deleting Role: {id}");
 
         let method = Method::Post;
@@ -726,17 +721,15 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to soft delete Role")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
         let inner = response.into_inner();
 
-        let role_data = inner.data.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled(
-                "Role data is missing in gRPC response".into(),
-            ))
-        })?;
+        let role_data = inner
+            .data
+            .ok_or_else(|| HttpError::Internal("Role data is missing in gRPC response".into()))?;
 
         let domain_role: RoleResponseDeleteAt = role_data.into();
 
@@ -762,7 +755,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         Ok(api_response)
     }
     #[instrument(skip(self), level = "info")]
-    async fn restore(&self, id: i32) -> Result<ApiResponse<RoleResponseDeleteAt>, AppErrorHttp> {
+    async fn restore(&self, id: i32) -> Result<ApiResponse<RoleResponseDeleteAt>, HttpError> {
         info!("Restoring Role: {}", id);
 
         let method = Method::Post;
@@ -788,17 +781,15 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to restore Role")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
         let inner = response.into_inner();
 
-        let role_data = inner.data.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled(
-                "Role data is missing in gRPC response".into(),
-            ))
-        })?;
+        let role_data = inner
+            .data
+            .ok_or_else(|| HttpError::Internal("Role data is missing in gRPC response".into()))?;
 
         let data: RoleResponseDeleteAt = role_data.into();
 
@@ -825,7 +816,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete(&self, id: i32) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete(&self, id: i32) -> Result<ApiResponse<bool>, HttpError> {
         info!("Permanently deleting Role: {id}");
 
         let method = Method::Delete;
@@ -851,7 +842,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to delete Role")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
@@ -867,7 +858,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         Ok(api_response)
     }
     #[instrument(skip(self), level = "info")]
-    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("Restoring all trashed Roles");
 
         let method = Method::Post;
@@ -892,7 +883,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
             Err(status) => {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to restore all Roles")
                     .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
@@ -919,7 +910,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("Permanently deleting all trashed Roles");
 
         let method = Method::Post;
@@ -948,7 +939,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
                     "Failed to delete all trashed Roles",
                 )
                 .await;
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 

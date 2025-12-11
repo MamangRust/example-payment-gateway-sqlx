@@ -38,7 +38,7 @@ use shared::{
             TransferResponseYearStatusSuccess, TransferYearAmountResponse,
         },
     },
-    errors::{AppErrorGrpc, AppErrorHttp},
+    errors::{AppErrorGrpc, HttpError},
     utils::{
         MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_card_number,
         month_name,
@@ -166,7 +166,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
     async fn find_all(
         &self,
         req: &DomainFindAllTransfers,
-    ) -> Result<ApiResponsePagination<Vec<TransferResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TransferResponse>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -245,7 +245,8 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch transfers")
                     .await;
                 error!("fetch all transfers failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -254,7 +255,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
     async fn find_by_id(
         &self,
         transfer_id: i32,
-    ) -> Result<ApiResponse<TransferResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TransferResponse>, HttpError> {
         info!("fetching transfer by id: {transfer_id}");
 
         let method = Method::Get;
@@ -295,9 +296,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("transfer {transfer_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Transfer data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Transfer data is missing in gRPC response".into())
                 })?;
 
                 let transfer_response: TransferResponse = data.into();
@@ -320,7 +319,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch transfer by id")
                     .await;
                 error!("find transfer {transfer_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -329,7 +328,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
     async fn find_by_active(
         &self,
         req: &DomainFindAllTransfers,
-    ) -> Result<ApiResponsePagination<Vec<TransferResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TransferResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -413,7 +412,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
                 )
                 .await;
                 error!("fetch active transfers failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -422,7 +421,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
     async fn find_by_trashed(
         &self,
         req: &DomainFindAllTransfers,
-    ) -> Result<ApiResponsePagination<Vec<TransferResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TransferResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -505,7 +504,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
                 )
                 .await;
                 error!("fetch trashed transfers failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -514,7 +513,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
     async fn find_by_transfer_from(
         &self,
         transfer_from: &str,
-    ) -> Result<ApiResponse<Vec<TransferResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferResponse>>, HttpError> {
         let masked_from = mask_card_number(transfer_from);
         info!("fetching transfers FROM card: {masked_from}");
 
@@ -592,7 +591,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
                 )
                 .await;
                 error!("fetch transfers FROM card {masked_from} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -601,7 +600,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
     async fn find_by_transfer_to(
         &self,
         transfer_to: &str,
-    ) -> Result<ApiResponse<Vec<TransferResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferResponse>>, HttpError> {
         let masked_to = mask_card_number(transfer_to);
         info!("fetching transfers TO card: {masked_to}");
 
@@ -679,7 +678,7 @@ impl TransferQueryGrpcClientTrait for TransferGrpcClientService {
                 )
                 .await;
                 error!("fetch transfers TO card {masked_to} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -691,7 +690,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
     async fn create(
         &self,
         req: &DomainCreateTransferRequest,
-    ) -> Result<ApiResponse<TransferResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TransferResponse>, HttpError> {
         let masked_from = mask_card_number(&req.transfer_from);
         let masked_to = mask_card_number(&req.transfer_to);
         info!(
@@ -730,7 +729,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                 error!("transfer creation failed - data missing in gRPC response FROM {masked_from} TO {masked_to}");
-                AppErrorHttp(AppErrorGrpc::Unhandled("Transfer data is missing in gRPC response".into()))
+                HttpError::Internal("Transfer data is missing in gRPC response".into())
             })?;
 
                 let transfer_response: TransferResponse = data.into();
@@ -778,7 +777,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to create Transfer")
                     .await;
                 error!("create transfer FROM {masked_from} TO {masked_to} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -787,15 +786,13 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
     async fn update(
         &self,
         req: &DomainUpdateTransferRequest,
-    ) -> Result<ApiResponse<TransferResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TransferResponse>, HttpError> {
         let masked_from = mask_card_number(&req.transfer_from);
         let masked_to = mask_card_number(&req.transfer_to);
 
-        let transfer_id = req.transfer_id.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled(
-                "transfer_id is required".to_string(),
-            ))
-        })?;
+        let transfer_id = req
+            .transfer_id
+            .ok_or_else(|| HttpError::Internal("transfer_id is required".to_string()))?;
 
         info!(
             "updating transfer id: {transfer_id} FROM {masked_from} TO {masked_to}, new amount: {}",
@@ -835,9 +832,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("update transfer {transfer_id} - data missing in gRPC response",);
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Transfer data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Transfer data is missing in gRPC response".into())
                 })?;
 
                 let transfer_response: TransferResponse = data.into();
@@ -896,7 +891,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to update Transfer")
                     .await;
                 error!("update transfer {transfer_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -905,7 +900,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
     async fn trashed(
         &self,
         transfer_id: i32,
-    ) -> Result<ApiResponse<TransferResponseDeleteAt>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TransferResponseDeleteAt>, HttpError> {
         info!("trashing transfer id: {transfer_id}");
 
         let method = Method::Post;
@@ -933,9 +928,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("trash transfer {transfer_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Transfer data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Transfer data is missing in gRPC response".into())
                 })?;
 
                 let cache_keys = vec![
@@ -967,7 +960,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to trash Transfer")
                     .await;
                 error!("trash transfer {transfer_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -976,7 +969,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
     async fn restore(
         &self,
         transfer_id: i32,
-    ) -> Result<ApiResponse<TransferResponseDeleteAt>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TransferResponseDeleteAt>, HttpError> {
         info!("restoring transfer id: {transfer_id}");
 
         let method = Method::Post;
@@ -1004,9 +997,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("restore transfer {transfer_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Transfer data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Transfer data is missing in gRPC response".into())
                 })?;
 
                 let cache_keys = vec![
@@ -1040,13 +1031,13 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to restore Transfer")
                     .await;
                 error!("restore transfer {transfer_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_permanent(&self, transfer_id: i32) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_permanent(&self, transfer_id: i32) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting transfer id: {transfer_id}");
 
         let method = Method::Delete;
@@ -1112,13 +1103,13 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 )
                 .await;
                 error!("delete transfer {transfer_id} permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("restoring all trashed transfers");
 
         let method = Method::Post;
@@ -1176,13 +1167,13 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 )
                 .await;
                 error!("restore all transfers failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting all transfers");
 
         let method = Method::Post;
@@ -1245,7 +1236,7 @@ impl TransferCommandGrpcClientTrait for TransferGrpcClientService {
                 )
                 .await;
                 error!("delete all transfers permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1257,7 +1248,7 @@ impl TransferStatsAmountGrpcClientTrait for TransferGrpcClientService {
     async fn get_monthly_amounts(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, HttpError> {
         info!("fetching monthly transfer AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1332,7 +1323,7 @@ impl TransferStatsAmountGrpcClientTrait for TransferGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly transfer AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1341,7 +1332,7 @@ impl TransferStatsAmountGrpcClientTrait for TransferGrpcClientService {
     async fn get_yearly_amounts(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, HttpError> {
         info!("fetching yearly transfer AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1413,7 +1404,7 @@ impl TransferStatsAmountGrpcClientTrait for TransferGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch yearly amounts")
                     .await;
                 error!("fetch yearly transfer AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1425,7 +1416,7 @@ impl TransferStatsStatusGrpcClientTrait for TransferGrpcClientService {
     async fn get_month_status_success(
         &self,
         req: &DomainMonthStatusTransfer,
-    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusSuccess>>, HttpError> {
         let month_str = month_name(req.month);
         info!(
             "fetching monthly transfer SUCCESS status for {month_str} {}",
@@ -1519,7 +1510,7 @@ impl TransferStatsStatusGrpcClientTrait for TransferGrpcClientService {
                     "fetch monthly SUCCESS transfer status for {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1528,7 +1519,7 @@ impl TransferStatsStatusGrpcClientTrait for TransferGrpcClientService {
     async fn get_yearly_status_success(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusSuccess>>, HttpError> {
         info!("fetching yearly transfer SUCCESS status for year: {year}");
 
         let method = Method::Get;
@@ -1603,7 +1594,7 @@ impl TransferStatsStatusGrpcClientTrait for TransferGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly SUCCESS transfer status for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1612,7 +1603,7 @@ impl TransferStatsStatusGrpcClientTrait for TransferGrpcClientService {
     async fn get_month_status_failed(
         &self,
         req: &DomainMonthStatusTransfer,
-    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusFailed>>, HttpError> {
         let month_str = month_name(req.month);
         info!(
             "fetching monthly transfer FAILED status for {month_str} {}",
@@ -1706,7 +1697,7 @@ impl TransferStatsStatusGrpcClientTrait for TransferGrpcClientService {
                     "fetch monthly FAILED transfer status for {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1715,7 +1706,7 @@ impl TransferStatsStatusGrpcClientTrait for TransferGrpcClientService {
     async fn get_yearly_status_failed(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusFailed>>, HttpError> {
         info!("fetching yearly transfer FAILED status for year: {year}");
 
         let method = Method::Get;
@@ -1790,7 +1781,7 @@ impl TransferStatsStatusGrpcClientTrait for TransferGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly FAILED transfer status for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1802,7 +1793,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
     async fn get_monthly_amounts_sender_bycard(
         &self,
         req: &DomainMonthYearCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching monthly transfer AMOUNT as SENDER for card: {masked_card}, year: {}",
@@ -1896,7 +1887,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
                     "fetch monthly transfer AMOUNT as SENDER for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1905,7 +1896,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
     async fn get_monthly_amounts_receiver_bycard(
         &self,
         req: &DomainMonthYearCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferMonthAmountResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching monthly transfer AMOUNT as RECEIVER for card: {masked_card}, year: {}",
@@ -1999,7 +1990,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
                     "fetch monthly transfer AMOUNT as RECEIVER for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2008,7 +1999,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
     async fn get_yearly_amounts_sender_bycard(
         &self,
         req: &DomainMonthYearCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly transfer AMOUNT as SENDER for card: {masked_card}, year: {}",
@@ -2101,7 +2092,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
                     "fetch yearly transfer AMOUNT as SENDER for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2110,7 +2101,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
     async fn get_yearly_amounts_receiver_bycard(
         &self,
         req: &DomainMonthYearCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferYearAmountResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly transfer AMOUNT as RECEIVER for card: {masked_card}, year: {}",
@@ -2204,7 +2195,7 @@ impl TransferStatsAmountByCardNumberGrpcClientTrait for TransferGrpcClientServic
                     "fetch yearly transfer AMOUNT as RECEIVER for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2216,7 +2207,7 @@ impl TransferStatsStatusByCardNumberGrpcClientTrait for TransferGrpcClientServic
     async fn get_month_status_success_by_card(
         &self,
         req: &DomainMonthStatusTransferCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusSuccess>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         let month_str = month_name(req.month);
         info!(
@@ -2312,7 +2303,7 @@ impl TransferStatsStatusByCardNumberGrpcClientTrait for TransferGrpcClientServic
                     "fetch monthly SUCCESS transfer status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2321,7 +2312,7 @@ impl TransferStatsStatusByCardNumberGrpcClientTrait for TransferGrpcClientServic
     async fn get_yearly_status_success_by_card(
         &self,
         req: &DomainYearStatusTransferCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusSuccess>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly transfer SUCCESS status for card: {masked_card}, year: {}",
@@ -2415,7 +2406,7 @@ impl TransferStatsStatusByCardNumberGrpcClientTrait for TransferGrpcClientServic
                     "fetch yearly SUCCESS transfer status for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2424,7 +2415,7 @@ impl TransferStatsStatusByCardNumberGrpcClientTrait for TransferGrpcClientServic
     async fn get_month_status_failed_by_card(
         &self,
         req: &DomainMonthStatusTransferCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusFailed>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         let month_str = month_name(req.month);
         info!(
@@ -2521,7 +2512,7 @@ impl TransferStatsStatusByCardNumberGrpcClientTrait for TransferGrpcClientServic
                     "fetch monthly FAILED transfer status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2530,7 +2521,7 @@ impl TransferStatsStatusByCardNumberGrpcClientTrait for TransferGrpcClientServic
     async fn get_yearly_status_failed_by_card(
         &self,
         req: &DomainYearStatusTransferCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusFailed>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly transfer FAILED status for card: {masked_card}, year: {}",
@@ -2623,7 +2614,7 @@ impl TransferStatsStatusByCardNumberGrpcClientTrait for TransferGrpcClientServic
                     "fetch yearly FAILED transfer status for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }

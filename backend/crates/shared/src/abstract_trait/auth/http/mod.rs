@@ -7,21 +7,18 @@ use crate::{
         requests::auth::{AuthRequest, RegisterRequest},
         responses::{ApiResponse, TokenResponse, UserResponse},
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 
 pub type DynAuthGrpcClient = Arc<dyn AuthGrpcClientTrait + Send + Sync>;
 
 #[async_trait]
 pub trait AuthGrpcClientTrait {
-    async fn login(
-        &self,
-        request: &AuthRequest,
-    ) -> Result<ApiResponse<TokenResponse>, AppErrorHttp>;
-    async fn get_me(&self, id: i32) -> Result<ApiResponse<UserResponse>, AppErrorHttp>;
-    async fn refresh_token(&self, token: &str) -> Result<ApiResponse<TokenResponse>, AppErrorHttp>;
+    async fn login(&self, request: &AuthRequest) -> Result<ApiResponse<TokenResponse>, HttpError>;
+    async fn get_me(&self, id: i32) -> Result<ApiResponse<UserResponse>, HttpError>;
+    async fn refresh_token(&self, token: &str) -> Result<ApiResponse<TokenResponse>, HttpError>;
     async fn register(
         &self,
         request: &RegisterRequest,
-    ) -> Result<ApiResponse<UserResponse>, AppErrorHttp>;
+    ) -> Result<ApiResponse<UserResponse>, HttpError>;
 }

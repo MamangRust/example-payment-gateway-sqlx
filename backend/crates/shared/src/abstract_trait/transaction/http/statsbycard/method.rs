@@ -3,7 +3,7 @@ use crate::{
         requests::transaction::MonthYearPaymentMethod,
         responses::{ApiResponse, TransactionMonthMethodResponse, TransactionYearMethodResponse},
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -13,10 +13,10 @@ pub trait TransactionStatsMethodByCardNumberGrpcClientTrait {
     async fn get_monthly_method_bycard(
         &self,
         req: &MonthYearPaymentMethod,
-    ) -> Result<ApiResponse<Vec<TransactionMonthMethodResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<TransactionMonthMethodResponse>>, HttpError>;
 
     async fn get_yearly_method_bycard(
         &self,
         req: &MonthYearPaymentMethod,
-    ) -> Result<ApiResponse<Vec<TransactionYearMethodResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<TransactionYearMethodResponse>>, HttpError>;
 }

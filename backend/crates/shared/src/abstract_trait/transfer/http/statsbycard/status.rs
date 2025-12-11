@@ -6,7 +6,7 @@ use crate::{
             TransferResponseYearStatusFailed, TransferResponseYearStatusSuccess,
         },
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -16,20 +16,20 @@ pub trait TransferStatsStatusByCardNumberGrpcClientTrait {
     async fn get_month_status_success_by_card(
         &self,
         req: &MonthStatusTransferCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusSuccess>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusSuccess>>, HttpError>;
 
     async fn get_yearly_status_success_by_card(
         &self,
         req: &YearStatusTransferCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusSuccess>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusSuccess>>, HttpError>;
 
     async fn get_month_status_failed_by_card(
         &self,
         req: &MonthStatusTransferCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusFailed>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<TransferResponseMonthStatusFailed>>, HttpError>;
 
     async fn get_yearly_status_failed_by_card(
         &self,
         req: &YearStatusTransferCardNumber,
-    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusFailed>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<TransferResponseYearStatusFailed>>, HttpError>;
 }

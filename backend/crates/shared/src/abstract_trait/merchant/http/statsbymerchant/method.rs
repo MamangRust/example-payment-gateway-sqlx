@@ -5,7 +5,7 @@ use crate::{
             ApiResponse, MerchantResponseMonthlyPaymentMethod, MerchantResponseYearlyPaymentMethod,
         },
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -15,9 +15,9 @@ pub trait MerchantStatsMethodByMerchantGrpcClientTrait {
     async fn get_monthly_method_bymerchant(
         &self,
         req: &MonthYearPaymentMethodMerchant,
-    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, HttpError>;
     async fn get_yearly_method_bymerchant(
         &self,
         req: &MonthYearPaymentMethodMerchant,
-    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, HttpError>;
 }

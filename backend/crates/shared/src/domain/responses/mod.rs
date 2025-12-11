@@ -5,6 +5,7 @@ mod merchant;
 mod pagination;
 mod role;
 mod saldo;
+mod session;
 mod topup;
 mod transaction;
 mod transfer;
@@ -29,6 +30,7 @@ pub use self::saldo::{
     SaldoMonthBalanceResponse, SaldoMonthTotalBalanceResponse, SaldoResponse,
     SaldoResponseDeleteAt, SaldoYearBalanceResponse, SaldoYearTotalBalanceResponse,
 };
+pub use self::session::Session;
 pub use self::topup::{
     TopupMonthAmountResponse, TopupMonthMethodResponse, TopupResponse, TopupResponseDeleteAt,
     TopupResponseMonthStatusFailed, TopupResponseMonthStatusSuccess, TopupResponseYearStatusFailed,

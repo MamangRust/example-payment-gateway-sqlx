@@ -34,7 +34,7 @@ use shared::{
             CardResponseYearlyBalance, DashboardCard, DashboardCardCardNumber,
         },
     },
-    errors::{AppErrorGrpc, AppErrorHttp},
+    errors::{AppErrorGrpc, HttpError},
     utils::{
         MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_card_number,
         naive_date_to_timestamp,
@@ -157,7 +157,7 @@ impl CardGrpcClientServiceTrait for CardGrpcClientService {}
 #[async_trait]
 impl CardDashboardGrpcClientTrait for CardGrpcClientService {
     #[instrument(skip_all)]
-    async fn get_dashboard(&self) -> Result<ApiResponse<DashboardCard>, AppErrorHttp> {
+    async fn get_dashboard(&self) -> Result<ApiResponse<DashboardCard>, HttpError> {
         let method = Method::Get;
 
         let tracing_ctx = self.start_tracing(
@@ -202,9 +202,8 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
 
                 let dashboard_data = inner.data.ok_or_else(|| {
                     error!("Dashboard Card data is missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Dashboard Card data is missing in gRPC response".into(),
-                    ))
+
+                    HttpError::Internal("Dashboard Card data is missing in gRPC response".into())
                 })?;
 
                 let domain_dashboard: DashboardCard = dashboard_data.into();
@@ -225,7 +224,7 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch dashboard data")
                     .await;
                 error!("gRPC error: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -234,7 +233,7 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
     async fn get_dashboard_bycard(
         &self,
         card_number: String,
-    ) -> Result<ApiResponse<DashboardCardCardNumber>, AppErrorHttp> {
+    ) -> Result<ApiResponse<DashboardCardCardNumber>, HttpError> {
         let method = Method::Get;
 
         let tracing_ctx = self.start_tracing(
@@ -282,9 +281,8 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
 
                 let dashboard_data = inner.data.ok_or_else(|| {
                     error!("card {card_number} - missing data in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Dashboard Card data is missing in gRPC response".into(),
-                    ))
+
+                    HttpError::Internal("Dashboard Card data is missing in gRPC response".into())
                 })?;
 
                 let domain_dashboard: DashboardCardCardNumber = dashboard_data.into();
@@ -309,7 +307,7 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("card {card_number} - gRPC failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -321,7 +319,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
     async fn find_all(
         &self,
         req: &DomainFindAllCardRequest,
-    ) -> Result<ApiResponsePagination<Vec<CardResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<CardResponse>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
         let search = &req.search;
@@ -396,7 +394,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch cards")
                     .await;
                 error!("find_all failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -405,7 +403,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
     async fn find_active(
         &self,
         req: &DomainFindAllCardRequest,
-    ) -> Result<ApiResponsePagination<Vec<CardResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<CardResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
         let search = &req.search;
@@ -489,7 +487,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch active cards")
                     .await;
                 error!("find_active failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -498,7 +496,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
     async fn find_trashed(
         &self,
         req: &DomainFindAllCardRequest,
-    ) -> Result<ApiResponsePagination<Vec<CardResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<CardResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
         let search = &req.search;
@@ -582,13 +580,13 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed cards")
                     .await;
                 error!("find_trashed failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<CardResponse>, AppErrorHttp> {
+    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<CardResponse>, HttpError> {
         info!("fetching card by id: {id}");
 
         let method = Method::Get;
@@ -629,9 +627,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("card {id} - missing data in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Card data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Card data is missing in gRPC response".into())
                 })?;
 
                 let card_response: CardResponse = data.into();
@@ -654,16 +650,13 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch card by id")
                     .await;
                 error!("card {id} - gRPC failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn find_by_user_id(
-        &self,
-        user_id: i32,
-    ) -> Result<ApiResponse<CardResponse>, AppErrorHttp> {
+    async fn find_by_user_id(&self, user_id: i32) -> Result<ApiResponse<CardResponse>, HttpError> {
         info!("fetching card by user_id: {user_id}");
 
         let method = Method::Get;
@@ -708,9 +701,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("user {user_id} - missing card data in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Card data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Card data is missing in gRPC response".into())
                 })?;
 
                 let card_response: CardResponse = data.into();
@@ -737,7 +728,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("user {user_id} - gRPC failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -746,7 +737,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
     async fn find_by_card_number(
         &self,
         card_number: String,
-    ) -> Result<ApiResponse<CardResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<CardResponse>, HttpError> {
         info!("fetching card by card_number: {card_number}");
 
         let method = Method::Get;
@@ -793,9 +784,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("card {card_number} - missing data in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Card data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Card data is missing in gRPC response".into())
                 })?;
 
                 let card_response: CardResponse = data.into();
@@ -818,7 +807,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch card by number")
                     .await;
                 error!("card {card_number} - gRPC failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -830,7 +819,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
     async fn create(
         &self,
         req: &DomainCreateCardRequest,
-    ) -> Result<ApiResponse<CardResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<CardResponse>, HttpError> {
         info!("creating card for user_id: {}", req.user_id);
 
         let method = Method::Post;
@@ -864,9 +853,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
 
                 let data = inner.data.ok_or_else(|| {
                     error!("user {} - card data missing in gRPC response", req.user_id);
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Card data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Card data is missing in gRPC response".into())
                 })?;
 
                 info!("card created successfully for user {}", req.user_id);
@@ -891,7 +878,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to create card")
                     .await;
                 error!("create card failed for user {}: {status:?}", req.user_id);
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -900,10 +887,10 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
     async fn update(
         &self,
         req: &DomainUpdateCardRequest,
-    ) -> Result<ApiResponse<CardResponse>, AppErrorHttp> {
-        let card_id = req.card_id.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled("card_id is required".to_string()))
-        })?;
+    ) -> Result<ApiResponse<CardResponse>, HttpError> {
+        let card_id = req
+            .card_id
+            .ok_or_else(|| HttpError::Internal("card_id is required".to_string()))?;
 
         info!("updating card id: {card_id}");
 
@@ -938,9 +925,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("card {card_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Card data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Card data is missing in gRPC response".into())
                 })?;
 
                 let card_response: CardResponse = data.into();
@@ -976,13 +961,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to update card")
                     .await;
                 error!("update card {card_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn trash(&self, id: i32) -> Result<ApiResponse<CardResponseDeleteAt>, AppErrorHttp> {
+    async fn trash(&self, id: i32) -> Result<ApiResponse<CardResponseDeleteAt>, HttpError> {
         info!("trashing card id: {id}");
 
         let method = Method::Post;
@@ -1007,9 +992,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("card {id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Card data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Card data is missing in gRPC response".into())
                 })?;
 
                 let card_response: CardResponseDeleteAt = data.into();
@@ -1038,13 +1021,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to trash card")
                     .await;
                 error!("trash card {id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore(&self, id: i32) -> Result<ApiResponse<CardResponseDeleteAt>, AppErrorHttp> {
+    async fn restore(&self, id: i32) -> Result<ApiResponse<CardResponseDeleteAt>, HttpError> {
         info!("restoring card id: {id}");
 
         let method = Method::Post;
@@ -1069,9 +1052,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("card {id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Card data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Card data is missing in gRPC response".into())
                 })?;
 
                 let cache_keys = vec![
@@ -1103,13 +1084,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to restore card")
                     .await;
                 error!("restore card {id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete(&self, id: i32) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete(&self, id: i32) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting card id: {id}");
 
         let method = Method::Delete;
@@ -1167,13 +1148,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("delete card {id} permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("restoring all trashed cards");
 
         let method = Method::Post;
@@ -1227,13 +1208,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("restore all cards failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting all cards");
 
         let method = Method::Post;
@@ -1293,7 +1274,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("delete all cards permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1305,7 +1286,7 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_balance(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthBalance>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthBalance>>, HttpError> {
         info!("fetching monthly balance for year: {year}");
 
         let method = Method::Get;
@@ -1376,7 +1357,7 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly balance for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1385,7 +1366,7 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_balance(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseYearlyBalance>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearlyBalance>>, HttpError> {
         info!("fetching yearly balance for year: {year}");
 
         let method = Method::Get;
@@ -1453,7 +1434,7 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch yearly balance")
                     .await;
                 error!("fetch yearly balance for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1465,7 +1446,7 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_topup_amount(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, HttpError> {
         info!("fetching monthly topup amount for year: {year}");
 
         let method = Method::Get;
@@ -1541,7 +1522,7 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly topup amount for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1550,7 +1531,7 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_topup_amount(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, HttpError> {
         info!("fetching yearly topup amount for year: {year}");
 
         let method = Method::Get;
@@ -1621,7 +1602,7 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly topup amount for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1633,7 +1614,7 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_transaction_amount(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, HttpError> {
         info!("fetching monthly TRANSACTION amount for year: {year}");
 
         let method = Method::Get;
@@ -1709,7 +1690,7 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly TRANSACTION amount for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1718,7 +1699,7 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_transaction_amount(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, HttpError> {
         info!("fetching yearly TRANSACTION amount for year: {year}");
 
         let method = Method::Get;
@@ -1794,7 +1775,7 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly TRANSACTION amount for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1806,7 +1787,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_amount_sender(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, HttpError> {
         info!("fetching monthly TRANSFER amount (sender) for year: {year}");
 
         let method = Method::Get;
@@ -1883,7 +1864,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly TRANSFER amount (sender) for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1892,7 +1873,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_amount_sender(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, HttpError> {
         info!("fetching yearly TRANSFER amount (sender) for year: {year}");
 
         let method = Method::Get;
@@ -1967,7 +1948,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly TRANSFER amount (sender) for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1976,7 +1957,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_amount_receiver(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, HttpError> {
         info!("fetching monthly TRANSFER amount (receiver) for year: {year}");
 
         let method = Method::Get;
@@ -2055,7 +2036,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                 error!(
                     "fetch monthly TRANSFER amount (receiver) for year {year} failed: {status:?}"
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2064,7 +2045,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_amount_receiver(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, HttpError> {
         info!("fetching yearly TRANSFER amount (receiver) for year: {year}");
 
         let method = Method::Get;
@@ -2142,7 +2123,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                 error!(
                     "fetch yearly TRANSFER amount (receiver) for year {year} failed: {status:?}"
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2154,7 +2135,7 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_withdraw_amount(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, HttpError> {
         info!("fetching monthly WITHDRAW amount for year: {year}");
 
         let method = Method::Get;
@@ -2230,7 +2211,7 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly WITHDRAW amount for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2239,7 +2220,7 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_withdraw_amount(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, HttpError> {
         info!("fetching yearly WITHDRAW amount for year: {year}");
 
         let method = Method::Get;
@@ -2315,7 +2296,7 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly WITHDRAW amount for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2327,7 +2308,7 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_balance_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthBalance>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthBalance>>, HttpError> {
         info!(
             "fetching monthly BALANCE for card: {}, year: {}",
             req.card_number, req.year
@@ -2422,7 +2403,7 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch monthly BALANCE for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2431,7 +2412,7 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_balance_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseYearlyBalance>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearlyBalance>>, HttpError> {
         info!(
             "fetching yearly BALANCE for card: {}, year: {}",
             req.card_number, req.year
@@ -2527,7 +2508,7 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch yearly BALANCE for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2539,7 +2520,7 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_topup_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, HttpError> {
         info!(
             "fetching monthly TOPUP amount for card: {}, year: {}",
             req.card_number, req.year
@@ -2635,7 +2616,7 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch monthly TOPUP for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2644,7 +2625,7 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_topup_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, HttpError> {
         info!(
             "fetching yearly TOPUP amount for card: {}, year: {}",
             req.card_number, req.year
@@ -2739,7 +2720,7 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch yearly TOPUP for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2751,7 +2732,7 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_transaction_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, HttpError> {
         info!(
             "fetching monthly TRANSACTION amount for card: {}, year: {}",
             req.card_number, req.year
@@ -2847,7 +2828,7 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch monthly TRANSACTION for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2856,7 +2837,7 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_transaction_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, HttpError> {
         info!(
             "fetching yearly TRANSACTION amount for card: {}, year: {}",
             req.card_number, req.year
@@ -2952,7 +2933,7 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch yearly TRANSACTION for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2964,7 +2945,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_amount_sender_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, HttpError> {
         info!(
             "fetching monthly TRANSFER amount (sender) for card: {}, year: {}",
             req.card_number, req.year
@@ -3060,7 +3041,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch monthly TRANSFER (sender) for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -3069,7 +3050,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_amount_sender_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, HttpError> {
         info!(
             "fetching yearly TRANSFER amount (sender) for card: {}, year: {}",
             req.card_number, req.year
@@ -3165,7 +3146,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch yearly TRANSFER (sender) for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -3174,7 +3155,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_amount_receiver_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, HttpError> {
         info!(
             "fetching monthly TRANSFER amount (receiver) for card: {}, year: {}",
             req.card_number, req.year
@@ -3270,7 +3251,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch monthly TRANSFER (receiver) for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -3279,7 +3260,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_amount_receiver_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, HttpError> {
         info!(
             "fetching yearly TRANSFER amount (receiver) for card: {}, year: {}",
             req.card_number, req.year
@@ -3375,7 +3356,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch yearly TRANSFER (receiver) for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -3387,7 +3368,7 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_monthly_withdraw_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseMonthAmount>>, HttpError> {
         info!(
             "fetching monthly WITHDRAW amount for card: {}, year: {}",
             req.card_number, req.year
@@ -3483,7 +3464,7 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch monthly WITHDRAW for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -3492,7 +3473,7 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
     async fn get_yearly_withdraw_amount_bycard(
         &self,
         req: &DomainMonthYearCardNumberCard,
-    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<CardResponseYearAmount>>, HttpError> {
         info!(
             "fetching yearly WITHDRAW amount for card: {}, year: {}",
             req.card_number, req.year
@@ -3588,7 +3569,7 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
                     "fetch yearly WITHDRAW for card {} year {} failed: {status:?}",
                     req.card_number, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }

@@ -1,5 +1,8 @@
 use crate::{
-    middleware::{jwt, rate_limit::rate_limit_middleware, validate::SimpleValidatedJson},
+    middleware::{
+        jwt, rate_limit::rate_limit_middleware, session::session_middleware,
+        validate::SimpleValidatedJson,
+    },
     state::AppState,
 };
 use axum::{
@@ -12,7 +15,7 @@ use axum::{
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::saldo::http::DynSaldoGrpcClientService,
+    abstract_trait::{saldo::http::DynSaldoGrpcClientService, session::DynSessionMiddleware},
     domain::{
         requests::{
             saldo::{
@@ -26,7 +29,7 @@ use shared::{
             SaldoYearBalanceResponse, SaldoYearTotalBalanceResponse,
         },
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use std::sync::Arc;
 use utoipa_axum::router::OpenApiRouter;
@@ -46,7 +49,7 @@ use utoipa_axum::router::OpenApiRouter;
 pub async fn get_saldos(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(params): Query<FindAllSaldos>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -68,7 +71,7 @@ pub async fn get_saldos(
 pub async fn get_active_saldos(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(params): Query<FindAllSaldos>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -90,7 +93,7 @@ pub async fn get_active_saldos(
 pub async fn get_trashed_saldos(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(params): Query<FindAllSaldos>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -112,7 +115,7 @@ pub async fn get_trashed_saldos(
 pub async fn get_saldo(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -134,7 +137,7 @@ pub async fn get_saldo(
 pub async fn get_saldo_by_card(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(card_number): Path<String>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_card(&card_number).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -157,7 +160,7 @@ pub async fn get_saldo_by_card(
 pub async fn create_saldo(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateSaldoRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
@@ -182,7 +185,7 @@ pub async fn update_saldo(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateSaldoRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     body.saldo_id = Some(id);
     match service.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
@@ -205,7 +208,26 @@ pub async fn update_saldo(
 pub async fn trash_saldo_handler(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.trash(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -227,7 +249,26 @@ pub async fn trash_saldo_handler(
 pub async fn restore_saldo_handler(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -249,7 +290,26 @@ pub async fn restore_saldo_handler(
 pub async fn delete_saldo(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.delete_permanent(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -274,7 +334,26 @@ pub async fn delete_saldo(
 )]
 pub async fn restore_all_saldo_handler(
     Extension(service): Extension<DynSaldoGrpcClientService>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -299,7 +378,26 @@ pub async fn restore_all_saldo_handler(
 )]
 pub async fn delete_all_saldo_handler(
     Extension(service): Extension<DynSaldoGrpcClientService>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -327,7 +425,26 @@ pub async fn delete_all_saldo_handler(
 pub async fn get_monthly_balance(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_month_balance(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -349,7 +466,26 @@ pub async fn get_monthly_balance(
 pub async fn get_yearly_balance(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_year_balance(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -371,7 +507,26 @@ pub async fn get_yearly_balance(
 pub async fn get_monthly_total_balance(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(params): Query<MonthTotalSaldoBalance>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_month_total_balance(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -393,7 +548,26 @@ pub async fn get_monthly_total_balance(
 pub async fn get_yearly_total_balance(
     Extension(service): Extension<DynSaldoGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_year_total_balance(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -427,9 +601,12 @@ pub fn saldo_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/saldos/stats/total-balance/yearly",
             get(get_yearly_total_balance),
         )
+        .route_layer(middleware::from_fn(session_middleware))
         .route_layer(middleware::from_fn(rate_limit_middleware))
         .route_layer(middleware::from_fn(jwt::auth))
         .layer(Extension(app_state.di_container.saldo_clients.clone()))
+        .layer(Extension(app_state.di_container.role_clients.clone()))
+        .layer(Extension(app_state.session.clone()))
         .layer(Extension(app_state.rate_limit.clone()))
         .layer(Extension(app_state.jwt_config.clone()))
 }

@@ -32,7 +32,7 @@ use shared::{
             SaldoYearBalanceResponse, SaldoYearTotalBalanceResponse,
         },
     },
-    errors::{AppErrorGrpc, AppErrorHttp},
+    errors::{AppErrorGrpc, HttpError},
     utils::{
         MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_card_number,
         month_name,
@@ -157,7 +157,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
     async fn find_all(
         &self,
         request: &DomainFindAllSaldos,
-    ) -> Result<ApiResponsePagination<Vec<SaldoResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<SaldoResponse>>, HttpError> {
         let page = request.page;
         let page_size = request.page_size;
 
@@ -232,7 +232,8 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch saldos")
                     .await;
                 error!("fetch all saldos failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -241,7 +242,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
     async fn find_active(
         &self,
         request: &DomainFindAllSaldos,
-    ) -> Result<ApiResponsePagination<Vec<SaldoResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<SaldoResponseDeleteAt>>, HttpError> {
         let page = request.page;
         let page_size = request.page_size;
 
@@ -321,7 +322,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch active saldos")
                     .await;
                 error!("fetch active saldos failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -330,7 +331,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
     async fn find_trashed(
         &self,
         request: &DomainFindAllSaldos,
-    ) -> Result<ApiResponsePagination<Vec<SaldoResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<SaldoResponseDeleteAt>>, HttpError> {
         let page = request.page;
         let page_size = request.page;
 
@@ -410,13 +411,13 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed saldos")
                     .await;
                 error!("fetch trashed saldos failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp> {
+    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<SaldoResponse>, HttpError> {
         info!("fetching saldo by id: {id}");
 
         let method = Method::Get;
@@ -458,9 +459,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("saldo {id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Saldo data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Saldo data is missing in gRPC response".into())
                 })?;
 
                 let data: SaldoResponse = data.into();
@@ -483,7 +482,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch saldo by id")
                     .await;
                 error!("find saldo {id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -492,7 +491,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
     async fn find_by_card(
         &self,
         card_number: &str,
-    ) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<SaldoResponse>, HttpError> {
         let masked_card = mask_card_number(card_number);
 
         info!("fetching saldo by card_number: {masked_card}");
@@ -538,9 +537,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("saldo with card_number {card_number} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Saldo data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Saldo data is missing in gRPC response".into())
                 })?;
 
                 let data: SaldoResponse = data.into();
@@ -566,7 +563,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 )
                 .await;
                 error!("find saldo with card_number {card_number} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -578,7 +575,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
     async fn create(
         &self,
         request: &DomainCreateSaldoRequest,
-    ) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<SaldoResponse>, HttpError> {
         let masked_card = mask_card_number(&request.card_number);
 
         info!(
@@ -611,7 +608,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("saldo creation failed - data missing in gRPC response for card: {masked_card}");
-                    AppErrorHttp(AppErrorGrpc::Unhandled("Saldo data is missing in gRPC response".into()))
+                    HttpError::Internal("Saldo data is missing in gRPC response".into())
                 })?;
 
                 let saldo_response: SaldoResponse = data.into();
@@ -651,7 +648,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to create saldo")
                     .await;
                 error!("create saldo for card {masked_card} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -660,11 +657,11 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
     async fn update(
         &self,
         request: &DomainUpdateSaldoRequest,
-    ) -> Result<ApiResponse<SaldoResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<SaldoResponse>, HttpError> {
         let masked_card = mask_card_number(&request.card_number);
-        let saldo_id = request.saldo_id.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled("saldo_id is required".to_string()))
-        })?;
+        let saldo_id = request
+            .saldo_id
+            .ok_or_else(|| HttpError::Internal("saldo_id is required".to_string()))?;
 
         info!(
             "updating saldo id: {saldo_id} for card: {} with new balance: {}",
@@ -698,9 +695,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("update saldo {saldo_id} - data missing in gRPC response",);
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Saldo data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Saldo data is missing in gRPC response".into())
                 })?;
 
                 let saldo_response: SaldoResponse = data.into();
@@ -742,13 +737,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to update saldo")
                     .await;
                 error!("update saldo {saldo_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn trash(&self, id: i32) -> Result<ApiResponse<SaldoResponseDeleteAt>, AppErrorHttp> {
+    async fn trash(&self, id: i32) -> Result<ApiResponse<SaldoResponseDeleteAt>, HttpError> {
         info!("trashing saldo id: {id}");
 
         let method = Method::Post;
@@ -773,9 +768,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("trash saldo {id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Saldo data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Saldo data is missing in gRPC response".into())
                 })?;
 
                 let saldo_response: SaldoResponseDeleteAt = data.into();
@@ -805,13 +798,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to trash saldo")
                     .await;
                 error!("trash saldo {id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore(&self, id: i32) -> Result<ApiResponse<SaldoResponseDeleteAt>, AppErrorHttp> {
+    async fn restore(&self, id: i32) -> Result<ApiResponse<SaldoResponseDeleteAt>, HttpError> {
         info!("restoring saldo id: {id}");
 
         let method = Method::Post;
@@ -836,9 +829,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("restore saldo {id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Saldo data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Saldo data is missing in gRPC response".into())
                 })?;
 
                 let saldo_response: SaldoResponseDeleteAt = data.into();
@@ -868,13 +859,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to restore saldo")
                     .await;
                 error!("restore saldo {id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_permanent(&self, id: i32) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_permanent(&self, id: i32) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting saldo id: {id}");
 
         let method = Method::Delete;
@@ -932,13 +923,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 )
                 .await;
                 error!("delete saldo {id} permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("restoring all trashed saldos");
 
         let method = Method::Post;
@@ -994,13 +985,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 )
                 .await;
                 error!("restore all saldos failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting all saldos");
 
         let method = Method::Post;
@@ -1062,7 +1053,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 )
                 .await;
                 error!("delete all saldos permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1074,7 +1065,7 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
     async fn get_month_balance(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<SaldoMonthBalanceResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<SaldoMonthBalanceResponse>>, HttpError> {
         info!("fetching monthly BALANCE for year: {year}");
 
         let method = Method::Get;
@@ -1151,7 +1142,7 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly BALANCE for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1160,7 +1151,7 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
     async fn get_year_balance(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<SaldoYearBalanceResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<SaldoYearBalanceResponse>>, HttpError> {
         info!("fetching yearly BALANCE for year: {year}");
 
         let method = Method::Get;
@@ -1233,7 +1224,7 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch yearly balance")
                     .await;
                 error!("fetch yearly BALANCE for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1245,7 +1236,7 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
     async fn get_month_total_balance(
         &self,
         req: &DomainMonthTotalSaldoBalance,
-    ) -> Result<ApiResponse<Vec<SaldoMonthTotalBalanceResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<SaldoMonthTotalBalanceResponse>>, HttpError> {
         let month_str = month_name(req.month);
         info!(
             "fetching monthly TOTAL BALANCE for {month_str} {}",
@@ -1337,7 +1328,7 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
                     "fetch monthly TOTAL BALANCE for {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1346,7 +1337,7 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
     async fn get_year_total_balance(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<SaldoYearTotalBalanceResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<SaldoYearTotalBalanceResponse>>, HttpError> {
         info!("fetching yearly TOTAL BALANCE for year: {year}");
 
         let method = Method::Get;
@@ -1422,7 +1413,7 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly TOTAL BALANCE for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }

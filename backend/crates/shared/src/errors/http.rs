@@ -9,144 +9,87 @@ use axum::{
 use tracing::{error, info, warn};
 
 #[derive(Debug)]
-pub struct AppErrorHttp(pub AppErrorGrpc);
+pub enum HttpError {
+    BadRequest(String),
+    Unauthorized(String),
+    NotFound(String),
+    Conflict(String),
+    ServiceUnavailable(String),
+    Internal(String),
+    Forbidden(String),
+}
 
-impl IntoResponse for AppErrorHttp {
-    fn into_response(self) -> Response {
-        let (status, msg, log_level) = match self.0 {
+impl From<AppErrorGrpc> for HttpError {
+    fn from(err: AppErrorGrpc) -> Self {
+        match err {
             AppErrorGrpc::Service(service_err) => match service_err {
                 ServiceError::InvalidCredentials => {
-                    warn!("🔐 Invalid credentials attempt");
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        "Invalid credentials".to_string(),
-                        "warn",
-                    )
+                    HttpError::Unauthorized("Invalid credentials".to_string())
                 }
+
                 ServiceError::Validation(errors) => {
-                    warn!("📝 Validation failed: {errors:?}");
-                    let error_msg = format!("Validation failed: {errors:?}");
-                    (StatusCode::BAD_REQUEST, error_msg, "warn")
+                    HttpError::BadRequest(format!("Validation failed: {errors:?}"))
                 }
+
+                ServiceError::Forbidden(msg) => HttpError::Forbidden(msg),
+
                 ServiceError::Repo(repo_err) => match repo_err {
-                    RepositoryError::NotFound => {
-                        info!("🔍 Resource not found");
-                        (StatusCode::NOT_FOUND, "Not found".to_string(), "info")
-                    }
-                    RepositoryError::Conflict(msg) => {
-                        warn!("⚡ Conflict detected: {}", msg);
-                        (StatusCode::CONFLICT, msg, "warn")
-                    }
-                    RepositoryError::AlreadyExists(msg) => {
-                        warn!("📦 Resource already exists: {}", msg);
-                        (StatusCode::CONFLICT, msg, "warn")
-                    }
+                    RepositoryError::NotFound => HttpError::NotFound("Not found".into()),
+                    RepositoryError::Conflict(msg) => HttpError::Conflict(msg),
+                    RepositoryError::AlreadyExists(msg) => HttpError::Conflict(msg),
                     RepositoryError::ForeignKey(msg) => {
-                        warn!("🔗 Foreign key violation: {}", msg);
-                        (
-                            StatusCode::BAD_REQUEST,
-                            format!("Foreign key violation: {msg}"),
-                            "warn",
-                        )
+                        HttpError::BadRequest(format!("Foreign key violation: {msg}"))
                     }
-                    RepositoryError::Sqlx(err) => {
-                        error!("💾 Database error: {}", err);
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Database error".to_string(),
-                            "error",
-                        )
-                    }
-                    RepositoryError::Custom(msg) => {
-                        error!("⚙️ Custom repository error: {}", msg);
-                        (StatusCode::INTERNAL_SERVER_ERROR, msg, "error")
-                    }
+                    _ => HttpError::Internal("Repository error".into()),
                 },
-                ServiceError::Bcrypt(err) => {
-                    error!("🔒 Bcrypt error: {}", err);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Internal authentication error".to_string(),
-                        "error",
-                    )
+
+                ServiceError::Jwt(err) => HttpError::Unauthorized(format!("JWT error: {err}")),
+
+                ServiceError::InternalServerError(msg) | ServiceError::Custom(msg) => {
+                    HttpError::Internal(msg)
                 }
-                ServiceError::Jwt(err) => {
-                    warn!("🎫 JWT error: {}", err);
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        format!("JWT error: {err}"),
-                        "warn",
-                    )
+
+                ServiceError::Bcrypt(_) => {
+                    HttpError::Internal("Internal authentication error".into())
                 }
-                ServiceError::TokenExpired => {
-                    warn!("⏰ Token expired");
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        "Token has expired".to_string(),
-                        "warn",
-                    )
-                }
+
+                ServiceError::TokenExpired => HttpError::Unauthorized("Token expired".into()),
+
                 ServiceError::InvalidTokenType => {
-                    warn!("🎫 Invalid token type");
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        "Invalid token type".to_string(),
-                        "warn",
-                    )
+                    HttpError::Unauthorized("Invalid token type".into())
                 }
-                ServiceError::InternalServerError(msg) => {
-                    error!("🔥 Internal server error: {}", msg);
-                    (StatusCode::INTERNAL_SERVER_ERROR, msg, "error")
-                }
-                ServiceError::Custom(msg) => {
-                    error!("⚙️ Custom service error: {}", msg);
-                    (StatusCode::INTERNAL_SERVER_ERROR, msg, "error")
-                }
-                ServiceError::NotFound(msg) => {
-                    info!("🔍 Not found: {}", msg);
-                    (StatusCode::NOT_FOUND, msg, "info")
-                }
+                _ => HttpError::Internal("Unknown service error".into()),
             },
-            AppErrorGrpc::Unhandled(msg) => {
-                error!("💥 Unhandled error: {}", msg);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Unhandled error: {msg}"),
-                    "error",
-                )
-            }
+
+            AppErrorGrpc::Unhandled(msg) => HttpError::Internal(msg),
+        }
+    }
+}
+
+impl IntoResponse for HttpError {
+    fn into_response(self) -> Response {
+        let (status, msg, log_level) = match self {
+            HttpError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg, "warn"),
+            HttpError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg, "warn"),
+            HttpError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg, "warn"),
+            HttpError::NotFound(msg) => (StatusCode::NOT_FOUND, msg, "info"),
+            HttpError::Conflict(msg) => (StatusCode::CONFLICT, msg, "warn"),
+            HttpError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg, "error"),
+            HttpError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg, "error"),
         };
 
         match log_level {
-            "error" => error!("🚨 HTTP Error {}: {}", status, msg),
-            "warn" => warn!("⚠️ HTTP Warning {}: {}", status, msg),
-            "info" => info!("ℹ️ HTTP Info {}: {}", status, msg),
-            _ => error!("🚨 HTTP Error {}: {}", status, msg),
+            "error" => error!("HTTP {}: {}", status, msg),
+            "warn" => warn!("HTTP {}: {}", status, msg),
+            "info" => info!("HTTP {}: {}", status, msg),
+            _ => error!("HTTP {}: {}", status, msg),
         }
 
         let body = Json(ErrorResponse {
-            status: "error".to_string(),
+            status: "error".into(),
             message: msg,
         });
 
         (status, body).into_response()
-    }
-}
-
-impl From<AppErrorGrpc> for AppErrorHttp {
-    fn from(error: AppErrorGrpc) -> Self {
-        AppErrorHttp(error)
-    }
-}
-
-impl From<ServiceError> for AppErrorHttp {
-    fn from(error: ServiceError) -> Self {
-        AppErrorHttp(AppErrorGrpc::Service(error))
-    }
-}
-
-impl From<RepositoryError> for AppErrorHttp {
-    fn from(error: RepositoryError) -> Self {
-        AppErrorHttp(AppErrorGrpc::Service(ServiceError::Repo(error)))
     }
 }

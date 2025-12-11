@@ -1,3 +1,4 @@
+use crate::middleware::session::session_middleware;
 use crate::{
     middleware::{jwt, rate_limit::rate_limit_middleware, validate::SimpleValidatedJson},
     state::AppState,
@@ -11,13 +12,14 @@ use axum::{
     routing::{delete, get, post},
 };
 use serde_json::json;
+use shared::abstract_trait::session::DynSessionMiddleware;
 use shared::{
     abstract_trait::role::http::DynRoleGrpcClientService,
     domain::{
         requests::role::{CreateRoleRequest, FindAllRoles, UpdateRoleRequest},
         responses::{ApiResponse, ApiResponsePagination, RoleResponse, RoleResponseDeleteAt},
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use std::sync::Arc;
 use utoipa_axum::router::OpenApiRouter;
@@ -37,7 +39,7 @@ use utoipa_axum::router::OpenApiRouter;
 pub async fn get_roles(
     Extension(service): Extension<DynRoleGrpcClientService>,
     Query(params): Query<FindAllRoles>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -59,7 +61,7 @@ pub async fn get_roles(
 pub async fn get_active_roles(
     Extension(service): Extension<DynRoleGrpcClientService>,
     Query(params): Query<FindAllRoles>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -81,7 +83,7 @@ pub async fn get_active_roles(
 pub async fn get_trashed_roles(
     Extension(service): Extension<DynRoleGrpcClientService>,
     Query(params): Query<FindAllRoles>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -103,7 +105,7 @@ pub async fn get_trashed_roles(
 pub async fn get_role(
     Extension(service): Extension<DynRoleGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -125,7 +127,7 @@ pub async fn get_role(
 pub async fn get_roles_by_user_id(
     Extension(service): Extension<DynRoleGrpcClientService>,
     Path(user_id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_user_id(user_id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -147,8 +149,27 @@ pub async fn get_roles_by_user_id(
 )]
 pub async fn create_role(
     Extension(service): Extension<DynRoleGrpcClientService>,
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateRoleRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
@@ -172,8 +193,27 @@ pub async fn create_role(
 pub async fn update_role(
     Extension(service): Extension<DynRoleGrpcClientService>,
     Path(id): Path<i32>,
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateRoleRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     body.id = Some(id);
     match service.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
@@ -196,7 +236,26 @@ pub async fn update_role(
 pub async fn trash_role_handler(
     Extension(service): Extension<DynRoleGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.trash(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -218,7 +277,26 @@ pub async fn trash_role_handler(
 pub async fn restore_role_handler(
     Extension(service): Extension<DynRoleGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -240,7 +318,26 @@ pub async fn restore_role_handler(
 pub async fn delete_role(
     Extension(service): Extension<DynRoleGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.delete(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -265,7 +362,26 @@ pub async fn delete_role(
 )]
 pub async fn restore_all_role_handler(
     Extension(service): Extension<DynRoleGrpcClientService>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -290,7 +406,26 @@ pub async fn restore_all_role_handler(
 )]
 pub async fn delete_all_role_handler(
     Extension(service): Extension<DynRoleGrpcClientService>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -317,9 +452,11 @@ pub fn role_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/roles/delete/{id}", delete(delete_role))
         .route("/api/roles/restore-all", post(restore_all_role_handler))
         .route("/api/roles/delete-all", post(delete_all_role_handler))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
+        .route_layer(middleware::from_fn(session_middleware))
         .route_layer(middleware::from_fn(jwt::auth))
+        .route_layer(middleware::from_fn(rate_limit_middleware))
         .layer(Extension(app_state.di_container.role_clients.clone()))
+        .layer(Extension(app_state.session.clone()))
         .layer(Extension(app_state.rate_limit.clone()))
         .layer(Extension(app_state.jwt_config.clone()))
 }

@@ -1,6 +1,8 @@
 use crate::{di::DependenciesInject, service::GrpcClients};
 use anyhow::{Context, Result};
 use shared::abstract_trait::rate_limit::DynRateLimitMiddleware;
+use shared::abstract_trait::session::DynSessionMiddleware;
+use shared::cache::session::SessionStore;
 use shared::{
     abstract_trait::jwt::DynJwtService,
     config::{GrpcClientConfig, JwtConfig},
@@ -17,6 +19,7 @@ pub struct AppState {
     pub rate_limit: DynRateLimitMiddleware,
     pub di_container: DependenciesInject,
     pub system_metrics: Arc<SystemMetrics>,
+    pub session: DynSessionMiddleware,
 }
 
 impl AppState {
@@ -32,6 +35,8 @@ impl AppState {
 
         let rate_limiter_middleware =
             Arc::new(RateLimiter::new(redis.pool.clone())) as DynRateLimitMiddleware;
+        let session_middleware =
+            Arc::new(SessionStore::new(redis.pool.clone())) as DynSessionMiddleware;
 
         let clients = GrpcClients::init(grpc_config)
             .await
@@ -45,6 +50,7 @@ impl AppState {
         Ok(Self {
             jwt_config,
             di_container,
+            session: session_middleware,
             rate_limit: rate_limiter_middleware,
             system_metrics,
         })

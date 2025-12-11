@@ -1,6 +1,6 @@
 use crate::{
     domain::responses::{ApiResponse, WithdrawMonthlyAmountResponse, WithdrawYearlyAmountResponse},
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -10,9 +10,9 @@ pub trait WithdrawStatsAmountGrpcClientTrait {
     async fn get_monthly_withdraws(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<WithdrawMonthlyAmountResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<WithdrawMonthlyAmountResponse>>, HttpError>;
     async fn get_yearly_withdraws(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<WithdrawYearlyAmountResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponse<Vec<WithdrawYearlyAmountResponse>>, HttpError>;
 }

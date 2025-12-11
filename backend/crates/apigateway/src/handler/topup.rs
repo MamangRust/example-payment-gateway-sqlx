@@ -1,5 +1,8 @@
 use crate::{
-    middleware::{jwt, rate_limit::rate_limit_middleware, validate::SimpleValidatedJson},
+    middleware::{
+        jwt, rate_limit::rate_limit_middleware, session::session_middleware,
+        validate::SimpleValidatedJson,
+    },
     state::AppState,
 };
 use axum::{
@@ -12,7 +15,7 @@ use axum::{
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::topup::http::DynTopupGrpcClientService,
+    abstract_trait::{session::DynSessionMiddleware, topup::http::DynTopupGrpcClientService},
     domain::{
         requests::{
             topup::{
@@ -29,7 +32,7 @@ use shared::{
             TopupResponseYearStatusSuccess, TopupYearlyAmountResponse, TopupYearlyMethodResponse,
         },
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use std::sync::Arc;
 use utoipa_axum::router::OpenApiRouter;
@@ -49,7 +52,7 @@ use utoipa_axum::router::OpenApiRouter;
 pub async fn get_topups(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<FindAllTopups>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -71,7 +74,7 @@ pub async fn get_topups(
 pub async fn get_topups_by_card_number(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<FindAllTopupsByCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_all_by_card_number(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -93,7 +96,7 @@ pub async fn get_topups_by_card_number(
 pub async fn get_active_topups(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<FindAllTopups>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -115,7 +118,7 @@ pub async fn get_active_topups(
 pub async fn get_trashed_topups(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<FindAllTopups>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -137,7 +140,7 @@ pub async fn get_trashed_topups(
 pub async fn get_topup(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -160,7 +163,7 @@ pub async fn get_topup(
 pub async fn create_topup(
     Extension(service): Extension<DynTopupGrpcClientService>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateTopupRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
@@ -185,7 +188,7 @@ pub async fn update_topup(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTopupRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     body.topup_id = Some(id);
     match service.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
@@ -208,7 +211,26 @@ pub async fn update_topup(
 pub async fn trash_topup_handler(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.trashed(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -230,7 +252,26 @@ pub async fn trash_topup_handler(
 pub async fn restore_topup_handler(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -252,7 +293,26 @@ pub async fn restore_topup_handler(
 pub async fn delete_topup(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.delete_permanent(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -277,7 +337,26 @@ pub async fn delete_topup(
 )]
 pub async fn restore_all_topup_handler(
     Extension(service): Extension<DynTopupGrpcClientService>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -302,7 +381,26 @@ pub async fn restore_all_topup_handler(
 )]
 pub async fn delete_all_topup_handler(
     Extension(service): Extension<DynTopupGrpcClientService>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.delete_all_permanent().await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -330,7 +428,26 @@ pub async fn delete_all_topup_handler(
 pub async fn get_monthly_topup_amounts(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_monthly_amounts(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -352,7 +469,26 @@ pub async fn get_monthly_topup_amounts(
 pub async fn get_yearly_topup_amounts(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_amounts(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -374,7 +510,26 @@ pub async fn get_yearly_topup_amounts(
 pub async fn get_monthly_topup_methods(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_monthly_methods(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -396,7 +551,26 @@ pub async fn get_monthly_topup_methods(
 pub async fn get_yearly_topup_methods(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_methods(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -418,7 +592,26 @@ pub async fn get_yearly_topup_methods(
 pub async fn get_month_topup_status_success(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<MonthTopupStatus>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_month_status_success(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -440,7 +633,26 @@ pub async fn get_month_topup_status_success(
 pub async fn get_yearly_topup_status_success(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_status_success(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -462,7 +674,26 @@ pub async fn get_yearly_topup_status_success(
 pub async fn get_month_topup_status_failed(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<MonthTopupStatus>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_month_status_failed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -484,7 +715,26 @@ pub async fn get_month_topup_status_failed(
 pub async fn get_yearly_topup_status_failed(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(req): Query<YearQuery>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_status_failed(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -506,7 +756,26 @@ pub async fn get_yearly_topup_status_failed(
 pub async fn get_monthly_topup_amounts_by_card(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearMonthMethod>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_monthly_amounts_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -528,7 +797,26 @@ pub async fn get_monthly_topup_amounts_by_card(
 pub async fn get_yearly_topup_amounts_by_card(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearMonthMethod>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_amounts_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -550,7 +838,26 @@ pub async fn get_yearly_topup_amounts_by_card(
 pub async fn get_monthly_topup_methods_by_card(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearMonthMethod>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_monthly_methods_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -572,7 +879,26 @@ pub async fn get_monthly_topup_methods_by_card(
 pub async fn get_yearly_topup_methods_by_card(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearMonthMethod>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_methods_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -594,7 +920,26 @@ pub async fn get_yearly_topup_methods_by_card(
 pub async fn get_month_topup_status_success_by_card(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<MonthTopupStatusCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_month_status_success_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -616,7 +961,26 @@ pub async fn get_month_topup_status_success_by_card(
 pub async fn get_yearly_topup_status_success_by_card(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearTopupStatusCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_status_success_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -638,7 +1002,26 @@ pub async fn get_yearly_topup_status_success_by_card(
 pub async fn get_month_topup_status_failed_by_card(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<MonthTopupStatusCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_month_status_failed_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -660,7 +1043,26 @@ pub async fn get_month_topup_status_failed_by_card(
 pub async fn get_yearly_topup_status_failed_by_card(
     Extension(service): Extension<DynTopupGrpcClientService>,
     Query(params): Query<YearTopupStatusCardNumber>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.get_yearly_status_failed_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -745,9 +1147,12 @@ pub fn topup_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/topups/stats/status/failed/yearly/by-card",
             get(get_yearly_topup_status_failed_by_card),
         )
-        .route_layer(middleware::from_fn(rate_limit_middleware))
+        .route_layer(middleware::from_fn(session_middleware))
         .route_layer(middleware::from_fn(jwt::auth))
+        .route_layer(middleware::from_fn(rate_limit_middleware))
         .layer(Extension(app_state.di_container.topup_clients.clone()))
+        .layer(Extension(app_state.di_container.role_clients.clone()))
+        .layer(Extension(app_state.session.clone()))
         .layer(Extension(app_state.rate_limit.clone()))
         .layer(Extension(app_state.jwt_config.clone()))
 }

@@ -1,3 +1,4 @@
+use crate::middleware::session::session_middleware;
 use crate::{
     middleware::{jwt, rate_limit::rate_limit_middleware, validate::SimpleValidatedJson},
     state::AppState,
@@ -11,13 +12,14 @@ use axum::{
     routing::{delete, get, post},
 };
 use serde_json::json;
+use shared::abstract_trait::session::DynSessionMiddleware;
 use shared::{
     abstract_trait::user::http::DynUserGrpcServiceClient,
     domain::{
         requests::user::{CreateUserRequest, FindAllUserRequest, UpdateUserRequest},
         responses::{ApiResponse, ApiResponsePagination, UserResponse, UserResponseDeleteAt},
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use std::sync::Arc;
 use utoipa_axum::router::OpenApiRouter;
@@ -37,7 +39,7 @@ use utoipa_axum::router::OpenApiRouter;
 pub async fn get_users(
     Extension(service): Extension<DynUserGrpcServiceClient>,
     Query(params): Query<FindAllUserRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -59,7 +61,7 @@ pub async fn get_users(
 pub async fn get_user(
     Extension(service): Extension<DynUserGrpcServiceClient>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -81,7 +83,7 @@ pub async fn get_user(
 pub async fn get_active_users(
     Extension(service): Extension<DynUserGrpcServiceClient>,
     Query(params): Query<FindAllUserRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -103,7 +105,7 @@ pub async fn get_active_users(
 pub async fn get_trashed_users(
     Extension(service): Extension<DynUserGrpcServiceClient>,
     Query(params): Query<FindAllUserRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     match service.find_by_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -125,8 +127,27 @@ pub async fn get_trashed_users(
 )]
 pub async fn create_user(
     Extension(service): Extension<DynUserGrpcServiceClient>,
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateUserRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
@@ -150,8 +171,27 @@ pub async fn create_user(
 pub async fn update_user(
     Extension(service): Extension<DynUserGrpcServiceClient>,
     Path(id): Path<i32>,
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateUserRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     body.id = Some(id);
     match service.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
@@ -174,7 +214,26 @@ pub async fn update_user(
 pub async fn trash_user_handler(
     Extension(service): Extension<DynUserGrpcServiceClient>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.trashed(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -196,7 +255,26 @@ pub async fn trash_user_handler(
 pub async fn restore_user_handler(
     Extension(service): Extension<DynUserGrpcServiceClient>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -218,7 +296,26 @@ pub async fn restore_user_handler(
 pub async fn delete_user(
     Extension(service): Extension<DynUserGrpcServiceClient>,
     Path(id): Path<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.delete_permanent(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -243,7 +340,26 @@ pub async fn delete_user(
 )]
 pub async fn restore_all_user_handler(
     Extension(service): Extension<DynUserGrpcServiceClient>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -268,7 +384,26 @@ pub async fn restore_all_user_handler(
 )]
 pub async fn delete_all_user_handler(
     Extension(service): Extension<DynUserGrpcServiceClient>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+    Extension(user_id): Extension<i32>,
+    Extension(session): Extension<DynSessionMiddleware>,
+) -> Result<impl IntoResponse, HttpError> {
+    let key = format!("session:{user_id}");
+
+    let current_session = session
+        .get_session(&key)
+        .await
+        .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    if !current_session
+        .roles
+        .iter()
+        .any(|r| r == "ROLE_ADMIN" || r == "ROLE_MODERATOR")
+    {
+        return Err(HttpError::Forbidden(
+            "Access denied. Required role: ADMIN or MODERATOR".to_string(),
+        ));
+    }
+
     match service.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
@@ -293,8 +428,10 @@ pub fn user_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/users/delete/{id}", delete(delete_user))
         .route("/api/users/restore-all", post(restore_all_user_handler))
         .route("/api/users/delete-all", post(delete_all_user_handler))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
+        .route_layer(middleware::from_fn(session_middleware))
         .route_layer(middleware::from_fn(jwt::auth))
+        .route_layer(middleware::from_fn(rate_limit_middleware))
+        .layer(Extension(app_state.di_container.role_clients.clone()))
         .layer(Extension(app_state.di_container.user_clients.clone()))
         .layer(Extension(app_state.rate_limit.clone()))
         .layer(Extension(app_state.jwt_config.clone()))

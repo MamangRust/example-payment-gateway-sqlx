@@ -3,7 +3,7 @@ use crate::{
         requests::card::FindAllCards,
         responses::{ApiResponse, ApiResponsePagination, CardResponse, CardResponseDeleteAt},
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -13,22 +13,19 @@ pub trait CardQueryGrpcClientTrait {
     async fn find_all(
         &self,
         req: &FindAllCards,
-    ) -> Result<ApiResponsePagination<Vec<CardResponse>>, AppErrorHttp>;
+    ) -> Result<ApiResponsePagination<Vec<CardResponse>>, HttpError>;
     async fn find_active(
         &self,
         req: &FindAllCards,
-    ) -> Result<ApiResponsePagination<Vec<CardResponseDeleteAt>>, AppErrorHttp>;
+    ) -> Result<ApiResponsePagination<Vec<CardResponseDeleteAt>>, HttpError>;
     async fn find_trashed(
         &self,
         req: &FindAllCards,
-    ) -> Result<ApiResponsePagination<Vec<CardResponseDeleteAt>>, AppErrorHttp>;
-    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<CardResponse>, AppErrorHttp>;
-    async fn find_by_user_id(
-        &self,
-        user_id: i32,
-    ) -> Result<ApiResponse<CardResponse>, AppErrorHttp>;
+    ) -> Result<ApiResponsePagination<Vec<CardResponseDeleteAt>>, HttpError>;
+    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<CardResponse>, HttpError>;
+    async fn find_by_user_id(&self, user_id: i32) -> Result<ApiResponse<CardResponse>, HttpError>;
     async fn find_by_card_number(
         &self,
         card_number: String,
-    ) -> Result<ApiResponse<CardResponse>, AppErrorHttp>;
+    ) -> Result<ApiResponse<CardResponse>, HttpError>;
 }

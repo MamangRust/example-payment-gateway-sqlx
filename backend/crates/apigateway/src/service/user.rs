@@ -23,7 +23,7 @@ use shared::{
         },
         responses::{ApiResponse, ApiResponsePagination, UserResponse, UserResponseDeleteAt},
     },
-    errors::{AppErrorGrpc, AppErrorHttp},
+    errors::{AppErrorGrpc, HttpError},
     utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
 };
 use std::sync::Arc;
@@ -144,7 +144,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
     async fn find_all(
         &self,
         req: &DomainFindAllUserRequest,
-    ) -> Result<ApiResponsePagination<Vec<UserResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<UserResponse>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -219,13 +219,13 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch users")
                     .await;
                 error!("fetch all users failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn find_by_id(&self, user_id: i32) -> Result<ApiResponse<UserResponse>, AppErrorHttp> {
+    async fn find_by_id(&self, user_id: i32) -> Result<ApiResponse<UserResponse>, HttpError> {
         info!("fetching user by id: {user_id}");
 
         let method = Method::Get;
@@ -267,9 +267,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("user {user_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "User data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("User data is missing in gRPC response".into())
                 })?;
 
                 let user_response = data.into();
@@ -292,7 +290,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch user by id")
                     .await;
                 error!("find user {user_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -301,7 +299,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
     async fn find_by_active(
         &self,
         req: &DomainFindAllUserRequest,
-    ) -> Result<ApiResponsePagination<Vec<UserResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<UserResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -380,7 +378,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch active users")
                     .await;
                 error!("fetch active users failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -389,7 +387,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
     async fn find_by_trashed(
         &self,
         req: &DomainFindAllUserRequest,
-    ) -> Result<ApiResponsePagination<Vec<UserResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<UserResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -468,7 +466,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed users")
                     .await;
                 error!("fetch trashed users failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -480,7 +478,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
     async fn create(
         &self,
         req: &DomainCreateUserRequest,
-    ) -> Result<ApiResponse<UserResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<UserResponse>, HttpError> {
         info!(
             "creating user: {} {} - email: {}",
             req.firstname, req.lastname, req.email
@@ -517,9 +515,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                         "user creation failed - data missing in gRPC response for email: {}",
                         req.email
                     );
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "User data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("User data is missing in gRPC response".into())
                 })?;
 
                 let data: UserResponse = data.into();
@@ -560,7 +556,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                     "create user {} {} (email: {}) failed: {status:?}",
                     req.firstname, req.lastname, req.email
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -569,10 +565,10 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
     async fn update(
         &self,
         req: &DomainUpdateUserRequest,
-    ) -> Result<ApiResponse<UserResponse>, AppErrorHttp> {
-        let user_id = req.id.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled("user id is required".to_string()))
-        })?;
+    ) -> Result<ApiResponse<UserResponse>, HttpError> {
+        let user_id = req
+            .id
+            .ok_or_else(|| HttpError::Internal("user id is required".to_string()))?;
 
         info!(
             "updating user id: {user_id} - firstname: {:?}, lastname: {:?}, email: {:?}",
@@ -608,9 +604,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("update user {user_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "User data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("User data is missing in gRPC response".into())
                 })?;
 
                 let data: UserResponse = data.into();
@@ -644,16 +638,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to update user")
                     .await;
                 error!("update user {user_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn trashed(
-        &self,
-        user_id: i32,
-    ) -> Result<ApiResponse<UserResponseDeleteAt>, AppErrorHttp> {
+    async fn trashed(&self, user_id: i32) -> Result<ApiResponse<UserResponseDeleteAt>, HttpError> {
         info!("trashing user id: {user_id}");
 
         let method = Method::Post;
@@ -678,9 +669,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("trash user {user_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "User data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("User data is missing in gRPC response".into())
                 })?;
 
                 let data: UserResponseDeleteAt = data.into();
@@ -710,16 +699,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to trash user")
                     .await;
                 error!("trash user {user_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore(
-        &self,
-        user_id: i32,
-    ) -> Result<ApiResponse<UserResponseDeleteAt>, AppErrorHttp> {
+    async fn restore(&self, user_id: i32) -> Result<ApiResponse<UserResponseDeleteAt>, HttpError> {
         info!("restoring user id: {user_id}");
 
         let method = Method::Post;
@@ -744,9 +730,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("restore user {user_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "User data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("User data is missing in gRPC response".into())
                 })?;
 
                 let data: UserResponseDeleteAt = data.into();
@@ -776,13 +760,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to restore user")
                     .await;
                 error!("restore user {user_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_permanent(&self, user_id: i32) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_permanent(&self, user_id: i32) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting user id: {user_id}");
 
         let method = Method::Delete;
@@ -839,13 +823,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 )
                 .await;
                 error!("delete user {user_id} permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("restoring all trashed users");
 
         let method = Method::Post;
@@ -901,13 +885,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 )
                 .await;
                 error!("restore all users failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting all users");
 
         let method = Method::Post;
@@ -968,7 +952,8 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 )
                 .await;
                 error!("delete all users permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }

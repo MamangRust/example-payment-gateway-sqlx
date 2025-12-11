@@ -18,7 +18,7 @@ use shared::{
         },
         responses::{ApiResponse, TokenResponse, UserResponse},
     },
-    errors::AppErrorHttp,
+    errors::HttpError,
 };
 use std::sync::Arc;
 use utoipa_axum::router::OpenApiRouter;
@@ -45,7 +45,7 @@ pub async fn health_checker_handler() -> impl IntoResponse {
 pub async fn login_user_handler(
     Extension(service): Extension<DynAuthGrpcClient>,
     SimpleValidatedJson(body): SimpleValidatedJson<AuthRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     let response = service.login(&body).await?;
     Ok((StatusCode::OK, Json(response)))
 }
@@ -63,7 +63,7 @@ pub async fn login_user_handler(
 pub async fn register_user_handler(
     Extension(service): Extension<DynAuthGrpcClient>,
     SimpleValidatedJson(body): SimpleValidatedJson<RegisterRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     let response = service.register(&body).await?;
     Ok((StatusCode::OK, Json(response)))
 }
@@ -82,7 +82,7 @@ pub async fn register_user_handler(
 pub async fn get_me_handler(
     Extension(service): Extension<DynAuthGrpcClient>,
     Extension(user_id): Extension<i32>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     let response = service.get_me(user_id).await?;
     Ok((StatusCode::OK, Json(response)))
 }
@@ -100,7 +100,7 @@ pub async fn get_me_handler(
 pub async fn refresh_token_handler(
     Extension(service): Extension<DynAuthGrpcClient>,
     Json(req): Json<RefreshTokenRequest>,
-) -> Result<impl IntoResponse, AppErrorHttp> {
+) -> Result<impl IntoResponse, HttpError> {
     let response = service.refresh_token(&req.refresh_token).await?;
     Ok((StatusCode::OK, Json(response)))
 }

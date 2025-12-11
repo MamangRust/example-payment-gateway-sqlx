@@ -38,7 +38,7 @@ use shared::{
             WithdrawResponseYearStatusSuccess, WithdrawYearlyAmountResponse,
         },
     },
-    errors::{AppErrorGrpc, AppErrorHttp},
+    errors::{AppErrorGrpc, HttpError},
     utils::{
         MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_card_number,
         month_name, naive_datetime_to_timestamp,
@@ -166,7 +166,7 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
     async fn find_all(
         &self,
         req: &DomainFindAllWithdraws,
-    ) -> Result<ApiResponsePagination<Vec<WithdrawResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<WithdrawResponse>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -238,7 +238,8 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch all withdraws")
                     .await;
                 error!("fetch all withdraws failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -247,7 +248,7 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
     async fn find_all_by_card_number(
         &self,
         req: &DomainFindAllWithdrawCardNumber,
-    ) -> Result<ApiResponsePagination<Vec<WithdrawResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<WithdrawResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         let page = req.page;
         let page_size = req.page_size;
@@ -344,7 +345,7 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
                     "fetch withdraws for card {} failed: {status:?}",
                     masked_card
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -353,7 +354,7 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
     async fn find_by_id(
         &self,
         withdraw_id: i32,
-    ) -> Result<ApiResponse<WithdrawResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<WithdrawResponse>, HttpError> {
         info!("fetching withdraw by id: {withdraw_id}");
 
         let method = Method::Get;
@@ -395,9 +396,7 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("withdraw {withdraw_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Withdraw data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Withdraw data is missing in gRPC response".into())
                 })?;
 
                 let api_response = ApiResponse {
@@ -418,7 +417,7 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to find withdraw by id")
                     .await;
                 error!("find withdraw {withdraw_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -427,7 +426,7 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
     async fn find_by_active(
         &self,
         req: &DomainFindAllWithdraws,
-    ) -> Result<ApiResponsePagination<Vec<WithdrawResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<WithdrawResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -509,7 +508,7 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
                 )
                 .await;
                 error!("fetch active withdraws failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -518,7 +517,7 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
     async fn find_by_trashed(
         &self,
         req: &DomainFindAllWithdraws,
-    ) -> Result<ApiResponsePagination<Vec<WithdrawResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<WithdrawResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -600,7 +599,7 @@ impl WithdrawQueryGrpcClientTrait for WithdrawGrpcClientService {
                 )
                 .await;
                 error!("fetch trashed withdraws failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -612,7 +611,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
     async fn create(
         &self,
         req: &DomainCreateWithdrawRequest,
-    ) -> Result<ApiResponse<WithdrawResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<WithdrawResponse>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "creating withdraw for card: {masked_card}, amount: {}",
@@ -651,7 +650,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("withdraw creation failed - data missing in gRPC response for card: {masked_card}");
-                    AppErrorHttp(AppErrorGrpc::Unhandled("Withdraw data is missing in gRPC response".into()))
+                    HttpError::Internal("Withdraw data is missing in gRPC response".into())
                 })?;
 
                 let withdraw_response: WithdrawResponse = data.into();
@@ -687,7 +686,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to create Withdraw")
                     .await;
                 error!("create withdraw for card {masked_card} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -696,14 +695,12 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
     async fn update(
         &self,
         req: &DomainUpdateWithdrawRequest,
-    ) -> Result<ApiResponse<WithdrawResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<WithdrawResponse>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
 
-        let withdraw_id = req.withdraw_id.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled(
-                "widhdraw_id is required".to_string(),
-            ))
-        })?;
+        let withdraw_id = req
+            .withdraw_id
+            .ok_or_else(|| HttpError::Internal("widhdraw_id is required".to_string()))?;
 
         info!(
             "updating withdraw id: {withdraw_id} for card: {masked_card}, new amount: {}",
@@ -747,9 +744,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                         "update withdraw {} - data missing in gRPC response",
                         withdraw_id
                     );
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Withdraw data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Withdraw data is missing in gRPC response".into())
                 })?;
 
                 let withdraw_response: WithdrawResponse = data.into();
@@ -786,7 +781,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to update Withdraw")
                     .await;
                 error!("update withdraw {withdraw_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -795,7 +790,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
     async fn trashed_withdraw(
         &self,
         withdraw_id: i32,
-    ) -> Result<ApiResponse<WithdrawResponseDeleteAt>, AppErrorHttp> {
+    ) -> Result<ApiResponse<WithdrawResponseDeleteAt>, HttpError> {
         info!("trashing withdraw id: {withdraw_id}");
 
         let method = Method::Post;
@@ -823,9 +818,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("trash withdraw {withdraw_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Withdraw data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Withdraw data is missing in gRPC response".into())
                 })?;
 
                 let withdraw_response: WithdrawResponseDeleteAt = data.into();
@@ -856,7 +849,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to trash Withdraw")
                     .await;
                 error!("trash withdraw {withdraw_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -865,7 +858,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
     async fn restore(
         &self,
         withdraw_id: i32,
-    ) -> Result<ApiResponse<WithdrawResponseDeleteAt>, AppErrorHttp> {
+    ) -> Result<ApiResponse<WithdrawResponseDeleteAt>, HttpError> {
         info!("restoring withdraw id: {withdraw_id}");
 
         let method = Method::Post;
@@ -893,9 +886,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("restore withdraw {withdraw_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Withdraw data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Withdraw data is missing in gRPC response".into())
                 })?;
 
                 let withdraw_response: WithdrawResponseDeleteAt = data.into();
@@ -925,13 +916,13 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to restore Withdraw")
                     .await;
                 error!("restore withdraw {withdraw_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_permanent(&self, withdraw_id: i32) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_permanent(&self, withdraw_id: i32) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting withdraw id: {withdraw_id}");
 
         let method = Method::Delete;
@@ -990,13 +981,13 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 )
                 .await;
                 error!("delete withdraw {withdraw_id} permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("restoring all trashed withdraws");
 
         let method = Method::Post;
@@ -1050,13 +1041,13 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 )
                 .await;
                 error!("restore all withdraws failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting all withdraws");
 
         let method = Method::Post;
@@ -1115,7 +1106,7 @@ impl WithdrawCommandGrpcClientTrait for WithdrawGrpcClientService {
                 )
                 .await;
                 error!("delete all withdraws permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1127,7 +1118,7 @@ impl WithdrawStatsAmountGrpcClientTrait for WithdrawGrpcClientService {
     async fn get_monthly_withdraws(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<WithdrawMonthlyAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawMonthlyAmountResponse>>, HttpError> {
         info!("fetching monthly withdraw AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1194,7 +1185,7 @@ impl WithdrawStatsAmountGrpcClientTrait for WithdrawGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly withdraw AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1203,7 +1194,7 @@ impl WithdrawStatsAmountGrpcClientTrait for WithdrawGrpcClientService {
     async fn get_yearly_withdraws(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<WithdrawYearlyAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawYearlyAmountResponse>>, HttpError> {
         info!("fetching yearly withdraw AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1270,7 +1261,7 @@ impl WithdrawStatsAmountGrpcClientTrait for WithdrawGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly withdraw AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1282,7 +1273,7 @@ impl WithdrawStatsStatusGrpcClientTrait for WithdrawGrpcClientService {
     async fn get_month_status_success(
         &self,
         req: &DomainMonthStatusWithdraw,
-    ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusSuccess>>, HttpError> {
         let month_str = month_name(req.month);
         info!(
             "fetching monthly withdraw SUCCESS status for {month_str} {}",
@@ -1371,7 +1362,7 @@ impl WithdrawStatsStatusGrpcClientTrait for WithdrawGrpcClientService {
                     "fetch monthly SUCCESS withdraw status for {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1380,7 +1371,7 @@ impl WithdrawStatsStatusGrpcClientTrait for WithdrawGrpcClientService {
     async fn get_yearly_status_success(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusSuccess>>, HttpError> {
         info!("fetching yearly withdraw SUCCESS status for year: {year}");
 
         let method = Method::Get;
@@ -1456,7 +1447,7 @@ impl WithdrawStatsStatusGrpcClientTrait for WithdrawGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly SUCCESS withdraw status for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1465,7 +1456,7 @@ impl WithdrawStatsStatusGrpcClientTrait for WithdrawGrpcClientService {
     async fn get_month_status_failed(
         &self,
         req: &DomainMonthStatusWithdraw,
-    ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusFailed>>, HttpError> {
         let month_str = month_name(req.month);
         info!(
             "fetching monthly withdraw FAILED status for {month_str} {}",
@@ -1559,7 +1550,7 @@ impl WithdrawStatsStatusGrpcClientTrait for WithdrawGrpcClientService {
                     "fetch monthly FAILED withdraw status for {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1568,7 +1559,7 @@ impl WithdrawStatsStatusGrpcClientTrait for WithdrawGrpcClientService {
     async fn get_yearly_status_failed(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusFailed>>, HttpError> {
         info!("fetching yearly withdraw FAILED status for year: {year}");
 
         let method = Method::Get;
@@ -1644,7 +1635,7 @@ impl WithdrawStatsStatusGrpcClientTrait for WithdrawGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly FAILED withdraw status for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1656,7 +1647,7 @@ impl WithdrawStatsAmountByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
     async fn get_monthly_bycard(
         &self,
         req: &DomainYearMonthCardNumber,
-    ) -> Result<ApiResponse<Vec<WithdrawMonthlyAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawMonthlyAmountResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching monthly withdraw AMOUNT for card: {masked_card}, year: {}",
@@ -1750,7 +1741,7 @@ impl WithdrawStatsAmountByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
                     "fetch monthly withdraw AMOUNT for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1759,7 +1750,7 @@ impl WithdrawStatsAmountByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
     async fn get_yearly_bycard(
         &self,
         req: &DomainYearMonthCardNumber,
-    ) -> Result<ApiResponse<Vec<WithdrawYearlyAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawYearlyAmountResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly withdraw AMOUNT for card: {masked_card}, year: {}",
@@ -1853,7 +1844,7 @@ impl WithdrawStatsAmountByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
                     "fetch yearly withdraw AMOUNT for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1865,7 +1856,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
     async fn get_month_status_success_bycard(
         &self,
         req: &DomainMonthStatusWithdrawCardNumber,
-    ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusSuccess>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         let month_str = month_name(req.month);
         info!(
@@ -1961,7 +1952,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
                     "fetch monthly SUCCESS withdraw status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1970,7 +1961,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
     async fn get_yearly_status_success_bycard(
         &self,
         req: &DomainYearStatusWithdrawCardNumber,
-    ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusSuccess>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly withdraw SUCCESS status for card: {masked_card}, year: {}",
@@ -2064,7 +2055,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
                     "fetch yearly SUCCESS withdraw status for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2073,7 +2064,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
     async fn get_month_status_failed_bycard(
         &self,
         req: &DomainMonthStatusWithdrawCardNumber,
-    ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawResponseMonthStatusFailed>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         let month_str = month_name(req.month);
         info!(
@@ -2170,7 +2161,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
                     "fetch monthly FAILED withdraw status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2179,7 +2170,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
     async fn get_yearly_status_failed_bycard(
         &self,
         req: &DomainYearStatusWithdrawCardNumber,
-    ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<WithdrawResponseYearStatusFailed>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly withdraw FAILED status for card: {masked_card}, year: {}",
@@ -2272,7 +2263,7 @@ impl WithdrawStatsStatusByCardNumberGrpcClientTrait for WithdrawGrpcClientServic
                     "fetch yearly FAILED withdraw status for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }

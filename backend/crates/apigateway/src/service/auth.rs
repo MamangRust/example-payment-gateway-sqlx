@@ -16,7 +16,7 @@ use shared::{
         requests::auth::{AuthRequest, RegisterRequest},
         responses::{ApiResponse, TokenResponse, UserResponse},
     },
-    errors::{AppErrorGrpc, AppErrorHttp},
+    errors::{AppErrorGrpc, HttpError},
     utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
 };
 use tokio::time::Instant;
@@ -127,7 +127,7 @@ impl AuthGrpcClientService {
 
 #[async_trait]
 impl AuthGrpcClientTrait for AuthGrpcClientService {
-    async fn login(&self, req: &AuthRequest) -> Result<ApiResponse<TokenResponse>, AppErrorHttp> {
+    async fn login(&self, req: &AuthRequest) -> Result<ApiResponse<TokenResponse>, HttpError> {
         info!("Attempting login for email={}", req.email);
 
         let method = Method::Post;
@@ -162,14 +162,14 @@ impl AuthGrpcClientTrait for AuthGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to log in user")
                     .await;
                 error!("❌ gRPC login_user request failed: {}", status);
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
         let inner: ApiResponseLogin = response.into_inner();
         let proto_token = inner.data.ok_or_else(|| {
             error!("❌ gRPC login_user returned empty token response");
-            AppErrorHttp(AppErrorGrpc::Unhandled("Missing token".into()))
+            AppErrorGrpc::Unhandled("Missing token".into())
         })?;
 
         let domain_token: TokenResponse = proto_token.into();
@@ -181,7 +181,7 @@ impl AuthGrpcClientTrait for AuthGrpcClientService {
         })
     }
 
-    async fn get_me(&self, id: i32) -> Result<ApiResponse<UserResponse>, AppErrorHttp> {
+    async fn get_me(&self, id: i32) -> Result<ApiResponse<UserResponse>, HttpError> {
         let method = Method::Get;
 
         let tracing_ctx = self.start_tracing(
@@ -212,14 +212,14 @@ impl AuthGrpcClientTrait for AuthGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch user details")
                     .await;
                 error!("❌ gRPC get_me request failed for id={}: {}", id, status);
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
         let inner: ApiResponseGetMe = response.into_inner();
         let proto_user = inner.data.ok_or_else(|| {
             error!("❌ gRPC get_me returned empty user data for id={}", id);
-            AppErrorHttp(AppErrorGrpc::Unhandled("Missing user data".into()))
+            AppErrorGrpc::Unhandled("Missing user data".into())
         })?;
 
         let domain_user: UserResponse = proto_user.into();
@@ -234,7 +234,7 @@ impl AuthGrpcClientTrait for AuthGrpcClientService {
     async fn refresh_token(
         &self,
         refresh_token: &str,
-    ) -> Result<ApiResponse<TokenResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TokenResponse>, HttpError> {
         let method = Method::Post;
 
         let tracing_ctx = self.start_tracing(
@@ -262,14 +262,15 @@ impl AuthGrpcClientTrait for AuthGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to refresh token")
                     .await;
                 error!("❌ gRPC refresh_token request failed: {}", status);
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
         let inner: ApiResponseRefreshToken = response.into_inner();
         let proto_token = inner.data.ok_or_else(|| {
             error!("❌ gRPC refresh_token returned empty token data");
-            AppErrorHttp(AppErrorGrpc::Unhandled("Missing token".into()))
+
+            HttpError::Internal("Missing token".into())
         })?;
 
         let domain_token: TokenResponse = proto_token.into();
@@ -284,7 +285,7 @@ impl AuthGrpcClientTrait for AuthGrpcClientService {
     async fn register(
         &self,
         request: &RegisterRequest,
-    ) -> Result<ApiResponse<UserResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<UserResponse>, HttpError> {
         let method = Method::Post;
 
         let tracing_ctx = self.start_tracing(
@@ -323,7 +324,7 @@ impl AuthGrpcClientTrait for AuthGrpcClientService {
                     "❌ gRPC register_user failed for email={}: {}",
                     request.email, status
                 );
-                return Err(AppErrorHttp(AppErrorGrpc::from(status)));
+                return Err(AppErrorGrpc::from(status).into());
             }
         };
 
@@ -333,7 +334,7 @@ impl AuthGrpcClientTrait for AuthGrpcClientService {
                 "❌ gRPC register_user returned empty user data for email={}",
                 request.email
             );
-            AppErrorHttp(AppErrorGrpc::Unhandled("Missing user data".into()))
+            AppErrorGrpc::Unhandled("Missing user data".into())
         })?;
 
         let domain_user: UserResponse = proto_user.into();

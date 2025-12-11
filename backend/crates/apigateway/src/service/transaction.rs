@@ -41,7 +41,7 @@ use shared::{
             TransactionYearMethodResponse, TransactionYearlyAmountResponse,
         },
     },
-    errors::{AppErrorGrpc, AppErrorHttp},
+    errors::{AppErrorGrpc, HttpError},
     utils::{
         MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_api_key,
         mask_card_number, month_name, naive_datetime_to_timestamp,
@@ -169,7 +169,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
     async fn find_all(
         &self,
         req: &DomainFindAllTransactions,
-    ) -> Result<ApiResponsePagination<Vec<TransactionResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TransactionResponse>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -249,7 +249,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch transactions")
                     .await;
                 error!("fetch all transactions failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -258,7 +259,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
     async fn find_all_by_card_number(
         &self,
         req: &FindAllTransactionCardNumber,
-    ) -> Result<ApiResponsePagination<Vec<TransactionResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TransactionResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
 
         let page = req.page;
@@ -362,7 +363,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                     "fetch transactions for card {} failed: {status:?}",
                     masked_card
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -371,7 +372,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
     async fn find_by_active(
         &self,
         req: &DomainFindAllTransactions,
-    ) -> Result<ApiResponsePagination<Vec<TransactionResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TransactionResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -460,7 +461,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("fetch active transactions failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -469,7 +470,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
     async fn find_by_trashed(
         &self,
         req: &DomainFindAllTransactions,
-    ) -> Result<ApiResponsePagination<Vec<TransactionResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<TransactionResponseDeleteAt>>, HttpError> {
         let page = req.page;
         let page_size = req.page_size;
 
@@ -561,7 +562,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("fetch trashed transactions failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -570,7 +571,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
     async fn find_by_id(
         &self,
         transaction_id: i32,
-    ) -> Result<ApiResponse<TransactionResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TransactionResponse>, HttpError> {
         info!("fetching transaction by id: {transaction_id}");
 
         let method = Method::Get;
@@ -612,9 +613,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("transaction {transaction_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Transaction data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Transaction data is missing in gRPC response".into())
                 })?;
 
                 let api_response = ApiResponse {
@@ -639,7 +638,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("find transaction {transaction_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -648,7 +647,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
     async fn find_by_merchant_id(
         &self,
         merchant_id: i32,
-    ) -> Result<ApiResponse<Vec<TransactionResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionResponse>>, HttpError> {
         info!("fetching transactions by merchant_id: {merchant_id}");
 
         let method = Method::Get;
@@ -720,7 +719,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("fetch transactions for merchant {merchant_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -733,7 +732,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
         &self,
         api_key: &str,
         req: &DomainCreateTransactionRequest,
-    ) -> Result<ApiResponse<TransactionResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TransactionResponse>, HttpError> {
         let masked_api = mask_api_key(api_key);
         let masked_card = mask_card_number(&req.card_number);
         info!(
@@ -778,7 +777,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("transaction creation failed - data missing in gRPC response for card: {masked_card}");
-                    AppErrorHttp(AppErrorGrpc::Unhandled("Transaction data is missing in gRPC response".into()))
+                    HttpError::Internal("Transaction data is missing in gRPC response".into())
                 })?;
 
                 let transaction_response: TransactionResponse = data.into();
@@ -822,7 +821,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 error!(
                     "create transaction for card {masked_card} via api_key {masked_api} failed: {status:?}"
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -832,15 +831,13 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
         &self,
         api_key: &str,
         req: &DomainUpdateTransactionRequest,
-    ) -> Result<ApiResponse<TransactionResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TransactionResponse>, HttpError> {
         let masked_api = mask_api_key(api_key);
         let masked_card = mask_card_number(&req.card_number);
 
-        let transaction_id = req.transaction_id.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled(
-                "transaction_id is required".to_string(),
-            ))
-        })?;
+        let transaction_id = req
+            .transaction_id
+            .ok_or_else(|| HttpError::Internal("transaction_id is required".to_string()))?;
 
         info!(
             "updating transaction id: {transaction_id} via api_key: {masked_api} for card: {masked_card}, new amount: {}, method: {}",
@@ -885,9 +882,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("update transaction {transaction_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Transaction data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Transaction data is missing in gRPC response".into())
                 })?;
 
                 let transaction_response: TransactionResponse = data.into();
@@ -935,7 +930,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 error!(
                     "update transaction {transaction_id} via api_key {masked_api} failed: {status:?}",
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -944,7 +939,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
     async fn trashed(
         &self,
         transaction_id: i32,
-    ) -> Result<ApiResponse<TransactionResponseDeleteAt>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TransactionResponseDeleteAt>, HttpError> {
         info!("trashing transaction id: {transaction_id}");
 
         let method = Method::Post;
@@ -973,9 +968,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("trash transaction {transaction_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Transaction data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Transaction data is missing in gRPC response".into())
                 })?;
 
                 let api_response = ApiResponse {
@@ -1004,7 +997,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to trash transaction")
                     .await;
                 error!("trash transaction {transaction_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1013,7 +1006,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
     async fn restore(
         &self,
         transaction_id: i32,
-    ) -> Result<ApiResponse<TransactionResponseDeleteAt>, AppErrorHttp> {
+    ) -> Result<ApiResponse<TransactionResponseDeleteAt>, HttpError> {
         info!("restoring transaction id: {transaction_id}");
 
         let method = Method::Post;
@@ -1042,9 +1035,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("restore transaction {transaction_id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Transaction data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Transaction data is missing in gRPC response".into())
                 })?;
 
                 let cache_keys = vec![
@@ -1073,16 +1064,13 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to restore transaction")
                     .await;
                 error!("restore transaction {transaction_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_permanent(
-        &self,
-        transaction_id: i32,
-    ) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_permanent(&self, transaction_id: i32) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting transaction id: {transaction_id}");
 
         let method = Method::Delete;
@@ -1146,13 +1134,13 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("delete transaction {transaction_id} permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("restoring all trashed transactions");
 
         let method = Method::Post;
@@ -1210,13 +1198,13 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("restore all transactions failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting all transactions");
 
         let method = Method::Post;
@@ -1279,7 +1267,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("delete all transactions permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1291,7 +1279,7 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
     async fn get_monthly_amounts(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TransactionMonthAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionMonthAmountResponse>>, HttpError> {
         info!("fetching monthly transaction AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1362,7 +1350,7 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly transaction AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1371,7 +1359,7 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
     async fn get_yearly_amounts(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TransactionYearlyAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionYearlyAmountResponse>>, HttpError> {
         info!("fetching yearly transaction AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1443,7 +1431,7 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly transaction AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1455,7 +1443,7 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
     async fn get_monthly_method(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TransactionMonthMethodResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionMonthMethodResponse>>, HttpError> {
         info!("fetching monthly transaction METHOD stats for year: {year}");
 
         let method = Method::Get;
@@ -1532,7 +1520,7 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly transaction METHOD for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1541,7 +1529,7 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
     async fn get_yearly_method(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TransactionYearMethodResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionYearMethodResponse>>, HttpError> {
         info!("fetching yearly transaction METHOD stats for year: {year}");
 
         let method = Method::Get;
@@ -1618,7 +1606,7 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly transaction METHOD for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1630,7 +1618,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
     async fn get_month_status_success(
         &self,
         req: &DomainMonthStatusTransaction,
-    ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusSuccess>>, HttpError> {
         let month_str = month_name(req.month);
         info!(
             "fetching monthly transaction SUCCESS status for {month_str} {}",
@@ -1721,7 +1709,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
                     "fetch monthly SUCCESS transaction status for {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1730,7 +1718,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
     async fn get_yearly_status_success(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusSuccess>>, HttpError> {
         info!("fetching yearly transaction SUCCESS status for year: {year}");
 
         let method = Method::Get;
@@ -1808,7 +1796,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
                 error!(
                     "fetch yearly SUCCESS transaction status for year {year} failed: {status:?}"
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1817,7 +1805,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
     async fn get_month_status_failed(
         &self,
         req: &DomainMonthStatusTransaction,
-    ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusFailed>>, HttpError> {
         let month_str = month_name(req.month);
         info!(
             "fetching monthly transaction FAILED status for {month_str} {}",
@@ -1905,7 +1893,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
                     "fetch monthly FAILED transaction status for {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -1914,7 +1902,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
     async fn get_yearly_status_failed(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusFailed>>, HttpError> {
         info!("fetching yearly transaction FAILED status for year: {year}");
 
         let method = Method::Get;
@@ -1990,7 +1978,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly FAILED transaction status for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2002,7 +1990,7 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
     async fn get_monthly_amounts_bycard(
         &self,
         req: &DomainMonthYearPaymentMethod,
-    ) -> Result<ApiResponse<Vec<TransactionMonthAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionMonthAmountResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching monthly transaction AMOUNT for card: {masked_card}, year: {}",
@@ -2096,7 +2084,7 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
                     "fetch monthly transaction AMOUNT for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2105,7 +2093,7 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
     async fn get_yearly_amounts_bycard(
         &self,
         req: &DomainMonthYearPaymentMethod,
-    ) -> Result<ApiResponse<Vec<TransactionYearlyAmountResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionYearlyAmountResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly transaction AMOUNT for card: {masked_card}, year: {}",
@@ -2199,7 +2187,7 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
                     "fetch yearly transaction AMOUNT for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2211,7 +2199,7 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
     async fn get_monthly_method_bycard(
         &self,
         req: &DomainMonthYearPaymentMethod,
-    ) -> Result<ApiResponse<Vec<TransactionMonthMethodResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionMonthMethodResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching monthly transaction METHOD for card: {masked_card}, year: {}",
@@ -2302,7 +2290,7 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
                     "fetch monthly transaction METHOD for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2311,7 +2299,7 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
     async fn get_yearly_method_bycard(
         &self,
         req: &DomainMonthYearPaymentMethod,
-    ) -> Result<ApiResponse<Vec<TransactionYearMethodResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionYearMethodResponse>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly transaction METHOD for card: {masked_card}, year: {}",
@@ -2402,7 +2390,7 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
                     "fetch yearly transaction METHOD for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2414,7 +2402,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
     async fn get_month_status_success_bycard(
         &self,
         req: &DomainMonthStatusTransactionCardNumber,
-    ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusSuccess>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         let month_str = month_name(req.month);
         info!(
@@ -2508,7 +2496,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                     "fetch monthly SUCCESS transaction status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2517,7 +2505,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
     async fn get_yearly_status_success_bycard(
         &self,
         req: &DomainYearStatusTransactionCardNumber,
-    ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusSuccess>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusSuccess>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly transaction SUCCESS status for card: {masked_card}, year: {}",
@@ -2608,7 +2596,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                     "fetch yearly SUCCESS transaction status for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2617,7 +2605,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
     async fn get_month_status_failed_bycard(
         &self,
         req: &DomainMonthStatusTransactionCardNumber,
-    ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionResponseMonthStatusFailed>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         let month_str = month_name(req.month);
         info!(
@@ -2710,7 +2698,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                     "fetch monthly FAILED transaction status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }
@@ -2719,7 +2707,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
     async fn get_yearly_status_failed_bycard(
         &self,
         req: &DomainYearStatusTransactionCardNumber,
-    ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusFailed>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<TransactionResponseYearStatusFailed>>, HttpError> {
         let masked_card = mask_card_number(&req.card_number);
         info!(
             "fetching yearly transaction FAILED status for card: {masked_card}, year: {}",
@@ -2810,7 +2798,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                     "fetch yearly FAILED transaction status for card {masked_card} year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                return Err(AppErrorGrpc::from(status).into());
             }
         }
     }

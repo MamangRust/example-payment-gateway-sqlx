@@ -47,7 +47,7 @@ use shared::{
             MerchantTransactionResponse,
         },
     },
-    errors::{AppErrorGrpc, AppErrorHttp},
+    errors::{AppErrorGrpc, HttpError},
     utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
 };
 use std::sync::Arc;
@@ -171,7 +171,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
     async fn find_all(
         &self,
         request: &DomainFindAllMerchants,
-    ) -> Result<ApiResponsePagination<Vec<MerchantResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<MerchantResponse>>, HttpError> {
         let page = request.page;
         let page_size = request.page_size;
 
@@ -249,7 +249,8 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch merchants")
                     .await;
                 error!("find_all merchants failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -258,7 +259,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
     async fn find_active(
         &self,
         request: &DomainFindAllMerchants,
-    ) -> Result<ApiResponsePagination<Vec<MerchantResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<MerchantResponseDeleteAt>>, HttpError> {
         let page = request.page;
         let page_size = request.page_size;
 
@@ -345,7 +346,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("find_active merchants failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -354,7 +355,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
     async fn find_trashed(
         &self,
         request: &DomainFindAllMerchants,
-    ) -> Result<ApiResponsePagination<Vec<MerchantResponseDeleteAt>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<MerchantResponseDeleteAt>>, HttpError> {
         let page = request.page;
         let page_size = request.page_size;
 
@@ -441,7 +442,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("find_trashed merchants failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -450,7 +451,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
     async fn find_by_apikey(
         &self,
         api_key: &str,
-    ) -> Result<ApiResponse<MerchantResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<MerchantResponse>, HttpError> {
         info!("fetching merchant by api_key: *** (masked)");
 
         let method = Method::Get;
@@ -495,9 +496,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("merchant with api_key - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Merchant data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Merchant data is missing in gRPC response".into())
                 })?;
 
                 let api_response = ApiResponse {
@@ -522,7 +521,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("find merchant by api_key failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -531,7 +530,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
     async fn find_merchant_user_id(
         &self,
         user_id: i32,
-    ) -> Result<ApiResponse<Vec<MerchantResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponse>>, HttpError> {
         info!("fetching merchants by user_id: {user_id}");
 
         let method = Method::Get;
@@ -602,13 +601,13 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("find merchants by user_id {user_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<MerchantResponse>, AppErrorHttp> {
+    async fn find_by_id(&self, id: i32) -> Result<ApiResponse<MerchantResponse>, HttpError> {
         info!("fetching merchant by id: {id}");
 
         let method = Method::Get;
@@ -650,9 +649,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("merchant {id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Merchant data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Merchant data is missing in gRPC response".into())
                 })?;
 
                 let api_response = ApiResponse {
@@ -673,7 +670,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch merchant by id")
                     .await;
                 error!("find merchant {id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -685,7 +682,7 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
     async fn find_all_transactiions(
         &self,
         request: &DomainFindAllMerchantTransactions,
-    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, HttpError> {
         let page = request.page;
         let page_size = request.page_size;
         let search = &request.search;
@@ -775,7 +772,7 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("fetch all merchant transactions failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -784,7 +781,7 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
     async fn find_all_transactiions_by_api_key(
         &self,
         request: &DomainFindAllMerchantTransactionsByApiKey,
-    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, HttpError> {
         let page = request.page;
         let page_size = request.page_size;
         let search = &request.search;
@@ -883,7 +880,7 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("fetch merchant transactions by api_key failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -892,7 +889,7 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
     async fn find_all_transactiions_by_id(
         &self,
         request: &DomainFindAllMerchantTransactionsById,
-    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, AppErrorHttp> {
+    ) -> Result<ApiResponsePagination<Vec<MerchantTransactionResponse>>, HttpError> {
         let page = request.page;
         let page_size = request.page_size;
         let merchant_id = request.merchant_id;
@@ -994,7 +991,7 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
                     "fetch transactions for merchant {} failed: {status:?}",
                     request.merchant_id
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1006,7 +1003,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
     async fn create(
         &self,
         request: &DomainCreateMerchantRequest,
-    ) -> Result<ApiResponse<MerchantResponse>, AppErrorHttp> {
+    ) -> Result<ApiResponse<MerchantResponse>, HttpError> {
         info!("creating merchant for user_id: {}", request.user_id);
 
         let method = Method::Post;
@@ -1041,9 +1038,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                         "merchant creation failed - data missing in gRPC response for user_id: {}",
                         request.user_id
                     );
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Merchant data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Merchant data is missing in gRPC response".into())
                 })?;
 
                 let merchant_response: MerchantResponse = data.into();
@@ -1094,7 +1089,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                     "create merchant for user_id {} failed: {status:?}",
                     request.user_id
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1103,12 +1098,10 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
     async fn update(
         &self,
         request: &DomainUpdateMerchantRequest,
-    ) -> Result<ApiResponse<MerchantResponse>, AppErrorHttp> {
-        let merchant_id = request.merchant_id.ok_or_else(|| {
-            AppErrorHttp(AppErrorGrpc::Unhandled(
-                "merchant_id is required".to_string(),
-            ))
-        })?;
+    ) -> Result<ApiResponse<MerchantResponse>, HttpError> {
+        let merchant_id = request
+            .merchant_id
+            .ok_or_else(|| HttpError::Internal("merchant_id is required".to_string()))?;
 
         info!("updating merchant id: {merchant_id}");
 
@@ -1143,9 +1136,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("update merchant {merchant_id} - data missing in gRPC response",);
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Merchant data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Merchant data is missing in gRPC response".into())
                 })?;
 
                 let merchant_response: MerchantResponse = data.into();
@@ -1192,13 +1183,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to update merchant")
                     .await;
                 error!("update merchant {merchant_id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn trash(&self, id: i32) -> Result<ApiResponse<MerchantResponseDeleteAt>, AppErrorHttp> {
+    async fn trash(&self, id: i32) -> Result<ApiResponse<MerchantResponseDeleteAt>, HttpError> {
         info!("trashing merchant id: {id}");
 
         let method = Method::Post;
@@ -1227,9 +1218,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("trash merchant {id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Merchant data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Merchant data is missing in gRPC response".into())
                 })?;
 
                 let merchant_response: MerchantResponseDeleteAt = data.into();
@@ -1266,16 +1255,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to trash merchant")
                     .await;
                 error!("trash merchant {id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore(
-        &self,
-        id: i32,
-    ) -> Result<ApiResponse<MerchantResponseDeleteAt>, AppErrorHttp> {
+    async fn restore(&self, id: i32) -> Result<ApiResponse<MerchantResponseDeleteAt>, HttpError> {
         info!("restoring merchant id: {id}");
 
         let method = Method::Post;
@@ -1304,9 +1290,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
                     error!("restore merchant {id} - data missing in gRPC response");
-                    AppErrorHttp(AppErrorGrpc::Unhandled(
-                        "Merchant data is missing in gRPC response".into(),
-                    ))
+                    HttpError::Internal("Merchant data is missing in gRPC response".into())
                 })?;
 
                 let merchant_response: MerchantResponseDeleteAt = data.into();
@@ -1343,13 +1327,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 self.complete_tracing_error(&tracing_ctx, method, "Failed to restore merchant")
                     .await;
                 error!("restore merchant {id} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete(&self, id: i32) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete(&self, id: i32) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting merchant id: {id}");
 
         let method = Method::Delete;
@@ -1413,13 +1397,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("delete merchant {id} permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn restore_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn restore_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("restoring all trashed merchants");
 
         let method = Method::Post;
@@ -1477,13 +1461,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("restore all merchants failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
 
     #[instrument(skip(self), level = "info")]
-    async fn delete_all(&self) -> Result<ApiResponse<bool>, AppErrorHttp> {
+    async fn delete_all(&self) -> Result<ApiResponse<bool>, HttpError> {
         info!("permanently deleting all merchants");
 
         let method = Method::Post;
@@ -1546,7 +1530,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("delete all merchants permanently failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1558,7 +1542,7 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
     async fn get_monthly_amount(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyAmount>>, HttpError> {
         info!("fetching monthly AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1635,7 +1619,7 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1644,7 +1628,7 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
     async fn get_yearly_amount(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyAmount>>, HttpError> {
         info!("fetching yearly AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1721,7 +1705,7 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1733,7 +1717,7 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
     async fn get_monthly_method(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, HttpError> {
         info!("fetching monthly PAYMENT METHOD stats for year: {year}");
 
         let method = Method::Get;
@@ -1810,7 +1794,7 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly PAYMENT METHOD for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1819,7 +1803,7 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
     async fn get_yearly_method(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, HttpError> {
         info!("fetching yearly PAYMENT METHOD stats for year: {year}");
 
         let method = Method::Get;
@@ -1896,7 +1880,7 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly PAYMENT METHOD for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1908,7 +1892,7 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
     async fn get_monthly_total_amount(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyTotalAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyTotalAmount>>, HttpError> {
         info!("fetching monthly TOTAL AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -1985,7 +1969,7 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("fetch monthly TOTAL AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -1994,7 +1978,7 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
     async fn get_yearly_total_amount(
         &self,
         year: i32,
-    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyTotalAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyTotalAmount>>, HttpError> {
         info!("fetching yearly TOTAL AMOUNT stats for year: {year}");
 
         let method = Method::Get;
@@ -2071,7 +2055,7 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
                 )
                 .await;
                 error!("fetch yearly TOTAL AMOUNT for year {year} failed: {status:?}");
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2083,7 +2067,7 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
     async fn get_monthly_amount_bymerchant(
         &self,
         req: &DomainMonthYearAmountMerchant,
-    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyAmount>>, HttpError> {
         info!(
             "fetching monthly AMOUNT for merchant_id: {}, year: {}",
             req.merchant_id, req.year
@@ -2178,7 +2162,7 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
                     "fetch monthly AMOUNT for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2187,7 +2171,7 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
     async fn get_yearly_amount_bymerchant(
         &self,
         req: &DomainMonthYearAmountMerchant,
-    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyAmount>>, HttpError> {
         info!(
             "fetching yearly AMOUNT for merchant_id: {}, year: {}",
             req.merchant_id, req.year
@@ -2282,7 +2266,7 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
                     "fetch yearly AMOUNT for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2294,7 +2278,7 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
     async fn get_monthly_method_bymerchant(
         &self,
         req: &DomainMonthYearPaymentMethodMerchant,
-    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, HttpError> {
         info!(
             "fetching monthly PAYMENT METHOD for merchant_id: {}, year: {}",
             req.merchant_id, req.year
@@ -2389,7 +2373,7 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
                     "fetch monthly PAYMENT METHOD for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2398,7 +2382,7 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
     async fn get_yearly_method_bymerchant(
         &self,
         req: &DomainMonthYearPaymentMethodMerchant,
-    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, HttpError> {
         info!(
             "fetching yearly PAYMENT METHOD for merchant_id: {}, year: {}",
             req.merchant_id, req.year
@@ -2493,7 +2477,7 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
                     "fetch yearly PAYMENT METHOD for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2505,7 +2489,7 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
     async fn get_monthly_total_amount_bymerchant(
         &self,
         req: &DomainMonthYearTotalAmountMerchant,
-    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyTotalAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyTotalAmount>>, HttpError> {
         info!(
             "fetching monthly TOTAL AMOUNT for merchant_id: {}, year: {}",
             req.merchant_id, req.year
@@ -2599,7 +2583,7 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
                     "fetch monthly TOTAL AMOUNT for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2608,7 +2592,7 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
     async fn get_yearly_total_amount_bymerchant(
         &self,
         req: &DomainMonthYearTotalAmountMerchant,
-    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyTotalAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyTotalAmount>>, HttpError> {
         info!(
             "fetching yearly TOTAL AMOUNT for merchant_id: {}, year: {}",
             req.merchant_id, req.year
@@ -2703,7 +2687,7 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
                     "fetch yearly TOTAL AMOUNT for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2715,7 +2699,7 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
     async fn get_monthly_amount_byapikey(
         &self,
         req: &DomainMonthYearAmountApiKey,
-    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyAmount>>, HttpError> {
         info!(
             "fetching monthly AMOUNT by api_key: *** (masked) - year: {}",
             req.year
@@ -2809,7 +2793,7 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                     "fetch monthly AMOUNT by api_key for year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2818,7 +2802,7 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
     async fn get_yearly_amount_byapikey(
         &self,
         req: &DomainMonthYearAmountApiKey,
-    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyAmount>>, HttpError> {
         info!(
             "fetching yearly AMOUNT by api_key: *** (masked) - year: {}",
             req.year
@@ -2912,7 +2896,7 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                     "fetch yearly AMOUNT by api_key for year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -2924,7 +2908,7 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
     async fn get_monthly_method_byapikey(
         &self,
         req: &DomainMonthYearPaymentMethodApiKey,
-    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyPaymentMethod>>, HttpError> {
         info!(
             "fetching monthly PAYMENT METHOD by api_key: *** (masked) - year: {}",
             req.year
@@ -3017,7 +3001,7 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                     "fetch monthly PAYMENT METHOD by api_key for year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -3026,7 +3010,7 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
     async fn get_yearly_method_byapikey(
         &self,
         req: &DomainMonthYearPaymentMethodApiKey,
-    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyPaymentMethod>>, HttpError> {
         info!(
             "fetching yearly PAYMENT METHOD by api_key: *** (masked) - year: {}",
             req.year
@@ -3120,7 +3104,7 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                     "fetch yearly PAYMENT METHOD by api_key for year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -3132,7 +3116,7 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
     async fn get_monthly_total_amount_byapikey(
         &self,
         req: &DomainMonthYearTotalAmountApiKey,
-    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyTotalAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseMonthlyTotalAmount>>, HttpError> {
         info!(
             "fetching monthly TOTAL AMOUNT by api_key: *** (masked) - year: {}",
             req.year
@@ -3226,7 +3210,7 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
                     "fetch monthly TOTAL AMOUNT by api_key for year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
@@ -3235,7 +3219,7 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
     async fn get_yearly_total_amount_byapikey(
         &self,
         req: &DomainMonthYearTotalAmountApiKey,
-    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyTotalAmount>>, AppErrorHttp> {
+    ) -> Result<ApiResponse<Vec<MerchantResponseYearlyTotalAmount>>, HttpError> {
         info!(
             "fetching yearly TOTAL AMOUNT by api_key: *** (masked) - year: {}",
             req.year
@@ -3329,7 +3313,7 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
                     "fetch yearly TOTAL AMOUNT by api_key for year {} failed: {status:?}",
                     req.year
                 );
-                Err(AppErrorHttp(AppErrorGrpc::from(status)))
+                Err(AppErrorGrpc::from(status).into())
             }
         }
     }
