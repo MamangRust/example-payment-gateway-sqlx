@@ -9,17 +9,14 @@ use genproto::{
         saldo_service_client::SaldoServiceClient,
     },
 };
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use shared::{
     abstract_trait::saldo::http::{
         SaldoBalanceGrpcClientTrait, SaldoCommandGrpcClientTrait, SaldoGrpcClientServiceTrait,
         SaldoQueryGrpcClientTrait, SaldoTotalBalanceGrpcClientTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::saldo::{
             CreateSaldoRequest as DomainCreateSaldoRequest, FindAllSaldos as DomainFindAllSaldos,
@@ -33,118 +30,26 @@ use shared::{
         },
     },
     errors::{AppErrorGrpc, HttpError},
-    utils::{
-        MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_card_number,
-        month_name,
-    },
+    observability::{Method, TracingMetrics},
+    utils::{mask_card_number, month_name},
 };
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
 pub struct SaldoGrpcClientService {
     client: SaldoServiceClient<Channel>,
-    metrics: Metrics,
+    tracing_metrics_core: TracingMetrics,
     cache_store: Arc<CacheStore>,
 }
 
 impl SaldoGrpcClientService {
-    pub fn new(client: SaldoServiceClient<Channel>, cache_store: Arc<CacheStore>) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(client: SaldoServiceClient<Channel>, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             client,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("saldo-client-service")
-    }
-
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("Operation completed successfully: {message}");
-        } else {
-            error!("Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -167,7 +72,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -184,7 +89,8 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
             search: request.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "saldo:find_all:page:{page}:size:{page_size}:search:{}",
@@ -198,14 +104,16 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
         {
             let log_msg = format!("✅ Found {} saldos in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_all_saldo(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully fetched saldos")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully fetched saldos")
                     .await;
 
                 let inner = response.into_inner();
@@ -229,7 +137,8 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch saldos")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch saldos")
                     .await;
                 error!("fetch all saldos failed: {status:?}");
 
@@ -252,7 +161,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindActiveSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -269,7 +178,8 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
             search: request.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "saldo:find_by_active:page:{page}:size:{page_size}:search:{}",
@@ -283,19 +193,21 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
         {
             let log_msg = format!("✅ Found {} active saldos in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_active(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched active saldos",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched active saldos",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<SaldoResponseDeleteAt> =
@@ -319,7 +231,8 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch active saldos")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch active saldos")
                     .await;
                 error!("fetch active saldos failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -341,7 +254,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTrashedSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -358,7 +271,8 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
             search: request.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "saldo:find_by_trashed:page:{page}:size:{page_size}:search:{}",
@@ -372,19 +286,21 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
         {
             let log_msg = format!("✅ Found {} trashed saldos in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_trashed(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched trashed saldos",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched trashed saldos",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<SaldoResponseDeleteAt> =
@@ -408,7 +324,8 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed saldos")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed saldos")
                     .await;
                 error!("fetch trashed saldos failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -421,7 +338,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
         info!("fetching saldo by id: {id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindSaldoById",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -432,7 +349,8 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdSaldoRequest { saldo_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("saldo:find_by_id:id:{id}");
 
@@ -442,19 +360,21 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
             .await
         {
             info!("✅ Found saldo in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Saldo retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Saldo retrieved from cache")
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_id_saldo(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched saldo by id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched saldo by id",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -479,7 +399,8 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch saldo by id")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch saldo by id")
                     .await;
                 error!("find saldo {id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -497,7 +418,7 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
         info!("fetching saldo by card_number: {masked_card}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindSaldoByCard",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -510,7 +431,8 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
             card_number: card_number.to_string(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("saldo:find_by_card:card_number:{}", masked_card);
 
@@ -520,19 +442,21 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
             .await
         {
             info!("✅ Found saldo in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Saldo retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Saldo retrieved from cache")
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_card_number(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched saldo by card number",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched saldo by card number",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -556,12 +480,13 @@ impl SaldoQueryGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch saldo by card number",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch saldo by card number",
+                    )
+                    .await;
                 error!("find saldo with card_number {card_number} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -584,7 +509,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
         );
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "CreateSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -598,11 +523,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
             total_balance: request.total_balance as i32,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().create_saldo(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully created saldo")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully created saldo")
                     .await;
 
                 let inner = response.into_inner();
@@ -645,7 +572,8 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to create saldo")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to create saldo")
                     .await;
                 error!("create saldo for card {masked_card} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -669,7 +597,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
         );
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "UpdateSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -685,11 +613,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
             total_balance: request.total_balance as i32,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().update_saldo(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully updated saldo")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully updated saldo")
                     .await;
 
                 let inner = response.into_inner();
@@ -734,7 +664,8 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to update saldo")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to update saldo")
                     .await;
                 error!("update saldo {saldo_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -747,7 +678,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
         info!("trashing saldo id: {id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "TrashSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -758,11 +689,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdSaldoRequest { saldo_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().trashed_saldo(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully trashed saldo")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully trashed saldo")
                     .await;
 
                 let inner = response.into_inner();
@@ -795,7 +728,8 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to trash saldo")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to trash saldo")
                     .await;
                 error!("trash saldo {id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -808,7 +742,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
         info!("restoring saldo id: {id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -819,11 +753,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdSaldoRequest { saldo_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_saldo(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully restored saldo")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully restored saldo")
                     .await;
 
                 let inner = response.into_inner();
@@ -856,7 +792,8 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to restore saldo")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to restore saldo")
                     .await;
                 error!("restore saldo {id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -869,7 +806,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
         info!("permanently deleting saldo id: {id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteSaldoPermanent",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -880,16 +817,18 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdSaldoRequest { saldo_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().delete_saldo_permanent(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted saldo permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted saldo permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -916,12 +855,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete saldo permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete saldo permanently",
+                    )
+                    .await;
                 error!("delete saldo {id} permanently failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -933,7 +873,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
         info!("restoring all trashed saldos");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreAllSaldos",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -943,16 +883,18 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_all_saldo(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully restored all trashed saldos",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully restored all trashed saldos",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 info!("all trashed saldos restored successfully");
@@ -978,12 +920,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to restore all trashed saldos",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to restore all trashed saldos",
+                    )
+                    .await;
                 error!("restore all saldos failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -995,7 +938,7 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
         info!("permanently deleting all saldos");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteAllSaldosPermanent",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -1005,7 +948,8 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self
             .client
@@ -1014,12 +958,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted all saldos permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted all saldos permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1046,12 +991,13 @@ impl SaldoCommandGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete all saldos permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete all saldos permanently",
+                    )
+                    .await;
                 error!("delete all saldos permanently failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1069,7 +1015,7 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
         info!("fetching monthly BALANCE for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthBalanceSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -1080,7 +1026,8 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearlySaldo { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("saldo:monthly_balance:year:{year}");
 
@@ -1090,12 +1037,13 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
             .await
         {
             info!("✅ Found monthly balance in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly balance retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly balance retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1106,12 +1054,13 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly balance",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly balance",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<SaldoMonthBalanceResponse> =
@@ -1135,12 +1084,9 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly balance",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch monthly balance")
+                    .await;
                 error!("fetch monthly BALANCE for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1155,7 +1101,7 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
         info!("fetching yearly BALANCE for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearBalanceSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -1166,7 +1112,8 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearlySaldo { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("saldo:yearly_balance:year:{year}");
 
@@ -1176,12 +1123,13 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
             .await
         {
             info!("✅ Found yearly balance in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly balance retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly balance retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1192,12 +1140,13 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly balance",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly balance",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<SaldoYearBalanceResponse> =
@@ -1221,7 +1170,8 @@ impl SaldoBalanceGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch yearly balance")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch yearly balance")
                     .await;
                 error!("fetch yearly BALANCE for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -1244,7 +1194,7 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthTotalBalanceSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -1259,7 +1209,8 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
             month: req.month,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("saldo:monthly_total_balance:year:{}", req.year);
 
@@ -1272,12 +1223,13 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
                 "✅ Found monthly total balance in cache for year: {}",
                 req.year
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly total balance retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly total balance retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1288,12 +1240,13 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly total balance",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly total balance",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<SaldoMonthTotalBalanceResponse> =
@@ -1318,12 +1271,13 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly total balance",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly total balance",
+                    )
+                    .await;
                 error!(
                     "fetch monthly TOTAL BALANCE for {month_str} {} failed: {status:?}",
                     req.year
@@ -1341,7 +1295,7 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
         info!("fetching yearly TOTAL BALANCE for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearTotalBalanceSaldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -1352,7 +1306,8 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearlySaldo { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("saldo:yearly_total_balance:year:{}", year);
 
@@ -1362,12 +1317,13 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
             .await
         {
             info!("✅ Found yearly total balance in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly total balance retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly total balance retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1378,12 +1334,13 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly total balance",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly total balance",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<SaldoYearTotalBalanceResponse> =
@@ -1406,12 +1363,13 @@ impl SaldoTotalBalanceGrpcClientTrait for SaldoGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly total balance",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly total balance",
+                    )
+                    .await;
                 error!("fetch yearly TOTAL BALANCE for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }

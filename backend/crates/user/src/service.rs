@@ -1,4 +1,4 @@
-use crate::di::DependenciesInject;
+use crate::state::AppState;
 use genproto::user::{
     ApiResponsePaginationUser, ApiResponsePaginationUserDeleteAt, ApiResponseUser,
     ApiResponseUserAll, ApiResponseUserDelete, ApiResponseUserDeleteAt, CreateUserRequest,
@@ -9,341 +9,685 @@ use shared::{
         CreateUserRequest as DomainCreateUserRequest, FindAllUserRequest as DomainFindAllRequest,
         UpdateUserRequest as DomainUserRequest,
     },
-    errors::AppErrorGrpc,
+    errors::{AppErrorGrpc, CircuitBreakerError},
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 #[derive(Clone)]
 pub struct UserServiceImpl {
-    pub di: Arc<DependenciesInject>,
+    pub state: Arc<AppState>,
 }
 
 impl UserServiceImpl {
-    pub fn new(di: Arc<DependenciesInject>) -> Self {
-        Self { di }
+    pub fn new(state: Arc<AppState>) -> Self {
+        Self { state }
+    }
+
+    async fn check_rate_limit(&self) -> Result<(), Status> {
+        self.state.load_monitor.record_request();
+
+        if self.state.circuit_breaker.is_open() {
+            warn!("Request rejected: circuit breaker open");
+            return Err(Status::unavailable(
+                "Service temporarily unavailable due to high error rate. Please try again later.",
+            ));
+        }
+
+        match self.state.di_container.request_limiter.try_acquire() {
+            Ok(_permit) => Ok(()),
+            Err(_) => {
+                warn!("Request rejected: rate limit exceeded");
+                Err(Status::resource_exhausted(
+                    "Too many concurrent requests. Please try again later.",
+                ))
+            }
+        }
     }
 }
 
 #[tonic::async_trait]
 impl UserService for UserServiceImpl {
-    #[instrument(skip(self, request), level = "info")]
+    #[instrument(skip(self, request), fields(
+        method = "find_all_user",
+        page = request.get_ref().page,
+        page_size = request.get_ref().page_size,
+        search = tracing::field::Empty
+    ), level = "info")]
     async fn find_all(
         &self,
         request: Request<FindAllUserRequest>,
     ) -> Result<Response<ApiResponsePaginationUser>, Status> {
-        let req = request.into_inner();
-        info!(
-            "🔍 Fetching all users page={} page_size={}",
-            req.page, req.page_size
-        );
+        self.check_rate_limit().await?;
 
+        let req = request.into_inner();
         let domain_req = DomainFindAllRequest {
             page: req.page,
             page_size: req.page_size,
             search: req.search.clone(),
         };
 
-        match self.di.user_query.find_all(&domain_req).await {
-            Ok(api_response) => {
-                info!("✅ Found {} users", api_response.data.len());
-                let grpc_response = ApiResponsePaginationUser {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_query
+                    .find_all(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponsePaginationUser {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     pagination: Some(api_response.pagination.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    page = domain_req.page,
+                    page_size = domain_req.page_size,
+                    "find_all_user success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!("❌ Failed to fetch users: {:?}", e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            "find_all_user rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            error = %inner,
+                            "find_all_user failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), level = "info")]
+    #[instrument(skip(self, request), fields(method = "find_by_id_user", user_id = request.get_ref().id), level = "info")]
     async fn find_by_id(
         &self,
         request: Request<FindByIdUserRequest>,
     ) -> Result<Response<ApiResponseUser>, Status> {
-        let req = request.into_inner();
-        info!("🔍 Finding user by id={}", req.id);
+        self.check_rate_limit().await?;
 
-        match self.di.user_query.find_by_id(req.id).await {
-            Ok(api_response) => {
-                info!("✅ User found id={}", req.id);
-                let grpc_response = ApiResponseUser {
+        let req = request.into_inner();
+        let user_id = req.id;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_query
+                    .find_by_id(user_id)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseUser {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(user_id = user_id, "find_by_id_user success");
+                Ok(resp)
             }
             Err(e) => {
-                error!("❌ Failed to find user id={}: {:?}", req.id, e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            user_id = user_id,
+                            "find_by_id_user rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(user_id = user_id, error = %inner, "find_by_id_user failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), level = "info")]
+    #[instrument(skip(self, request), fields(
+        method = "find_by_active_user",
+        page = request.get_ref().page,
+        page_size = request.get_ref().page_size,
+        search = tracing::field::Empty
+    ), level = "info")]
     async fn find_by_active(
         &self,
         request: Request<FindAllUserRequest>,
     ) -> Result<Response<ApiResponsePaginationUserDeleteAt>, Status> {
-        let req = request.into_inner();
-        info!(
-            "🔍 Fetching active users page={} page_size={}",
-            req.page, req.page_size
-        );
+        self.check_rate_limit().await?;
 
+        let req = request.into_inner();
         let domain_req = DomainFindAllRequest {
             page: req.page,
             page_size: req.page_size,
             search: req.search.clone(),
         };
 
-        match self.di.user_query.find_by_active(&domain_req).await {
-            Ok(api_response) => {
-                info!("✅ Found {} active users", api_response.data.len());
-                let grpc_response = ApiResponsePaginationUserDeleteAt {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_query
+                    .find_by_active(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponsePaginationUserDeleteAt {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     pagination: Some(api_response.pagination.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    page = domain_req.page,
+                    page_size = domain_req.page_size,
+                    "find_by_active_user success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!("❌ Failed to fetch active users: {:?}", e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            "find_by_active_user rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            error = %inner,
+                            "find_by_active_user failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), level = "info")]
+    #[instrument(skip(self, request), fields(
+        method = "find_by_trashed_user",
+        page = request.get_ref().page,
+        page_size = request.get_ref().page_size,
+        search = tracing::field::Empty
+    ), level = "info")]
     async fn find_by_trashed(
         &self,
         request: Request<FindAllUserRequest>,
     ) -> Result<Response<ApiResponsePaginationUserDeleteAt>, Status> {
-        let req = request.into_inner();
-        info!(
-            "🔍 Fetching trashed users page={} page_size={}",
-            req.page, req.page_size
-        );
+        self.check_rate_limit().await?;
 
+        let req = request.into_inner();
         let domain_req = DomainFindAllRequest {
             page: req.page,
             page_size: req.page_size,
             search: req.search.clone(),
         };
 
-        match self.di.user_query.find_by_trashed(&domain_req).await {
-            Ok(api_response) => {
-                info!("✅ Found {} trashed users", api_response.data.len());
-                let grpc_response = ApiResponsePaginationUserDeleteAt {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_query
+                    .find_by_trashed(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponsePaginationUserDeleteAt {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     pagination: Some(api_response.pagination.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    page = domain_req.page,
+                    page_size = domain_req.page_size,
+                    "find_by_trashed_user success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!("❌ Failed to fetch trashed users: {:?}", e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            "find_by_trashed_user rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            error = %inner,
+                            "find_by_trashed_user failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
-
-    #[instrument(skip(self, request), level = "info")]
+    #[instrument(skip(self, request), fields(method = "create_user", email = %request.get_ref().email), level = "info")]
     async fn create(
         &self,
         request: Request<CreateUserRequest>,
     ) -> Result<Response<ApiResponseUser>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
-        info!("🆕 Creating user email={}", req.email);
+        let email = req.email.clone();
 
         let domain_req = DomainCreateUserRequest {
             firstname: req.firstname,
             lastname: req.lastname,
-            email: req.email.clone(),
+            email: email.clone(),
             password: req.password,
             confirm_password: req.confirm_password,
         };
 
-        match self.di.user_command.create(&domain_req).await {
-            Ok(api_response) => {
-                info!("✅ User created successfully email={}", req.email);
-                let grpc_response = ApiResponseUser {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_command
+                    .create(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseUser {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(email = email, "create_user success");
+                Ok(resp)
             }
             Err(e) => {
-                error!("❌ Failed to create user email={}: {:?}", req.email, e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(email = email, "create_user rejected: circuit breaker open");
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(email = email, error = %inner, "create_user failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), level = "info")]
+    #[instrument(skip(self, request), fields(
+        method = "update_user",
+        user_id = request.get_ref().id,
+        email = %request.get_ref().email
+    ), level = "info")]
     async fn update(
         &self,
         request: Request<UpdateUserRequest>,
     ) -> Result<Response<ApiResponseUser>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
-        info!("✏️ Updating user id={} email={}", req.id, req.email);
+        let user_id = req.id;
+        let email = req.email.clone();
 
         let domain_req = DomainUserRequest {
             id: Some(req.id),
             firstname: Some(req.firstname),
             lastname: Some(req.lastname),
-            email: Some(req.email.clone()),
+            email: Some(email.clone()),
             password: req.password,
             confirm_password: req.confirm_password,
         };
 
-        match self.di.user_command.update(&domain_req).await {
-            Ok(api_response) => {
-                info!("✅ User updated id={}", req.id);
-                let grpc_response = ApiResponseUser {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_command
+                    .update(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseUser {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(user_id = user_id, "update_user success");
+                Ok(resp)
             }
             Err(e) => {
-                error!("❌ Failed to update user id={}: {:?}", req.id, e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            user_id = user_id,
+                            "update_user rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(user_id = user_id, error = %inner, "update_user failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), level = "info")]
+    #[instrument(skip(self, request), fields(method = "trashed_user", user_id = request.get_ref().id), level = "info")]
     async fn trashed_user(
         &self,
         request: Request<FindByIdUserRequest>,
     ) -> Result<Response<ApiResponseUserDeleteAt>, Status> {
-        let req = request.into_inner();
-        info!("🗑️ Moving user id={} to trash", req.id);
+        self.check_rate_limit().await?;
 
-        match self.di.user_command.trashed(req.id).await {
-            Ok(api_response) => {
-                info!("✅ User moved to trash id={}", req.id);
-                let grpc_response = ApiResponseUserDeleteAt {
+        let req = request.into_inner();
+        let user_id = req.id;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_command
+                    .trashed(user_id)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseUserDeleteAt {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(user_id = user_id, "trashed_user success");
+                Ok(resp)
             }
             Err(e) => {
-                error!("❌ Failed to trash user id={}: {:?}", req.id, e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            user_id = user_id,
+                            "trashed_user rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(user_id = user_id, error = %inner, "trashed_user failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), level = "info")]
+    #[instrument(skip(self, request), fields(method = "restore_user", user_id = request.get_ref().id), level = "info")]
     async fn restore_user(
         &self,
         request: Request<FindByIdUserRequest>,
     ) -> Result<Response<ApiResponseUserDeleteAt>, Status> {
-        let req = request.into_inner();
-        info!("♻️ Restoring user id={}", req.id);
+        self.check_rate_limit().await?;
 
-        match self.di.user_command.restore(req.id).await {
-            Ok(api_response) => {
-                info!("✅ User restored id={}", req.id);
-                let grpc_response = ApiResponseUserDeleteAt {
+        let req = request.into_inner();
+        let user_id = req.id;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_command
+                    .restore(user_id)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseUserDeleteAt {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(user_id = user_id, "restore_user success");
+                Ok(resp)
             }
             Err(e) => {
-                error!("❌ Failed to restore user id={}: {:?}", req.id, e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            user_id = user_id,
+                            "restore_user rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(user_id = user_id, error = %inner, "restore_user failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), level = "info")]
+    #[instrument(skip(self, request), fields(method = "delete_user_permanent", user_id = request.get_ref().id), level = "info")]
     async fn delete_user_permanent(
         &self,
         request: Request<FindByIdUserRequest>,
     ) -> Result<Response<ApiResponseUserDelete>, Status> {
-        let req = request.into_inner();
-        info!("🔥 Permanently deleting user id={}", req.id);
+        self.check_rate_limit().await?;
 
-        match self.di.user_command.delete_permanent(req.id).await {
-            Ok(api_response) => {
-                info!("✅ User permanently deleted id={}", req.id);
-                let grpc_response = ApiResponseUserDelete {
+        let req = request.into_inner();
+        let user_id = req.id;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_command
+                    .delete_permanent(user_id)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseUserDelete {
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(user_id = user_id, "delete_user_permanent success");
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "❌ Failed to permanently delete user id={}: {:?}",
-                    req.id, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            user_id = user_id,
+                            "delete_user_permanent rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(user_id = user_id, error = %inner, "delete_user_permanent failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self), level = "info")]
+    #[instrument(
+        skip(self, _request),
+        fields(method = "restore_all_user"),
+        level = "info"
+    )]
     async fn restore_all_user(
         &self,
         _request: Request<()>,
     ) -> Result<Response<ApiResponseUserAll>, Status> {
-        info!("♻️ Restoring all users");
+        self.check_rate_limit().await?;
 
-        match self.di.user_command.restore_all().await {
-            Ok(api_response) => {
-                info!("✅ All users restored");
-                let grpc_response = ApiResponseUserAll {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_command
+                    .restore_all()
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseUserAll {
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!("restore_all_user success");
+                Ok(resp)
             }
             Err(e) => {
-                error!("❌ Failed to restore all users: {:?}", e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!("restore_all_user rejected: circuit breaker open");
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(error = %inner, "restore_all_user failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self), level = "info")]
+    #[instrument(
+        skip(self, _request),
+        fields(method = "delete_all_user_permanent"),
+        level = "info"
+    )]
     async fn delete_all_user_permanent(
         &self,
         _request: Request<()>,
     ) -> Result<Response<ApiResponseUserAll>, Status> {
-        info!("🔥 Permanently deleting ALL users");
+        self.check_rate_limit().await?;
 
-        match self.di.user_command.delete_all().await {
-            Ok(api_response) => {
-                info!("✅ All users permanently deleted");
-                let grpc_response = ApiResponseUserAll {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .user_command
+                    .delete_all()
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseUserAll {
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!("delete_all_user_permanent success");
+                Ok(resp)
             }
             Err(e) => {
-                error!("❌ Failed to permanently delete all users: {:?}", e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!("delete_all_user_permanent rejected: circuit breaker open");
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(error = %inner, "delete_all_user_permanent failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }

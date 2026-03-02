@@ -4,13 +4,13 @@ use crate::{
 };
 use axum::{
     Extension, Json,
+    extract::State,
     http::StatusCode,
     middleware,
     response::IntoResponse,
     routing::{get, post},
 };
 use shared::{
-    abstract_trait::auth::http::DynAuthGrpcClient,
     domain::{
         requests::{
             auth::{AuthRequest, RegisterRequest},
@@ -43,10 +43,12 @@ pub async fn health_checker_handler() -> impl IntoResponse {
     tag = "Auth"
 )]
 pub async fn login_user_handler(
-    Extension(service): Extension<DynAuthGrpcClient>,
+    State(app_state): State<Arc<AppState>>,
     SimpleValidatedJson(body): SimpleValidatedJson<AuthRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let response = service.login(&body).await?;
+    let auth_client = &app_state.di_container.auth_clients;
+
+    let response = auth_client.login(&body).await?;
     Ok((StatusCode::OK, Json(response)))
 }
 
@@ -61,10 +63,12 @@ pub async fn login_user_handler(
     tag = "Auth"
 )]
 pub async fn register_user_handler(
-    Extension(service): Extension<DynAuthGrpcClient>,
+    State(app_state): State<Arc<AppState>>,
     SimpleValidatedJson(body): SimpleValidatedJson<RegisterRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let response = service.register(&body).await?;
+    let auth_client = &app_state.di_container.auth_clients;
+
+    let response = auth_client.register(&body).await?;
     Ok((StatusCode::OK, Json(response)))
 }
 
@@ -80,10 +84,12 @@ pub async fn register_user_handler(
     tag = "Auth",
 )]
 pub async fn get_me_handler(
-    Extension(service): Extension<DynAuthGrpcClient>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let response = service.get_me(user_id).await?;
+    let auth_client = &app_state.di_container.auth_clients;
+
+    let response = auth_client.get_me(user_id).await?;
     Ok((StatusCode::OK, Json(response)))
 }
 
@@ -98,28 +104,30 @@ pub async fn get_me_handler(
     tag = "Auth"
 )]
 pub async fn refresh_token_handler(
-    Extension(service): Extension<DynAuthGrpcClient>,
+    State(app_state): State<Arc<AppState>>,
     Json(req): Json<RefreshTokenRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let response = service.refresh_token(&req.refresh_token).await?;
+    let auth_client = &app_state.di_container.auth_clients;
+
+    let response = auth_client.refresh_token(&req.refresh_token).await?;
     Ok((StatusCode::OK, Json(response)))
 }
 
-pub fn auth_routes(app_state: Arc<AppState>) -> OpenApiRouter {
+pub fn auth_routes(state: Arc<AppState>) -> OpenApiRouter {
     let public_routes = OpenApiRouter::new()
         .route("/api/auth/register", post(register_user_handler))
         .route("/api/auth/login", post(login_user_handler))
         .route("/api/healthchecker", get(health_checker_handler))
-        .layer(Extension(app_state.di_container.auth_clients.clone()));
+        .with_state(state.clone());
 
     let private_routes = OpenApiRouter::new()
         .route("/api/auth/me", get(get_me_handler))
         .route("/api/auth/refresh-token", post(refresh_token_handler))
-        .route_layer(middleware::from_fn(jwt::auth))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
-        .layer(Extension(app_state.di_container.auth_clients.clone()))
-        .layer(Extension(app_state.rate_limit.clone()))
-        .layer(Extension(app_state.jwt_config.clone()));
-
-    public_routes.merge(private_routes).with_state(app_state)
+        .route_layer(middleware::from_fn_with_state(state.clone(), jwt::auth))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
+        .with_state(state);
+    public_routes.merge(private_routes)
 }

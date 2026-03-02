@@ -1,19 +1,25 @@
+use crate::state::AppState;
 use axum::{
-    Extension, Json,
+    Json,
     body::Body,
+    extract::State,
     http::{Request, StatusCode, header},
     middleware::Next,
     response::IntoResponse,
 };
 use axum_extra::extract::cookie::CookieJar;
-use shared::{abstract_trait::jwt::DynJwtService, errors::ErrorResponse};
+use shared::{errors::ErrorResponse, utils::get_trace_id};
+use std::sync::Arc;
 
 pub async fn auth(
     cookie_jar: CookieJar,
-    Extension(jwt): Extension<DynJwtService>,
+    State(app_state): State<Arc<AppState>>,
     mut req: Request<Body>,
     next: Next,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let jwt = &app_state.jwt_config;
+    let trace_id = get_trace_id();
+
     let token = cookie_jar
         .get("token")
         .map(|cookie| cookie.value().to_string())
@@ -30,6 +36,7 @@ pub async fn auth(
             return Err((
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorResponse {
+                    trace_id: trace_id.clone(),
                     status: "fail".to_string(),
                     message: "You are not logged in, please provide token".to_string(),
                 }),
@@ -43,6 +50,7 @@ pub async fn auth(
             return Err((
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorResponse {
+                    trace_id: trace_id.clone(),
                     status: "fail".to_string(),
                     message: "Invalid token".to_string(),
                 }),

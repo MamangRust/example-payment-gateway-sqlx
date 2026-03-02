@@ -1,12 +1,16 @@
-use crate::errors::{repository::RepositoryError, service::ServiceError};
+use crate::errors::{CircuitBreakerError, repository::RepositoryError, service::ServiceError};
+use opentelemetry::Context;
+use opentelemetry::trace::{TraceContextExt, TraceId};
 use thiserror::Error;
-use tonic::Status;
+use tonic::{Code, Status, metadata::MetadataMap};
 use tracing::{error, warn};
 
 #[derive(Debug, Error)]
 pub enum AppErrorGrpc {
     #[error("Service error: {0}")]
     Service(#[from] ServiceError),
+    #[error("Circuit breaker is open - service temporarily unavailable")]
+    CircuitBreakerOpen,
     #[error("Unhandled: {0}")]
     Unhandled(String),
 }
@@ -20,6 +24,7 @@ impl AppErrorGrpc {
                 ServiceError::TokenExpired => warn!("⏰ {}", self),
                 _ => error!("🚨 {}", self),
             },
+            AppErrorGrpc::CircuitBreakerOpen => warn!("🔌 {}", self),
             AppErrorGrpc::Unhandled(_) => error!("💥 {}", self),
         }
     }
@@ -28,64 +33,89 @@ impl AppErrorGrpc {
 impl From<AppErrorGrpc> for Status {
     fn from(err: AppErrorGrpc) -> Self {
         err.log();
-        match err {
+
+        let binding = Context::current();
+        let span = binding.span();
+        let span_ctx = span.span_context();
+        let trace_id = span_ctx.trace_id();
+
+        let mut metadata = MetadataMap::new();
+
+        if trace_id != TraceId::INVALID {
+            if let Ok(trace_val) = trace_id.to_string().parse() {
+                metadata.insert("x-trace-id", trace_val);
+            }
+        }
+
+        let (code, message) = match err {
             AppErrorGrpc::Service(service_err) => match service_err {
                 ServiceError::InvalidCredentials => {
-                    Status::unauthenticated("🔐 Invalid credentials")
+                    (Code::Unauthenticated, "🔐 Invalid credentials".into())
                 }
-                ServiceError::Validation(errors) => {
-                    Status::invalid_argument(format!("📝 Validation failed: {errors:#?}"))
-                }
-                ServiceError::Forbidden(msg) => Status::permission_denied(msg),
+                ServiceError::Validation(errors) => (
+                    Code::InvalidArgument,
+                    format!("📝 Validation failed: {errors:#?}"),
+                ),
+                ServiceError::Forbidden(msg) => (Code::PermissionDenied, msg),
                 ServiceError::Repo(repo_err) => match repo_err {
-                    RepositoryError::NotFound => Status::not_found("🔍 Resource not found"),
+                    RepositoryError::NotFound => (Code::NotFound, "🔍 Resource not found".into()),
                     RepositoryError::Conflict(msg) => {
-                        Status::already_exists(format!("⚡ Conflict: {msg}"))
+                        (Code::AlreadyExists, format!("⚡ Conflict: {msg}"))
                     }
                     RepositoryError::AlreadyExists(msg) => {
-                        Status::already_exists(format!("📦 Already exists: {msg}"))
+                        (Code::AlreadyExists, format!("📦 Already exists: {msg}"))
                     }
-                    RepositoryError::ForeignKey(msg) => {
-                        Status::failed_precondition(format!("🔗 Foreign key constraint: {msg}"))
-                    }
+                    RepositoryError::ForeignKey(msg) => (
+                        Code::FailedPrecondition,
+                        format!("🔗 Foreign key constraint: {msg}"),
+                    ),
                     RepositoryError::Sqlx(err) => {
                         error!("💾 Database SQLx error: {err:?}");
-                        Status::internal("💾 Database operation failed")
+                        (Code::Internal, "💾 Database operation failed".into())
                     }
                     RepositoryError::Custom(msg) => {
-                        warn!("⚙️ Custom repository error: {msg}",);
-                        Status::internal(format!("⚙️ {msg}"))
+                        warn!("⚙️ Custom repository error: {msg}");
+                        (Code::Internal, format!("⚙️ {msg}"))
                     }
                 },
                 ServiceError::Bcrypt(err) => {
                     error!("🔒 Bcrypt error: {err:?}");
-                    Status::internal("🔒 Password processing error")
+                    (Code::Internal, "🔒 Password processing error".into())
                 }
                 ServiceError::Jwt(err) => {
                     warn!("🎫 JWT error: {err:?}");
-                    Status::unauthenticated(format!("🎫 Token error: {err:?}"))
+                    (Code::Unauthenticated, format!("🎫 Token error: {err:?}"))
                 }
-                ServiceError::TokenExpired => Status::unauthenticated("⏰ Token has expired"),
-                ServiceError::InvalidTokenType => Status::unauthenticated("🎫 Invalid token type"),
+                ServiceError::TokenExpired => {
+                    (Code::Unauthenticated, "⏰ Token has expired".into())
+                }
+                ServiceError::InvalidTokenType => {
+                    (Code::Unauthenticated, "🎫 Invalid token type".into())
+                }
                 ServiceError::InternalServerError(msg) => {
-                    error!("🔥 Internal server error: {msg}",);
-                    Status::internal(format!("🔥 {msg}"))
+                    error!("🔥 Internal server error: {msg}");
+                    (Code::Internal, format!("🔥 {msg}"))
                 }
                 ServiceError::Custom(msg) => {
                     warn!("⚙️ Custom service error: {msg}");
-                    Status::internal(format!("⚙️ {msg}"))
+                    (Code::Internal, format!("⚙️ {msg}"))
                 }
                 ServiceError::NotFound(msg) => {
                     warn!("🔍 Not found: {msg}");
-                    Status::not_found(format!("🔍 {msg}"))
+                    (Code::NotFound, format!("🔍 {msg}"))
                 }
             },
-
+            AppErrorGrpc::CircuitBreakerOpen => (
+                Code::Unavailable,
+                "🔌 Service temporarily unavailable - circuit breaker is open".into(),
+            ),
             AppErrorGrpc::Unhandled(msg) => {
                 error!("💥 Unhandled application error: {msg}");
-                Status::internal(format!("💥 Unexpected error: {msg}"))
+                (Code::Internal, format!("💥 Unexpected error: {msg}"))
             }
-        }
+        };
+
+        Status::with_metadata(code, message, metadata)
     }
 }
 
@@ -123,10 +153,24 @@ impl From<Status> for AppErrorGrpc {
                 status.message().to_string(),
             )),
 
+            tonic::Code::Unavailable => AppErrorGrpc::CircuitBreakerOpen,
+
             _ => {
-                warn!("🌐 Unknown gRPC status conversion: {status_code} - {message}",);
+                warn!("🌐 Unknown gRPC status conversion: {status_code} - {message}");
                 AppErrorGrpc::Unhandled(format!("gRPC error: {status_code} - {message}"))
             }
+        }
+    }
+}
+
+impl<E> From<CircuitBreakerError<E>> for AppErrorGrpc
+where
+    E: Into<AppErrorGrpc>,
+{
+    fn from(err: CircuitBreakerError<E>) -> Self {
+        match err {
+            CircuitBreakerError::Open => AppErrorGrpc::CircuitBreakerOpen,
+            CircuitBreakerError::Inner(e) => e.into(),
         }
     }
 }

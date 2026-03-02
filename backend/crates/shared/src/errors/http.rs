@@ -1,5 +1,9 @@
-use crate::errors::{
-    error::ErrorResponse, grpc::AppErrorGrpc, repository::RepositoryError, service::ServiceError,
+use crate::{
+    errors::{
+        error::ErrorResponse, grpc::AppErrorGrpc, repository::RepositoryError,
+        service::ServiceError,
+    },
+    utils::get_trace_id,
 };
 use axum::{
     Json,
@@ -61,6 +65,10 @@ impl From<AppErrorGrpc> for HttpError {
                 _ => HttpError::Internal("Unknown service error".into()),
             },
 
+            AppErrorGrpc::CircuitBreakerOpen => HttpError::ServiceUnavailable(
+                "Service temporarily unavailable - circuit breaker is open".to_string(),
+            ),
+
             AppErrorGrpc::Unhandled(msg) => HttpError::Internal(msg),
         }
     }
@@ -74,20 +82,23 @@ impl IntoResponse for HttpError {
             HttpError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg, "warn"),
             HttpError::NotFound(msg) => (StatusCode::NOT_FOUND, msg, "info"),
             HttpError::Conflict(msg) => (StatusCode::CONFLICT, msg, "warn"),
-            HttpError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg, "error"),
+            HttpError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg, "warn"),
             HttpError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg, "error"),
         };
 
+        let trace_id = get_trace_id();
+
         match log_level {
-            "error" => error!("HTTP {}: {}", status, msg),
-            "warn" => warn!("HTTP {}: {}", status, msg),
-            "info" => info!("HTTP {}: {}", status, msg),
-            _ => error!("HTTP {}: {}", status, msg),
+            "error" => error!(trace_id = ?trace_id, "HTTP {}: {}", status, msg),
+            "warn" => warn!(trace_id = ?trace_id, "HTTP {}: {}", status, msg),
+            "info" => info!(trace_id = ?trace_id, "HTTP {}: {}", status, msg),
+            _ => error!(trace_id = ?trace_id, "HTTP {}: {}", status, msg),
         }
 
         let body = Json(ErrorResponse {
             status: "error".into(),
             message: msg,
+            trace_id: trace_id,
         });
 
         (status, body).into_response()

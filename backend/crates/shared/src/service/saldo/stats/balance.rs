@@ -4,125 +4,32 @@ use crate::{
         service::stats::balance::SaldoBalanceServiceTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::responses::{ApiResponse, SaldoMonthBalanceResponse, SaldoYearBalanceResponse},
     errors::ServiceError,
-    utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
+    observability::{Method, TracingMetrics},
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Duration;
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::Request;
 use tracing::{error, info};
 
 pub struct SaldoBalanceService {
     pub balance: DynSaldoBalanceRepository,
-    pub metrics: Metrics,
+    pub tracing_metrics_core: TracingMetrics,
     pub cache_store: Arc<CacheStore>,
 }
 
 impl SaldoBalanceService {
-    pub fn new(balance: DynSaldoBalanceRepository, cache_store: Arc<CacheStore>) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(balance: DynSaldoBalanceRepository, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             balance,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("saldo-stats-balance-service")
-    }
-
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("✅ Operation completed successfully: {message}");
-        } else {
-            error!("❌ Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -141,7 +48,7 @@ impl SaldoBalanceServiceTrait for SaldoBalanceService {
         }
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "get_month_balance",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -151,7 +58,8 @@ impl SaldoBalanceServiceTrait for SaldoBalanceService {
         );
 
         let mut request = Request::new(year);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("saldo:monthly_balance:year:{year}");
 
@@ -161,12 +69,13 @@ impl SaldoBalanceServiceTrait for SaldoBalanceService {
             .await
         {
             info!("✅ Found monthly balance in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly balance retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly balance retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -176,22 +85,24 @@ impl SaldoBalanceServiceTrait for SaldoBalanceService {
                     "✅ Successfully retrieved {} monthly balance records for year {year}",
                     balances.len()
                 );
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Monthly balance retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Monthly balance retrieved successfully",
+                    )
+                    .await;
                 balances
             }
             Err(e) => {
                 error!("❌ Failed to retrieve monthly balance for year {year}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to retrieve monthly balance: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to retrieve monthly balance: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Repo(e));
             }
         };
@@ -232,7 +143,7 @@ impl SaldoBalanceServiceTrait for SaldoBalanceService {
         }
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "get_year_balance",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -242,7 +153,8 @@ impl SaldoBalanceServiceTrait for SaldoBalanceService {
         );
 
         let mut request = Request::new(year);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("saldo:yearly_balance:year:{year}");
 
@@ -252,12 +164,13 @@ impl SaldoBalanceServiceTrait for SaldoBalanceService {
             .await
         {
             info!("✅ Found yearly balance in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly balance retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly balance retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -267,22 +180,24 @@ impl SaldoBalanceServiceTrait for SaldoBalanceService {
                     "✅ Successfully retrieved {} yearly balance records for year {year}",
                     balances.len()
                 );
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Yearly balance retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Yearly balance retrieved successfully",
+                    )
+                    .await;
                 balances
             }
             Err(e) => {
                 error!("❌ Failed to retrieve yearly balance for year {year}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to retrieve yearly balance: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to retrieve yearly balance: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Repo(e));
             }
         };

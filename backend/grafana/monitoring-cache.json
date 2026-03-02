@@ -1,0 +1,605 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": {
+                    "type": "grafana",
+                    "uid": "-- Grafana --"
+                },
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "description": "Comprehensive dashboard for monitoring cache performance and health in a Rust application, using metrics from OpenTelemetry.",
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": 0,
+    "links": [],
+    "panels": [
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": 0
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "reqps"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                    "calcs": ["lastNotNull"],
+                    "fields": "",
+                    "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+            },
+            "pluginVersion": "12.3.0",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "sum(rate(rust_app_cache_operations_total{job=\"rust-app-via-otel\"}[5m]))",
+                    "interval": "",
+                    "legendFormat": "",
+                    "range": true,
+                    "refId": "A"
+                }
+            ],
+            "title": "Total Operations Rate",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": 0
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 6,
+                "y": 0
+            },
+            "id": 2,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                    "calcs": ["lastNotNull"],
+                    "fields": "",
+                    "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+            },
+            "pluginVersion": "12.3.0",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "(\n  sum(increase(rust_app_cache_hits_total{job=\"rust-app-via-otel\"}[5m]))\n  /\n  sum(increase(rust_app_cache_hits_total{job=\"rust-app-via-otel\"}[5m]) + increase(rust_app_cache_misses_total{job=\"rust-app-via-otel\"}[5m]))\n) * 100 or vector(0)",
+                    "interval": "",
+                    "legendFormat": "Cache Hit Rate",
+                    "range": true,
+                    "refId": "A"
+                }
+            ],
+            "title": "Cache Hit Rate",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": 0
+                            },
+                            {
+                                "color": "red",
+                                "value": 5
+                            }
+                        ]
+                    },
+                    "unit": "reqps"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            },
+            "id": 3,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                    "calcs": ["lastNotNull"],
+                    "fields": "",
+                    "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+            },
+            "pluginVersion": "12.3.0",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "sum(rate(rust_app_cache_errors_total{job=\"rust-app-via-otel\"}[5m]))",
+                    "interval": "",
+                    "legendFormat": "",
+                    "range": true,
+                    "refId": "A"
+                }
+            ],
+            "title": "Error Rate",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "vis": false,
+                            "viz": false
+                        }
+                    },
+                    "mappings": []
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 18,
+                "y": 0
+            },
+            "id": 4,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "right",
+                    "showLegend": true,
+                    "values": ["value", "percent"]
+                },
+                "pieType": "pie",
+                "reduceOptions": {
+                    "calcs": ["lastNotNull"],
+                    "fields": "",
+                    "values": false
+                },
+                "sort": "desc",
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "12.3.0",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "sum by (cache_operation) (rate(rust_app_cache_operations_total{job=\"rust-app-via-otel\"}[5m]))",
+                    "interval": "",
+                    "legendFormat": "{{cache_operation}}",
+                    "range": true,
+                    "refId": "A"
+                }
+            ],
+            "title": "Operations Distribution",
+            "type": "piechart"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "vis": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "never",
+                        "showValues": false,
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": 0
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "id": 5,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": true
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "12.3.0",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "histogram_quantile(0.50, sum by (le, cache_operation) (rate(rust_app_cache_operation_duration_seconds_bucket{job=\"rust-app-via-otel\"}[5m])))",
+                    "interval": "",
+                    "legendFormat": "P50 - {{cache_operation}}",
+                    "range": true,
+                    "refId": "A"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "histogram_quantile(0.95, sum by (le, cache_operation) (rate(rust_app_cache_operation_duration_seconds_bucket{job=\"rust-app-via-otel\"}[5m])))",
+                    "interval": "",
+                    "legendFormat": "P95 - {{cache_operation}}",
+                    "range": true,
+                    "refId": "B"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "histogram_quantile(0.99, sum by (le, cache_operation) (rate(rust_app_cache_operation_duration_seconds_bucket{job=\"rust-app-via-otel\"}[5m])))",
+                    "interval": "",
+                    "legendFormat": "P99 - {{cache_operation}}",
+                    "range": true,
+                    "refId": "C"
+                }
+            ],
+            "title": "Operation Latency (Percentiles)",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "vis": false,
+                            "viz": false
+                        }
+                    },
+                    "mappings": []
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            },
+            "id": 6,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "right",
+                    "showLegend": true,
+                    "values": ["value", "percent"]
+                },
+                "pieType": "donut",
+                "reduceOptions": {
+                    "calcs": ["lastNotNull"],
+                    "fields": "",
+                    "values": false
+                },
+                "sort": "desc",
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "12.3.0",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "sum by (cache_result) (rate(rust_app_cache_operations_total{job=\"rust-app-via-otel\"}[5m]))",
+                    "interval": "",
+                    "legendFormat": "{{cache_result}}",
+                    "range": true,
+                    "refId": "A"
+                }
+            ],
+            "title": "Result Distribution (Hit/Miss/Error/Success)",
+            "type": "piechart"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "vis": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "never",
+                        "showValues": false,
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "normal"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": 0
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "reqps"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 16
+            },
+            "id": 7,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": true
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "12.3.0",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${DS_PROMETHEUS}"
+                    },
+                    "editorMode": "code",
+                    "expr": "sum by (cache_operation, cache_result) (rate(rust_app_cache_operations_total{job=\"rust-app-via-otel\"}[5m]))",
+                    "interval": "",
+                    "legendFormat": "{{cache_operation}} - {{cache_result}}",
+                    "range": true,
+                    "refId": "A"
+                }
+            ],
+            "title": "Operations Rate by Result",
+            "type": "timeseries"
+        }
+    ],
+    "preload": false,
+    "refresh": "5s",
+    "schemaVersion": 42,
+    "tags": ["rust", "cache", "monolith"],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-1h",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "",
+    "title": "Rust Modular Monolith - Cache Metrics",
+    "uid": "rust-cache-metrics",
+    "version": 11
+}

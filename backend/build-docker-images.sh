@@ -43,24 +43,27 @@ check_docker() {
 # Build Docker image for a service
 build_service_image() {
     local service=$1
-    local dockerfile="Dockerfile.${service}"
+    local dockerfile="crates/${service}/Dockerfile.${service}"
     
     print_status "Building ${service} service image..."
     
     if [ ! -f "$dockerfile" ]; then
-        print_error "Dockerfile $dockerfile not found"
+        print_error "Dockerfile not found: $dockerfile"
         return 1
     fi
     
-    # Build the image
-    if docker build -f "$dockerfile" -t "payment-gateway-sqlx/${service}:latest" .; then
-        print_status "✅ Successfully built ${service}:latest"
+    if docker build \
+        -f "$dockerfile" \
+        -t "payment-gateway-sqlx/${service}:latest" \
+        .; then
+        print_status "Successfully built ${service}:latest"
         return 0
     else
-        print_error "❌ Failed to build ${service}:latest"
+        print_error "Failed to build ${service}:latest"
         return 1
     fi
 }
+
 
 # Build all service images
 build_all_images() {

@@ -16,11 +16,13 @@ use axum::{
     http::{HeaderName, Method, header},
 };
 use shared::utils::shutdown_signal;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::net::TcpListener;
+use tower::{ServiceBuilder, limit::ConcurrencyLimitLayer};
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     limit::RequestBodyLimitLayer,
+    timeout::TimeoutLayer,
 };
 use tracing::info;
 use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
@@ -315,7 +317,6 @@ impl AppRouter {
         let shared_state = Arc::new(app_state);
 
         let api_router = OpenApiRouter::with_openapi(ApiDoc::openapi())
-            .with_state(shared_state.clone())
             .merge(auth_routes(shared_state.clone()))
             .merge(user_routes(shared_state.clone()))
             .merge(role_routes(shared_state.clone()))
@@ -325,7 +326,7 @@ impl AppRouter {
             .merge(topup_routes(shared_state.clone()))
             .merge(transaction_routes(shared_state.clone()))
             .merge(transfer_routes(shared_state.clone()))
-            .merge(withdraw_routes(shared_state.clone()));
+            .merge(withdraw_routes(shared_state));
 
         let allowed_origin = "http://localhost:1420"
             .parse()
@@ -351,7 +352,12 @@ impl AppRouter {
         let router_with_layers = api_router
             .layer(cors)
             .layer(DefaultBodyLimit::disable())
-            .layer(RequestBodyLimitLayer::new(2 * 1024 * 1024));
+            .layer(
+                ServiceBuilder::new()
+                    .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024))
+                    .layer(TimeoutLayer::new(Duration::from_secs(45)))
+                    .layer(ConcurrencyLimitLayer::new(12000)),
+            );
 
         let (app_router, api) = router_with_layers.split_for_parts();
 

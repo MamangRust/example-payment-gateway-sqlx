@@ -1,18 +1,24 @@
+use crate::state::AppState;
 use axum::{
-    Extension, Json,
+    Json,
     body::Body,
+    extract::State,
     http::{Request, StatusCode},
     middleware::Next,
     response::IntoResponse,
 };
-use shared::{abstract_trait::rate_limit::DynRateLimitMiddleware, errors::ErrorResponse};
+use shared::{errors::ErrorResponse, utils::get_trace_id};
+use std::sync::Arc;
 use tracing::warn;
 
 pub async fn rate_limit_middleware(
-    Extension(rate_limiter): Extension<DynRateLimitMiddleware>,
+    State(app_state): State<Arc<AppState>>,
     req: Request<Body>,
     next: Next,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let rate_limiter = &app_state.rate_limit;
+    let trace_id = get_trace_id();
+
     let client_ip = req
         .headers()
         .get("x-forwarded-for")
@@ -36,6 +42,7 @@ pub async fn rate_limit_middleware(
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
             Json(ErrorResponse {
+                trace_id,
                 status: "fail".to_string(),
                 message: "Too many requests, please try again later".to_string(),
             }),

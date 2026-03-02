@@ -19,7 +19,6 @@ pub use self::transaction::TransactionGrpcClientService;
 pub use self::transfer::TransferGrpcClientService;
 pub use self::user::UserGrpcClientService;
 pub use self::withdraw::WithdrawGrpcClientService;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use genproto::{
@@ -32,7 +31,7 @@ use genproto::{
     user::user_service_client::UserServiceClient,
     withdraw::withdraw_service_client::WithdrawServiceClient,
 };
-use shared::config::GrpcClientConfig;
+use shared::config::{GrpcClientConfig, GrpcServiceEndpoints};
 use tonic::transport::{Channel, Endpoint};
 use tracing::info;
 
@@ -51,7 +50,7 @@ pub struct GrpcClients {
 }
 
 impl GrpcClients {
-    pub async fn init(config: GrpcClientConfig) -> Result<Self> {
+    pub async fn init(config: GrpcServiceEndpoints) -> Result<Self> {
         let auth_channel = Self::connect(&config.auth, "auth-service").await?;
         let card_channel = Self::connect(&config.card, "card-service").await?;
         let merchant_channel = Self::connect(&config.merchant, "merchant-service").await?;
@@ -80,31 +79,43 @@ impl GrpcClients {
     async fn connect(addr: &str, service: &str) -> Result<Channel> {
         info!("Connecting (balanced) to {} at {}", service, addr);
 
-        const POOL_SIZE: usize = 10;
+        let config_grpc = GrpcClientConfig::from_env()?;
 
-        let mut endpoints = Vec::with_capacity(POOL_SIZE);
+        let mut endpoints = Vec::with_capacity(config_grpc.pool_size);
 
-        for _ in 0..POOL_SIZE {
+        for _ in 0..config_grpc.pool_size {
             let ep = Endpoint::from_shared(addr.to_string())
                 .with_context(|| format!("Invalid gRPC address for {service}: {addr}"))?
-                .connect_timeout(Duration::from_secs(3))
-                .timeout(Duration::from_secs(15))
-                .tcp_keepalive(Some(Duration::from_secs(120)))
-                .keep_alive_while_idle(true)
-                .keep_alive_timeout(Duration::from_secs(10))
-                .http2_keep_alive_interval(Duration::from_secs(20))
-                .initial_connection_window_size(4 * 1024 * 1024)
-                .initial_stream_window_size(2 * 1024 * 1024)
-                .concurrency_limit(500)
-                .rate_limit(1500, Duration::from_secs(1))
-                .tcp_nodelay(true);
+                .connect_timeout(config_grpc.connect_timeout())
+                .timeout(config_grpc.request_timeout())
+                .tcp_keepalive(config_grpc.tcp_keepalive())
+                .keep_alive_while_idle(config_grpc.keep_alive_while_idle)
+                .keep_alive_timeout(config_grpc.keepalive_timeout())
+                .http2_keep_alive_interval(config_grpc.http2_keepalive_interval())
+                .initial_connection_window_size(
+                    config_grpc.initial_connection_window_size_mb * 1024 * 1024,
+                )
+                .initial_stream_window_size(config_grpc.initial_stream_window_size_mb * 1024 * 1024)
+                .concurrency_limit(config_grpc.concurrency_per_connection)
+                .rate_limit(
+                    config_grpc.rate_limit_per_sec,
+                    config_grpc.rate_limit_duration(),
+                )
+                .tcp_nodelay(config_grpc.tcp_nodelay);
 
             endpoints.push(ep);
         }
 
         let channel = Channel::balance_list(endpoints.into_iter());
 
-        info!("Successfully created balanced channel for {}", service);
+        info!(
+            "Successfully created balanced channel for {} (pool={}, concurrency={}, rate_limit={}/s)",
+            service,
+            config_grpc.pool_size,
+            config_grpc.concurrency_per_connection,
+            config_grpc.rate_limit_per_sec
+        );
+
         Ok(channel)
     }
 }

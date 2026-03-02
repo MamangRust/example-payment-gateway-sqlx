@@ -1,13 +1,14 @@
 use crate::{
     middleware::{
-        jwt, rate_limit::rate_limit_middleware, session::session_middleware,
+        circuit_breaker::circuit_breaker_middleware, jwt, rate_limit::rate_limit_middleware,
+        request_limiter::request_limiter_middleware, session::session_middleware,
         validate::SimpleValidatedJson,
     },
     state::AppState,
 };
 use axum::{
     Json,
-    extract::{Extension, Path, Query},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
@@ -15,7 +16,6 @@ use axum::{
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::{session::DynSessionMiddleware, withdraw::http::DynWithdrawGrpcClientService},
     domain::{
         requests::withdraw::{
             CreateWithdrawRequest, FindAllWithdrawCardNumber, FindAllWithdraws,
@@ -47,10 +47,12 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_withdraws(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllWithdraws>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all(&params).await {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    match withdraw_client.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -69,10 +71,12 @@ pub async fn get_withdraws(
     )
 )]
 pub async fn get_withdraws_by_card_number(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllWithdrawCardNumber>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all_by_card_number(&params).await {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    match withdraw_client.find_all_by_card_number(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -91,10 +95,12 @@ pub async fn get_withdraws_by_card_number(
     )
 )]
 pub async fn get_withdraw(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_id(id).await {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    match withdraw_client.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -113,10 +119,12 @@ pub async fn get_withdraw(
     )
 )]
 pub async fn get_active_withdraws(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllWithdraws>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_active(&params).await {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    match withdraw_client.find_by_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -135,10 +143,12 @@ pub async fn get_active_withdraws(
     )
 )]
 pub async fn get_trashed_withdraws(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllWithdraws>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_trashed(&params).await {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    match withdraw_client.find_by_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -158,10 +168,12 @@ pub async fn get_trashed_withdraws(
     )
 )]
 pub async fn create_withdraw(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateWithdrawRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.create(&body).await {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    match withdraw_client.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
     }
@@ -182,12 +194,14 @@ pub async fn create_withdraw(
     )
 )]
 pub async fn update_withdraw(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateWithdrawRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
     body.withdraw_id = Some(id);
-    match service.update(&body).await {
+    match withdraw_client.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -206,11 +220,14 @@ pub async fn update_withdraw(
     )
 )]
 pub async fn trash_withdraw_handler(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -228,7 +245,7 @@ pub async fn trash_withdraw_handler(
         ));
     }
 
-    match service.trashed_withdraw(id).await {
+    match withdraw_client.trashed_withdraw(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -247,11 +264,14 @@ pub async fn trash_withdraw_handler(
     )
 )]
 pub async fn restore_withdraw_handler(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -269,7 +289,7 @@ pub async fn restore_withdraw_handler(
         ));
     }
 
-    match service.restore(id).await {
+    match withdraw_client.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -288,11 +308,14 @@ pub async fn restore_withdraw_handler(
     )
 )]
 pub async fn delete_withdraw(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -310,7 +333,7 @@ pub async fn delete_withdraw(
         ));
     }
 
-    match service.delete_permanent(id).await {
+    match withdraw_client.delete_permanent(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -333,10 +356,13 @@ pub async fn delete_withdraw(
     )
 )]
 pub async fn restore_all_withdraw_handler(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -354,7 +380,7 @@ pub async fn restore_all_withdraw_handler(
         ));
     }
 
-    match service.restore_all().await {
+    match withdraw_client.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -377,10 +403,13 @@ pub async fn restore_all_withdraw_handler(
     )
 )]
 pub async fn delete_all_withdraw_handler(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -398,7 +427,7 @@ pub async fn delete_all_withdraw_handler(
         ));
     }
 
-    match service.delete_all().await {
+    match withdraw_client.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -423,11 +452,14 @@ pub async fn delete_all_withdraw_handler(
     )
 )]
 pub async fn get_monthly_withdraws(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -445,7 +477,7 @@ pub async fn get_monthly_withdraws(
         ));
     }
 
-    match service.get_monthly_withdraws(req.year).await {
+    match withdraw_client.get_monthly_withdraws(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -464,11 +496,14 @@ pub async fn get_monthly_withdraws(
     )
 )]
 pub async fn get_yearly_withdraws(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(query): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -486,7 +521,7 @@ pub async fn get_yearly_withdraws(
         ));
     }
 
-    match service.get_yearly_withdraws(query.year).await {
+    match withdraw_client.get_yearly_withdraws(query.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -505,11 +540,14 @@ pub async fn get_yearly_withdraws(
     )
 )]
 pub async fn get_month_status_success(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusWithdraw>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -527,7 +565,7 @@ pub async fn get_month_status_success(
         ));
     }
 
-    match service.get_month_status_success(&params).await {
+    match withdraw_client.get_month_status_success(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -546,11 +584,14 @@ pub async fn get_month_status_success(
     )
 )]
 pub async fn get_yearly_status_success(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -568,7 +609,7 @@ pub async fn get_yearly_status_success(
         ));
     }
 
-    match service.get_yearly_status_success(req.year).await {
+    match withdraw_client.get_yearly_status_success(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -587,11 +628,14 @@ pub async fn get_yearly_status_success(
     )
 )]
 pub async fn get_month_status_failed(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusWithdraw>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -609,7 +653,7 @@ pub async fn get_month_status_failed(
         ));
     }
 
-    match service.get_month_status_failed(&params).await {
+    match withdraw_client.get_month_status_failed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -628,11 +672,14 @@ pub async fn get_month_status_failed(
     )
 )]
 pub async fn get_yearly_status_failed(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -650,7 +697,7 @@ pub async fn get_yearly_status_failed(
         ));
     }
 
-    match service.get_yearly_status_failed(req.year).await {
+    match withdraw_client.get_yearly_status_failed(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -669,11 +716,14 @@ pub async fn get_yearly_status_failed(
     )
 )]
 pub async fn get_monthly_by_card_number(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearMonthCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -691,7 +741,7 @@ pub async fn get_monthly_by_card_number(
         ));
     }
 
-    match service.get_monthly_bycard(&params).await {
+    match withdraw_client.get_monthly_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -710,11 +760,14 @@ pub async fn get_monthly_by_card_number(
     )
 )]
 pub async fn get_yearly_by_card_number(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearMonthCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -732,7 +785,7 @@ pub async fn get_yearly_by_card_number(
         ));
     }
 
-    match service.get_yearly_bycard(&params).await {
+    match withdraw_client.get_yearly_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -751,11 +804,14 @@ pub async fn get_yearly_by_card_number(
     )
 )]
 pub async fn get_month_status_success_by_card(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusWithdrawCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -773,7 +829,10 @@ pub async fn get_month_status_success_by_card(
         ));
     }
 
-    match service.get_month_status_success_bycard(&params).await {
+    match withdraw_client
+        .get_month_status_success_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -792,11 +851,14 @@ pub async fn get_month_status_success_by_card(
     )
 )]
 pub async fn get_yearly_status_success_by_card(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearStatusWithdrawCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -814,7 +876,10 @@ pub async fn get_yearly_status_success_by_card(
         ));
     }
 
-    match service.get_yearly_status_success_bycard(&params).await {
+    match withdraw_client
+        .get_yearly_status_success_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -833,11 +898,14 @@ pub async fn get_yearly_status_success_by_card(
     )
 )]
 pub async fn get_month_status_failed_by_card(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusWithdrawCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -855,7 +923,10 @@ pub async fn get_month_status_failed_by_card(
         ));
     }
 
-    match service.get_month_status_failed_bycard(&params).await {
+    match withdraw_client
+        .get_month_status_failed_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -874,11 +945,14 @@ pub async fn get_month_status_failed_by_card(
     )
 )]
 pub async fn get_yearly_status_failed_by_card(
-    Extension(service): Extension<DynWithdrawGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearStatusWithdrawCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let withdraw_client = &app_state.di_container.withdraw_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -896,13 +970,16 @@ pub async fn get_yearly_status_failed_by_card(
         ));
     }
 
-    match service.get_yearly_status_failed_bycard(&params).await {
+    match withdraw_client
+        .get_yearly_status_failed_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
 }
 
-pub fn withdraw_routes(app_state: Arc<AppState>) -> OpenApiRouter {
+pub fn withdraw_routes(state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/withdraws", get(get_withdraws))
         .route("/api/withdraws/by-card", get(get_withdraws_by_card_number))
@@ -973,12 +1050,22 @@ pub fn withdraw_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/withdraws/stats/status/failed/yearly/by-card",
             get(get_yearly_status_failed_by_card),
         )
-        .route_layer(middleware::from_fn(session_middleware))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
-        .route_layer(middleware::from_fn(jwt::auth))
-        .layer(Extension(app_state.di_container.withdraw_clients.clone()))
-        .layer(Extension(app_state.di_container.role_clients.clone()))
-        .layer(Extension(app_state.session.clone()))
-        .layer(Extension(app_state.rate_limit.clone()))
-        .layer(Extension(app_state.jwt_config.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            session_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(state.clone(), jwt::auth))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            circuit_breaker_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_limiter_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
+        .with_state(state)
 }

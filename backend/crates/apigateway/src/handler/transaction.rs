@@ -1,13 +1,14 @@
 use crate::{
     middleware::{
-        api_key::ApiKey, jwt, rate_limit::rate_limit_middleware, session::session_middleware,
-        validate::SimpleValidatedJson,
+        api_key::ApiKey, circuit_breaker::circuit_breaker_middleware, jwt,
+        rate_limit::rate_limit_middleware, request_limiter::request_limiter_middleware,
+        session::session_middleware, validate::SimpleValidatedJson,
     },
     state::AppState,
 };
 use axum::{
     Json,
-    extract::{Extension, Path, Query},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
@@ -15,9 +16,6 @@ use axum::{
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::{
-        session::DynSessionMiddleware, transaction::http::DynTransactionGrpcClientService,
-    },
     domain::{
         requests::{
             transaction::{
@@ -53,10 +51,12 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_transactions(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTransactions>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all(&params).await {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    match transaction_client.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -75,10 +75,12 @@ pub async fn get_transactions(
     )
 )]
 pub async fn get_transactions_by_card_number(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTransactionCardNumber>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all_by_card_number(&params).await {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    match transaction_client.find_all_by_card_number(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -97,10 +99,12 @@ pub async fn get_transactions_by_card_number(
     )
 )]
 pub async fn get_active_transactions(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTransactions>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_active(&params).await {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    match transaction_client.find_by_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -119,10 +123,12 @@ pub async fn get_active_transactions(
     )
 )]
 pub async fn get_trashed_transactions(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTransactions>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_trashed(&params).await {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    match transaction_client.find_by_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -141,10 +147,12 @@ pub async fn get_trashed_transactions(
     )
 )]
 pub async fn get_transaction(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_id(id).await {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    match transaction_client.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -163,10 +171,12 @@ pub async fn get_transaction(
     )
 )]
 pub async fn get_transactions_by_merchant_id(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(merchant_id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_merchant_id(merchant_id).await {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    match transaction_client.find_by_merchant_id(merchant_id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -187,10 +197,12 @@ pub async fn get_transactions_by_merchant_id(
 )]
 pub async fn create_transaction(
     ApiKey(key): ApiKey,
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateTransactionRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.create(&key, &body).await {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    match transaction_client.create(&key, &body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
     }
@@ -212,12 +224,14 @@ pub async fn create_transaction(
 )]
 pub async fn update_transaction(
     ApiKey(key): ApiKey,
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTransactionRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
     body.transaction_id = Some(id);
-    match service.update(&key, &body).await {
+    match transaction_client.update(&key, &body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -236,11 +250,14 @@ pub async fn update_transaction(
     )
 )]
 pub async fn trash_transaction_handler(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -258,7 +275,7 @@ pub async fn trash_transaction_handler(
         ));
     }
 
-    match service.trashed(id).await {
+    match transaction_client.trashed(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -277,11 +294,14 @@ pub async fn trash_transaction_handler(
     )
 )]
 pub async fn restore_transaction_handler(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -299,7 +319,7 @@ pub async fn restore_transaction_handler(
         ));
     }
 
-    match service.restore(id).await {
+    match transaction_client.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -318,11 +338,14 @@ pub async fn restore_transaction_handler(
     )
 )]
 pub async fn delete_transaction(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -340,7 +363,7 @@ pub async fn delete_transaction(
         ));
     }
 
-    match service.delete_permanent(id).await {
+    match transaction_client.delete_permanent(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -363,10 +386,13 @@ pub async fn delete_transaction(
     )
 )]
 pub async fn restore_all_transaction_handler(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -384,7 +410,7 @@ pub async fn restore_all_transaction_handler(
         ));
     }
 
-    match service.restore_all().await {
+    match transaction_client.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -407,10 +433,13 @@ pub async fn restore_all_transaction_handler(
     )
 )]
 pub async fn delete_all_transaction_handler(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -428,7 +457,7 @@ pub async fn delete_all_transaction_handler(
         ));
     }
 
-    match service.delete_all().await {
+    match transaction_client.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -453,11 +482,14 @@ pub async fn delete_all_transaction_handler(
     )
 )]
 pub async fn get_monthly_amounts(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -475,7 +507,7 @@ pub async fn get_monthly_amounts(
         ));
     }
 
-    match service.get_monthly_amounts(req.year).await {
+    match transaction_client.get_monthly_amounts(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -494,11 +526,14 @@ pub async fn get_monthly_amounts(
     )
 )]
 pub async fn get_yearly_amounts(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -516,7 +551,7 @@ pub async fn get_yearly_amounts(
         ));
     }
 
-    match service.get_yearly_amounts(req.year).await {
+    match transaction_client.get_yearly_amounts(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -535,11 +570,14 @@ pub async fn get_yearly_amounts(
     )
 )]
 pub async fn get_monthly_method(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -557,7 +595,7 @@ pub async fn get_monthly_method(
         ));
     }
 
-    match service.get_monthly_method(req.year).await {
+    match transaction_client.get_monthly_method(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -576,11 +614,14 @@ pub async fn get_monthly_method(
     )
 )]
 pub async fn get_yearly_method(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -598,7 +639,7 @@ pub async fn get_yearly_method(
         ));
     }
 
-    match service.get_yearly_method(req.year).await {
+    match transaction_client.get_yearly_method(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -617,11 +658,14 @@ pub async fn get_yearly_method(
     )
 )]
 pub async fn get_month_status_success(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusTransaction>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -639,7 +683,7 @@ pub async fn get_month_status_success(
         ));
     }
 
-    match service.get_month_status_success(&params).await {
+    match transaction_client.get_month_status_success(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -658,11 +702,14 @@ pub async fn get_month_status_success(
     )
 )]
 pub async fn get_yearly_status_success(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -680,7 +727,7 @@ pub async fn get_yearly_status_success(
         ));
     }
 
-    match service.get_yearly_status_success(req.year).await {
+    match transaction_client.get_yearly_status_success(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -699,11 +746,14 @@ pub async fn get_yearly_status_success(
     )
 )]
 pub async fn get_month_status_failed(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusTransaction>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -721,7 +771,7 @@ pub async fn get_month_status_failed(
         ));
     }
 
-    match service.get_month_status_failed(&params).await {
+    match transaction_client.get_month_status_failed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -740,11 +790,14 @@ pub async fn get_month_status_failed(
     )
 )]
 pub async fn get_yearly_status_failed(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -762,7 +815,7 @@ pub async fn get_yearly_status_failed(
         ));
     }
 
-    match service.get_yearly_status_failed(req.year).await {
+    match transaction_client.get_yearly_status_failed(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -781,11 +834,14 @@ pub async fn get_yearly_status_failed(
     )
 )]
 pub async fn get_monthly_amounts_by_card(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearPaymentMethod>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -803,7 +859,7 @@ pub async fn get_monthly_amounts_by_card(
         ));
     }
 
-    match service.get_monthly_amounts_bycard(&params).await {
+    match transaction_client.get_monthly_amounts_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -822,11 +878,14 @@ pub async fn get_monthly_amounts_by_card(
     )
 )]
 pub async fn get_yearly_amounts_by_card(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearPaymentMethod>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -844,7 +903,7 @@ pub async fn get_yearly_amounts_by_card(
         ));
     }
 
-    match service.get_yearly_amounts_bycard(&params).await {
+    match transaction_client.get_yearly_amounts_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -863,11 +922,14 @@ pub async fn get_yearly_amounts_by_card(
     )
 )]
 pub async fn get_monthly_method_by_card(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearPaymentMethod>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -885,7 +947,7 @@ pub async fn get_monthly_method_by_card(
         ));
     }
 
-    match service.get_monthly_method_bycard(&params).await {
+    match transaction_client.get_monthly_method_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -904,11 +966,14 @@ pub async fn get_monthly_method_by_card(
     )
 )]
 pub async fn get_yearly_method_by_card(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearPaymentMethod>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -926,7 +991,7 @@ pub async fn get_yearly_method_by_card(
         ));
     }
 
-    match service.get_yearly_method_bycard(&params).await {
+    match transaction_client.get_yearly_method_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -945,11 +1010,14 @@ pub async fn get_yearly_method_by_card(
     )
 )]
 pub async fn get_month_status_success_by_card(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusTransactionCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -967,7 +1035,10 @@ pub async fn get_month_status_success_by_card(
         ));
     }
 
-    match service.get_month_status_success_bycard(&params).await {
+    match transaction_client
+        .get_month_status_success_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -986,11 +1057,14 @@ pub async fn get_month_status_success_by_card(
     )
 )]
 pub async fn get_yearly_status_success_by_card(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearStatusTransactionCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1008,7 +1082,10 @@ pub async fn get_yearly_status_success_by_card(
         ));
     }
 
-    match service.get_yearly_status_success_bycard(&params).await {
+    match transaction_client
+        .get_yearly_status_success_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1027,11 +1104,14 @@ pub async fn get_yearly_status_success_by_card(
     )
 )]
 pub async fn get_month_status_failed_by_card(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusTransactionCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1049,7 +1129,10 @@ pub async fn get_month_status_failed_by_card(
         ));
     }
 
-    match service.get_month_status_failed_bycard(&params).await {
+    match transaction_client
+        .get_month_status_failed_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1068,11 +1151,14 @@ pub async fn get_month_status_failed_by_card(
     )
 )]
 pub async fn get_yearly_status_failed_by_card(
-    Extension(service): Extension<DynTransactionGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearStatusTransactionCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transaction_client = &app_state.di_container.transaction_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1090,13 +1176,16 @@ pub async fn get_yearly_status_failed_by_card(
         ));
     }
 
-    match service.get_yearly_status_failed_bycard(&params).await {
+    match transaction_client
+        .get_yearly_status_failed_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
 }
 
-pub fn transaction_routes(app_state: Arc<AppState>) -> OpenApiRouter {
+pub fn transaction_routes(state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/transactions", get(get_transactions))
         .route(
@@ -1193,14 +1282,22 @@ pub fn transaction_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/transactions/stats/status/failed/yearly/by-card",
             get(get_yearly_status_failed_by_card),
         )
-        .route_layer(middleware::from_fn(session_middleware))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
-        .route_layer(middleware::from_fn(jwt::auth))
-        .layer(Extension(
-            app_state.di_container.transaction_clients.clone(),
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            session_middleware,
         ))
-        .layer(Extension(app_state.di_container.role_clients.clone()))
-        .layer(Extension(app_state.session.clone()))
-        .layer(Extension(app_state.rate_limit.clone()))
-        .layer(Extension(app_state.jwt_config.clone()))
+        .route_layer(middleware::from_fn_with_state(state.clone(), jwt::auth))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            circuit_breaker_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_limiter_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
+        .with_state(state)
 }

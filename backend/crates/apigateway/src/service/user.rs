@@ -5,16 +5,13 @@ use genproto::user::{
     CreateUserRequest, FindAllUserRequest, FindByIdUserRequest, UpdateUserRequest,
     user_service_client::UserServiceClient,
 };
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use shared::{
     abstract_trait::user::http::{
         UserCommandGrpcClientTrait, UserGrpcClientServiceTrait, UserQueryGrpcClientTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::user::{
             CreateUserRequest as DomainCreateUserRequest,
@@ -24,114 +21,25 @@ use shared::{
         responses::{ApiResponse, ApiResponsePagination, UserResponse, UserResponseDeleteAt},
     },
     errors::{AppErrorGrpc, HttpError},
-    utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
+    observability::{Method, TracingMetrics},
 };
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
 pub struct UserGrpcClientService {
     client: UserServiceClient<Channel>,
-    metrics: Metrics,
+    tracing_metrics_core: TracingMetrics,
     cache_store: Arc<CacheStore>,
 }
 
 impl UserGrpcClientService {
-    pub fn new(client: UserServiceClient<Channel>, cache_store: Arc<CacheStore>) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(client: UserServiceClient<Channel>, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             client,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("user-client-service")
-    }
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("Operation completed successfully: {message}");
-        } else {
-            error!("Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -154,7 +62,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllUser",
             vec![
                 KeyValue::new("component", "user"),
@@ -171,7 +79,8 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "user:find_all:page:{page}:size:{page_size}:search:{}",
@@ -185,14 +94,16 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
         {
             let log_msg = format!("✅ Found {} users in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_all(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully fetched users")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully fetched users")
                     .await;
 
                 let inner = response.into_inner();
@@ -216,7 +127,8 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch users")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch users")
                     .await;
                 error!("fetch all users failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -229,7 +141,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
         info!("fetching user by id: {user_id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindUserById",
             vec![
                 KeyValue::new("component", "user"),
@@ -240,7 +152,8 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdUserRequest { id: user_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("user:find_by_id:{user_id}");
 
@@ -250,19 +163,21 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
             .await
         {
             info!("✅ Found user with ID {user_id} in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "User retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "User retrieved from cache")
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_id(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched user by id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched user by id",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -287,7 +202,8 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch user by id")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch user by id")
                     .await;
                 error!("find user {user_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -309,7 +225,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindActiveUser",
             vec![
                 KeyValue::new("component", "user"),
@@ -326,7 +242,8 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "user:find_by_active:page:{page}:size:{page_size}:search:{:?}",
@@ -340,19 +257,21 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
         {
             let log_msg = format!("✅ Found {} active users in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_active(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched active users",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched active users",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<UserResponseDeleteAt> =
@@ -375,7 +294,8 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch active users")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch active users")
                     .await;
                 error!("fetch active users failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -397,7 +317,7 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTrashedUser",
             vec![
                 KeyValue::new("component", "user"),
@@ -414,7 +334,8 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "user:find_by_trashed:page:{page}:size:{page_size}:search:{}",
@@ -428,19 +349,21 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
         {
             let log_msg = format!("✅ Found {} trashed users in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_trashed(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched trashed users",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched trashed users",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<UserResponseDeleteAt> =
@@ -463,7 +386,8 @@ impl UserQueryGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed users")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed users")
                     .await;
                 error!("fetch trashed users failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -485,7 +409,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
         );
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "CreateUser",
             vec![
                 KeyValue::new("component", "user"),
@@ -502,11 +426,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
             confirm_password: req.confirm_password.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().create(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully created user")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully created user")
                     .await;
 
                 let inner = response.into_inner();
@@ -550,7 +476,8 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to create user")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to create user")
                     .await;
                 error!(
                     "create user {} {} (email: {}) failed: {status:?}",
@@ -576,7 +503,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
         );
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "UpdateUser",
             vec![
                 KeyValue::new("component", "user"),
@@ -594,11 +521,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
             confirm_password: req.confirm_password.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().update(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully updated user")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully updated user")
                     .await;
 
                 let inner = response.into_inner();
@@ -635,7 +564,8 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to update user")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to update user")
                     .await;
                 error!("update user {user_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -648,7 +578,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
         info!("trashing user id: {user_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "TrashUser",
             vec![
                 KeyValue::new("component", "user"),
@@ -659,11 +589,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdUserRequest { id: user_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().trashed_user(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully trashed user")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully trashed user")
                     .await;
 
                 let inner = response.into_inner();
@@ -696,7 +628,8 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to trash user")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to trash user")
                     .await;
                 error!("trash user {user_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -709,7 +642,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
         info!("restoring user id: {user_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreUser",
             vec![
                 KeyValue::new("component", "user"),
@@ -720,11 +653,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdUserRequest { id: user_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_user(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully restored user")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully restored user")
                     .await;
 
                 let inner = response.into_inner();
@@ -757,7 +692,8 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to restore user")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to restore user")
                     .await;
                 error!("restore user {user_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -770,7 +706,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
         info!("permanently deleting user id: {user_id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteUserPermanent",
             vec![
                 KeyValue::new("component", "user"),
@@ -781,16 +717,18 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdUserRequest { id: user_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().delete_user_permanent(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted user permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted user permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -816,12 +754,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete user permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete user permanently",
+                    )
+                    .await;
                 error!("delete user {user_id} permanently failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -833,7 +772,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
         info!("restoring all trashed users");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreAllUsers",
             vec![
                 KeyValue::new("component", "user"),
@@ -843,16 +782,18 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_all_user(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully restored all trashed users",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully restored all trashed users",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -878,12 +819,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to restore all trashed users",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to restore all trashed users",
+                    )
+                    .await;
                 error!("restore all users failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -895,7 +837,7 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
         info!("permanently deleting all users");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteAllUsersPermanent",
             vec![
                 KeyValue::new("component", "user"),
@@ -905,7 +847,8 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self
             .client
@@ -914,12 +857,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted all users permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted all users permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -945,12 +889,13 @@ impl UserCommandGrpcClientTrait for UserGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete all users permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete all users permanently",
+                    )
+                    .await;
                 error!("delete all users permanently failed: {status:?}");
 
                 return Err(AppErrorGrpc::from(status).into());

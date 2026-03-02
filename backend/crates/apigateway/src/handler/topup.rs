@@ -1,13 +1,14 @@
 use crate::{
     middleware::{
-        jwt, rate_limit::rate_limit_middleware, session::session_middleware,
+        circuit_breaker::circuit_breaker_middleware, jwt, rate_limit::rate_limit_middleware,
+        request_limiter::request_limiter_middleware, session::session_middleware,
         validate::SimpleValidatedJson,
     },
     state::AppState,
 };
 use axum::{
     Json,
-    extract::{Extension, Path, Query},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
@@ -15,7 +16,6 @@ use axum::{
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::{session::DynSessionMiddleware, topup::http::DynTopupGrpcClientService},
     domain::{
         requests::{
             topup::{
@@ -50,10 +50,12 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_topups(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTopups>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all(&params).await {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    match topup_client.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -72,10 +74,12 @@ pub async fn get_topups(
     )
 )]
 pub async fn get_topups_by_card_number(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTopupsByCardNumber>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all_by_card_number(&params).await {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    match topup_client.find_all_by_card_number(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -94,10 +98,12 @@ pub async fn get_topups_by_card_number(
     )
 )]
 pub async fn get_active_topups(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTopups>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_active(&params).await {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    match topup_client.find_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -116,10 +122,12 @@ pub async fn get_active_topups(
     )
 )]
 pub async fn get_trashed_topups(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTopups>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_trashed(&params).await {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    match topup_client.find_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -138,10 +146,12 @@ pub async fn get_trashed_topups(
     )
 )]
 pub async fn get_topup(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_id(id).await {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    match topup_client.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -161,10 +171,12 @@ pub async fn get_topup(
     )
 )]
 pub async fn create_topup(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateTopupRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.create(&body).await {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    match topup_client.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
     }
@@ -185,12 +197,14 @@ pub async fn create_topup(
     )
 )]
 pub async fn update_topup(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTopupRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
     body.topup_id = Some(id);
-    match service.update(&body).await {
+    match topup_client.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -209,11 +223,14 @@ pub async fn update_topup(
     )
 )]
 pub async fn trash_topup_handler(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -231,7 +248,7 @@ pub async fn trash_topup_handler(
         ));
     }
 
-    match service.trashed(id).await {
+    match topup_client.trashed(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -250,11 +267,14 @@ pub async fn trash_topup_handler(
     )
 )]
 pub async fn restore_topup_handler(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -272,7 +292,7 @@ pub async fn restore_topup_handler(
         ));
     }
 
-    match service.restore(id).await {
+    match topup_client.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -291,11 +311,14 @@ pub async fn restore_topup_handler(
     )
 )]
 pub async fn delete_topup(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -313,7 +336,7 @@ pub async fn delete_topup(
         ));
     }
 
-    match service.delete_permanent(id).await {
+    match topup_client.delete_permanent(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -336,10 +359,13 @@ pub async fn delete_topup(
     )
 )]
 pub async fn restore_all_topup_handler(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -357,7 +383,7 @@ pub async fn restore_all_topup_handler(
         ));
     }
 
-    match service.restore_all().await {
+    match topup_client.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -380,10 +406,13 @@ pub async fn restore_all_topup_handler(
     )
 )]
 pub async fn delete_all_topup_handler(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -401,7 +430,7 @@ pub async fn delete_all_topup_handler(
         ));
     }
 
-    match service.delete_all_permanent().await {
+    match topup_client.delete_all_permanent().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -426,11 +455,14 @@ pub async fn delete_all_topup_handler(
     )
 )]
 pub async fn get_monthly_topup_amounts(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -448,7 +480,7 @@ pub async fn get_monthly_topup_amounts(
         ));
     }
 
-    match service.get_monthly_amounts(req.year).await {
+    match topup_client.get_monthly_amounts(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -467,11 +499,14 @@ pub async fn get_monthly_topup_amounts(
     )
 )]
 pub async fn get_yearly_topup_amounts(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -489,7 +524,7 @@ pub async fn get_yearly_topup_amounts(
         ));
     }
 
-    match service.get_yearly_amounts(req.year).await {
+    match topup_client.get_yearly_amounts(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -508,11 +543,14 @@ pub async fn get_yearly_topup_amounts(
     )
 )]
 pub async fn get_monthly_topup_methods(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -530,7 +568,7 @@ pub async fn get_monthly_topup_methods(
         ));
     }
 
-    match service.get_monthly_methods(req.year).await {
+    match topup_client.get_monthly_methods(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -549,11 +587,14 @@ pub async fn get_monthly_topup_methods(
     )
 )]
 pub async fn get_yearly_topup_methods(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -571,7 +612,7 @@ pub async fn get_yearly_topup_methods(
         ));
     }
 
-    match service.get_yearly_methods(req.year).await {
+    match topup_client.get_yearly_methods(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -590,11 +631,14 @@ pub async fn get_yearly_topup_methods(
     )
 )]
 pub async fn get_month_topup_status_success(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthTopupStatus>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -612,7 +656,7 @@ pub async fn get_month_topup_status_success(
         ));
     }
 
-    match service.get_month_status_success(&params).await {
+    match topup_client.get_month_status_success(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -631,11 +675,14 @@ pub async fn get_month_topup_status_success(
     )
 )]
 pub async fn get_yearly_topup_status_success(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -653,7 +700,7 @@ pub async fn get_yearly_topup_status_success(
         ));
     }
 
-    match service.get_yearly_status_success(req.year).await {
+    match topup_client.get_yearly_status_success(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -672,11 +719,14 @@ pub async fn get_yearly_topup_status_success(
     )
 )]
 pub async fn get_month_topup_status_failed(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthTopupStatus>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -694,7 +744,7 @@ pub async fn get_month_topup_status_failed(
         ));
     }
 
-    match service.get_month_status_failed(&params).await {
+    match topup_client.get_month_status_failed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -713,11 +763,14 @@ pub async fn get_month_topup_status_failed(
     )
 )]
 pub async fn get_yearly_topup_status_failed(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -735,7 +788,7 @@ pub async fn get_yearly_topup_status_failed(
         ));
     }
 
-    match service.get_yearly_status_failed(req.year).await {
+    match topup_client.get_yearly_status_failed(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -754,11 +807,14 @@ pub async fn get_yearly_topup_status_failed(
     )
 )]
 pub async fn get_monthly_topup_amounts_by_card(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearMonthMethod>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -776,7 +832,7 @@ pub async fn get_monthly_topup_amounts_by_card(
         ));
     }
 
-    match service.get_monthly_amounts_bycard(&params).await {
+    match topup_client.get_monthly_amounts_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -795,11 +851,14 @@ pub async fn get_monthly_topup_amounts_by_card(
     )
 )]
 pub async fn get_yearly_topup_amounts_by_card(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearMonthMethod>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -817,7 +876,7 @@ pub async fn get_yearly_topup_amounts_by_card(
         ));
     }
 
-    match service.get_yearly_amounts_bycard(&params).await {
+    match topup_client.get_yearly_amounts_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -836,11 +895,14 @@ pub async fn get_yearly_topup_amounts_by_card(
     )
 )]
 pub async fn get_monthly_topup_methods_by_card(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearMonthMethod>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -858,7 +920,7 @@ pub async fn get_monthly_topup_methods_by_card(
         ));
     }
 
-    match service.get_monthly_methods_bycard(&params).await {
+    match topup_client.get_monthly_methods_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -877,11 +939,14 @@ pub async fn get_monthly_topup_methods_by_card(
     )
 )]
 pub async fn get_yearly_topup_methods_by_card(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearMonthMethod>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -899,7 +964,7 @@ pub async fn get_yearly_topup_methods_by_card(
         ));
     }
 
-    match service.get_yearly_methods_bycard(&params).await {
+    match topup_client.get_yearly_methods_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -918,11 +983,14 @@ pub async fn get_yearly_topup_methods_by_card(
     )
 )]
 pub async fn get_month_topup_status_success_by_card(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthTopupStatusCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -940,7 +1008,7 @@ pub async fn get_month_topup_status_success_by_card(
         ));
     }
 
-    match service.get_month_status_success_bycard(&params).await {
+    match topup_client.get_month_status_success_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -959,11 +1027,14 @@ pub async fn get_month_topup_status_success_by_card(
     )
 )]
 pub async fn get_yearly_topup_status_success_by_card(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearTopupStatusCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -981,7 +1052,7 @@ pub async fn get_yearly_topup_status_success_by_card(
         ));
     }
 
-    match service.get_yearly_status_success_bycard(&params).await {
+    match topup_client.get_yearly_status_success_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1000,11 +1071,14 @@ pub async fn get_yearly_topup_status_success_by_card(
     )
 )]
 pub async fn get_month_topup_status_failed_by_card(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthTopupStatusCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1022,7 +1096,7 @@ pub async fn get_month_topup_status_failed_by_card(
         ));
     }
 
-    match service.get_month_status_failed_bycard(&params).await {
+    match topup_client.get_month_status_failed_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1041,11 +1115,14 @@ pub async fn get_month_topup_status_failed_by_card(
     )
 )]
 pub async fn get_yearly_topup_status_failed_by_card(
-    Extension(service): Extension<DynTopupGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearTopupStatusCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let topup_client = &app_state.di_container.topup_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1063,13 +1140,13 @@ pub async fn get_yearly_topup_status_failed_by_card(
         ));
     }
 
-    match service.get_yearly_status_failed_bycard(&params).await {
+    match topup_client.get_yearly_status_failed_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
 }
 
-pub fn topup_routes(app_state: Arc<AppState>) -> OpenApiRouter {
+pub fn topup_routes(state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/topups", get(get_topups))
         .route("/api/topups/create", post(create_topup))
@@ -1147,12 +1224,22 @@ pub fn topup_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/topups/stats/status/failed/yearly/by-card",
             get(get_yearly_topup_status_failed_by_card),
         )
-        .route_layer(middleware::from_fn(session_middleware))
-        .route_layer(middleware::from_fn(jwt::auth))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
-        .layer(Extension(app_state.di_container.topup_clients.clone()))
-        .layer(Extension(app_state.di_container.role_clients.clone()))
-        .layer(Extension(app_state.session.clone()))
-        .layer(Extension(app_state.rate_limit.clone()))
-        .layer(Extension(app_state.jwt_config.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            session_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(state.clone(), jwt::auth))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            circuit_breaker_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_limiter_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
+        .with_state(state)
 }

@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use deadpool_redis::{
     Config as DeadpoolRedisConfig, Connection, Pool, PoolError, Runtime, redis::cmd,
 };
+use std::env;
 use tracing::info;
 
 #[derive(Debug, Clone)]
@@ -9,23 +10,58 @@ pub struct RedisConfig {
     pub host: String,
     pub port: u16,
     pub db: u8,
+    pub user: Option<String>,
     pub password: Option<String>,
 }
 
 impl RedisConfig {
-    pub fn new(host: String, port: u16, db: u8, password: Option<String>) -> Self {
+    pub fn new() -> Self {
+        let host = env::var("REDIS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+
+        let port = env::var("REDIS_PORT")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(6379);
+
+        let db = env::var("REDIS_DB")
+            .ok()
+            .and_then(|v| v.parse::<u8>().ok())
+            .unwrap_or(0);
+
+        let user = env::var("REDIS_USER").ok().filter(|v| !v.is_empty());
+
+        let password = env::var("REDIS_PASSWORD").ok().filter(|v| !v.is_empty());
+
         Self {
             host,
             port,
             db,
+            user,
             password,
         }
     }
+
     pub fn url(&self) -> String {
-        match &self.password {
-            Some(pw) => format!("redis://:{}@{}:{}/{}", pw, self.host, self.port, self.db),
-            None => format!("redis://{}:{}/{}", self.host, self.port, self.db),
+        match (&self.user, &self.password) {
+            (Some(user), Some(pw)) => {
+                format!(
+                    "redis://{}:{}@{}:{}/{}",
+                    user, pw, self.host, self.port, self.db
+                )
+            }
+            (None, Some(pw)) => {
+                format!("redis://:{}@{}:{}/{}", pw, self.host, self.port, self.db)
+            }
+            _ => {
+                format!("redis://{}:{}/{}", self.host, self.port, self.db)
+            }
         }
+    }
+}
+
+impl Default for RedisConfig {
+    fn default() -> Self {
+        RedisConfig::new()
     }
 }
 

@@ -1,22 +1,21 @@
 use crate::{
     middleware::{
-        jwt, rate_limit::rate_limit_middleware, session::session_middleware,
+        circuit_breaker::circuit_breaker_middleware, jwt,
+        request_limiter::request_limiter_middleware, session::session_middleware,
         validate::SimpleValidatedJson,
     },
     state::AppState,
 };
 use axum::{
     Json,
-    extract::{Extension, Path, Query},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
     routing::{delete, get, post},
 };
 use serde_json::json;
-use shared::abstract_trait::session::DynSessionMiddleware;
 use shared::{
-    abstract_trait::card::http::DynCardGrpcClientService,
     domain::{
         requests::{
             card::{CreateCardRequest, FindAllCards, MonthYearCardNumberCard, UpdateCardRequest},
@@ -31,6 +30,7 @@ use shared::{
     errors::HttpError,
 };
 use std::sync::Arc;
+use tracing::info;
 use utoipa_axum::router::OpenApiRouter;
 
 #[utoipa::path(
@@ -46,10 +46,12 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_cards(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllCards>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all(&params).await {
+    let card_client = &app_state.di_container.card_clients;
+
+    match card_client.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -68,10 +70,12 @@ pub async fn get_cards(
     )
 )]
 pub async fn get_active_cards(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllCards>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_active(&params).await {
+    let card_client = &app_state.di_container.card_clients;
+
+    match card_client.find_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -90,10 +94,12 @@ pub async fn get_active_cards(
     )
 )]
 pub async fn get_trashed_cards(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllCards>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_trashed(&params).await {
+    let card_client = &app_state.di_container.card_clients;
+
+    match card_client.find_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -112,10 +118,12 @@ pub async fn get_trashed_cards(
     )
 )]
 pub async fn get_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_id(id).await {
+    let card_client = &app_state.di_container.card_clients;
+
+    match card_client.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -134,10 +142,12 @@ pub async fn get_card(
     )
 )]
 pub async fn get_card_by_user(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(user_id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_user_id(user_id).await {
+    let card_client = &app_state.di_container.card_clients;
+
+    match card_client.find_by_user_id(user_id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -156,10 +166,12 @@ pub async fn get_card_by_user(
     )
 )]
 pub async fn get_card_by_number(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(card_number): Path<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_card_number(card_number).await {
+    let card_client = &app_state.di_container.card_clients;
+
+    match card_client.find_by_card_number(card_number).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -179,10 +191,12 @@ pub async fn get_card_by_number(
     )
 )]
 pub async fn create_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateCardRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.create(&body).await {
+    let card_client = &app_state.di_container.card_clients;
+
+    match card_client.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
     }
@@ -203,12 +217,14 @@ pub async fn create_card(
     )
 )]
 pub async fn update_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateCardRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
     body.card_id = Some(id);
-    match service.update(&body).await {
+    match card_client.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -227,11 +243,14 @@ pub async fn update_card(
     )
 )]
 pub async fn trash_card_handler(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -249,7 +268,7 @@ pub async fn trash_card_handler(
         ));
     }
 
-    match service.trash(id).await {
+    match card_client.trash(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -268,12 +287,15 @@ pub async fn trash_card_handler(
     )
 )]
 pub async fn restore_card_handler(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -289,7 +311,7 @@ pub async fn restore_card_handler(
             "Access denied. Required role: ADMIN or MODERATOR".to_string(),
         ));
     }
-    match service.restore(id).await {
+    match card_client.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -308,12 +330,15 @@ pub async fn restore_card_handler(
     )
 )]
 pub async fn delete_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -330,7 +355,7 @@ pub async fn delete_card(
         ));
     }
 
-    match service.delete(id).await {
+    match card_client.delete(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -353,11 +378,14 @@ pub async fn delete_card(
     )
 )]
 pub async fn restore_all_card_handler(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -374,7 +402,7 @@ pub async fn restore_all_card_handler(
         ));
     }
 
-    match service.restore_all().await {
+    match card_client.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -397,11 +425,14 @@ pub async fn restore_all_card_handler(
     )
 )]
 pub async fn delete_all_card_handler(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -418,7 +449,7 @@ pub async fn delete_all_card_handler(
         ));
     }
 
-    match service.delete_all().await {
+    match card_client.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -445,11 +476,14 @@ pub async fn delete_all_card_handler(
     )
 )]
 pub async fn get_monthly_balance(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -467,7 +501,7 @@ pub async fn get_monthly_balance(
         ));
     }
 
-    match service.get_monthly_balance(req.year).await {
+    match card_client.get_monthly_balance(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -486,11 +520,14 @@ pub async fn get_monthly_balance(
     )
 )]
 pub async fn get_yearly_balance(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -508,7 +545,7 @@ pub async fn get_yearly_balance(
         ));
     }
 
-    match service.get_yearly_balance(req.year).await {
+    match card_client.get_yearly_balance(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -529,12 +566,15 @@ pub async fn get_yearly_balance(
     )
 )]
 pub async fn get_monthly_topup_amount(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -551,7 +591,7 @@ pub async fn get_monthly_topup_amount(
         ));
     }
 
-    match service.get_monthly_topup_amount(req.year).await {
+    match card_client.get_monthly_topup_amount(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -570,12 +610,14 @@ pub async fn get_monthly_topup_amount(
     )
 )]
 pub async fn get_yearly_topup_amount(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -592,7 +634,7 @@ pub async fn get_yearly_topup_amount(
         ));
     }
 
-    match service.get_yearly_topup_amount(req.year).await {
+    match card_client.get_yearly_topup_amount(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -611,12 +653,15 @@ pub async fn get_yearly_topup_amount(
     )
 )]
 pub async fn get_monthly_transaction_amount(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -633,7 +678,7 @@ pub async fn get_monthly_transaction_amount(
         ));
     }
 
-    match service.get_monthly_transaction_amount(req.year).await {
+    match card_client.get_monthly_transaction_amount(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -652,12 +697,15 @@ pub async fn get_monthly_transaction_amount(
     )
 )]
 pub async fn get_yearly_transaction_amount(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -674,7 +722,7 @@ pub async fn get_yearly_transaction_amount(
         ));
     }
 
-    match service.get_yearly_transaction_amount(req.year).await {
+    match card_client.get_yearly_transaction_amount(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -695,12 +743,15 @@ pub async fn get_yearly_transaction_amount(
     )
 )]
 pub async fn get_monthly_transfer_amount_sender(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -717,7 +768,7 @@ pub async fn get_monthly_transfer_amount_sender(
         ));
     }
 
-    match service.get_monthly_amount_sender(req.year).await {
+    match card_client.get_monthly_amount_sender(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -736,12 +787,15 @@ pub async fn get_monthly_transfer_amount_sender(
     )
 )]
 pub async fn get_monthly_transfer_amount_receiver(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -758,7 +812,7 @@ pub async fn get_monthly_transfer_amount_receiver(
         ));
     }
 
-    match service.get_monthly_amount_receiver(req.year).await {
+    match card_client.get_monthly_amount_receiver(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -777,12 +831,15 @@ pub async fn get_monthly_transfer_amount_receiver(
     )
 )]
 pub async fn get_yearly_transfer_amount_sender(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
     let key = format!("session:{user_id}");
+
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
 
     let current_session = session
         .get_session(&key)
@@ -799,7 +856,7 @@ pub async fn get_yearly_transfer_amount_sender(
         ));
     }
 
-    match service.get_yearly_amount_sender(req.year).await {
+    match card_client.get_yearly_amount_sender(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -818,11 +875,14 @@ pub async fn get_yearly_transfer_amount_sender(
     )
 )]
 pub async fn get_yearly_transfer_amount_receiver(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -840,7 +900,7 @@ pub async fn get_yearly_transfer_amount_receiver(
         ));
     }
 
-    match service.get_yearly_amount_receiver(req.year).await {
+    match card_client.get_yearly_amount_receiver(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -861,11 +921,14 @@ pub async fn get_yearly_transfer_amount_receiver(
     )
 )]
 pub async fn get_monthly_withdraw_amount(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -883,7 +946,7 @@ pub async fn get_monthly_withdraw_amount(
         ));
     }
 
-    match service.get_monthly_withdraw_amount(req.year).await {
+    match card_client.get_monthly_withdraw_amount(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -902,11 +965,14 @@ pub async fn get_monthly_withdraw_amount(
     )
 )]
 pub async fn get_yearly_withdraw_amount(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -924,7 +990,7 @@ pub async fn get_yearly_withdraw_amount(
         ));
     }
 
-    match service.get_yearly_withdraw_amount(req.year).await {
+    match card_client.get_yearly_withdraw_amount(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -946,11 +1012,14 @@ pub async fn get_yearly_withdraw_amount(
 // Stats by card
 
 pub async fn get_monthly_balance_by_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -968,7 +1037,7 @@ pub async fn get_monthly_balance_by_card(
         ));
     }
 
-    match service.get_monthly_balance_bycard(&params).await {
+    match card_client.get_monthly_balance_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -987,11 +1056,14 @@ pub async fn get_monthly_balance_by_card(
     )
 )]
 pub async fn get_yearly_balance_by_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1009,7 +1081,7 @@ pub async fn get_yearly_balance_by_card(
         ));
     }
 
-    match service.get_yearly_balance_bycard(&params).await {
+    match card_client.get_yearly_balance_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1028,11 +1100,14 @@ pub async fn get_yearly_balance_by_card(
     )
 )]
 pub async fn get_monthly_topup_amount_by_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1050,7 +1125,7 @@ pub async fn get_monthly_topup_amount_by_card(
         ));
     }
 
-    match service.get_monthly_topup_amount_bycard(&params).await {
+    match card_client.get_monthly_topup_amount_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1069,11 +1144,14 @@ pub async fn get_monthly_topup_amount_by_card(
     )
 )]
 pub async fn get_yearly_topup_amount_by_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1091,7 +1169,7 @@ pub async fn get_yearly_topup_amount_by_card(
         ));
     }
 
-    match service.get_yearly_topup_amount_bycard(&params).await {
+    match card_client.get_yearly_topup_amount_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1110,11 +1188,14 @@ pub async fn get_yearly_topup_amount_by_card(
     )
 )]
 pub async fn get_monthly_transaction_amount_by_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1132,7 +1213,10 @@ pub async fn get_monthly_transaction_amount_by_card(
         ));
     }
 
-    match service.get_monthly_transaction_amount_bycard(&params).await {
+    match card_client
+        .get_monthly_transaction_amount_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1151,11 +1235,14 @@ pub async fn get_monthly_transaction_amount_by_card(
     )
 )]
 pub async fn get_yearly_transaction_amount_by_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1173,7 +1260,10 @@ pub async fn get_yearly_transaction_amount_by_card(
         ));
     }
 
-    match service.get_yearly_transaction_amount_bycard(&params).await {
+    match card_client
+        .get_yearly_transaction_amount_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1192,11 +1282,14 @@ pub async fn get_yearly_transaction_amount_by_card(
     )
 )]
 pub async fn get_monthly_transfer_amount_by_card_sender(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1214,7 +1307,7 @@ pub async fn get_monthly_transfer_amount_by_card_sender(
         ));
     }
 
-    match service.get_monthly_amount_sender_bycard(&params).await {
+    match card_client.get_monthly_amount_sender_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1233,11 +1326,14 @@ pub async fn get_monthly_transfer_amount_by_card_sender(
     )
 )]
 pub async fn get_monthly_transfer_amount_by_card_receiver(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1255,7 +1351,10 @@ pub async fn get_monthly_transfer_amount_by_card_receiver(
         ));
     }
 
-    match service.get_monthly_amount_receiver_bycard(&params).await {
+    match card_client
+        .get_monthly_amount_receiver_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1274,11 +1373,14 @@ pub async fn get_monthly_transfer_amount_by_card_receiver(
     )
 )]
 pub async fn get_yearly_transfer_amount_by_card_sender(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1296,7 +1398,7 @@ pub async fn get_yearly_transfer_amount_by_card_sender(
         ));
     }
 
-    match service.get_yearly_amount_sender_bycard(&params).await {
+    match card_client.get_yearly_amount_sender_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1315,11 +1417,14 @@ pub async fn get_yearly_transfer_amount_by_card_sender(
     )
 )]
 pub async fn get_yearly_transfer_amount_by_card_receiver(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1337,7 +1442,7 @@ pub async fn get_yearly_transfer_amount_by_card_receiver(
         ));
     }
 
-    match service.get_yearly_amount_receiver_bycard(&params).await {
+    match card_client.get_yearly_amount_receiver_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1356,11 +1461,14 @@ pub async fn get_yearly_transfer_amount_by_card_receiver(
     )
 )]
 pub async fn get_monthly_withdraw_amount_by_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1378,7 +1486,10 @@ pub async fn get_monthly_withdraw_amount_by_card(
         ));
     }
 
-    match service.get_monthly_withdraw_amount_bycard(&params).await {
+    match card_client
+        .get_monthly_withdraw_amount_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1397,11 +1508,14 @@ pub async fn get_monthly_withdraw_amount_by_card(
     )
 )]
 pub async fn get_yearly_withdraw_amount_by_card(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumberCard>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1419,7 +1533,7 @@ pub async fn get_yearly_withdraw_amount_by_card(
         ));
     }
 
-    match service.get_yearly_withdraw_amount_bycard(&params).await {
+    match card_client.get_yearly_withdraw_amount_bycard(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1437,16 +1551,25 @@ pub async fn get_yearly_withdraw_amount_by_card(
     )
 )]
 pub async fn get_card_dashboard(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
         .get_session(&key)
         .await
         .ok_or_else(|| HttpError::Unauthorized("Session expired or not found".to_string()))?;
+
+    info!(
+        user_id = user_id,
+        roles = ?current_session.roles,
+        "Authenticated user roles"
+    );
 
     if !current_session
         .roles
@@ -1458,7 +1581,7 @@ pub async fn get_card_dashboard(
         ));
     }
 
-    match service.get_dashboard().await {
+    match card_client.get_dashboard().await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1477,11 +1600,14 @@ pub async fn get_card_dashboard(
     )
 )]
 pub async fn get_card_dashboard_by_card_number(
-    Extension(service): Extension<DynCardGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(card_number): Path<String>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let card_client = &app_state.di_container.card_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1499,13 +1625,13 @@ pub async fn get_card_dashboard_by_card_number(
         ));
     }
 
-    match service.get_dashboard_bycard(card_number).await {
+    match card_client.get_dashboard_bycard(card_number).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
 }
 
-pub fn card_routes(app_state: Arc<AppState>) -> OpenApiRouter {
+pub fn card_routes(state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/cards", get(get_cards))
         .route("/api/cards/create", post(create_card))
@@ -1619,12 +1745,18 @@ pub fn card_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/cards/dashboard/{card_number}",
             get(get_card_dashboard_by_card_number),
         )
-        .route_layer(middleware::from_fn(session_middleware))
-        .route_layer(middleware::from_fn(jwt::auth))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
-        .layer(Extension(app_state.di_container.card_clients.clone()))
-        .layer(Extension(app_state.di_container.role_clients.clone()))
-        .layer(Extension(app_state.session.clone()))
-        .layer(Extension(app_state.rate_limit.clone()))
-        .layer(Extension(app_state.jwt_config.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            session_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(state.clone(), jwt::auth))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            circuit_breaker_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_limiter_middleware,
+        ))
+        .with_state(state)
 }

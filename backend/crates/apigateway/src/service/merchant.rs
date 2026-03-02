@@ -7,11 +7,7 @@ use genproto::merchant::{
     FindByMerchantUserIdRequest, FindYearMerchant, FindYearMerchantByApikey, FindYearMerchantById,
     UpdateMerchantRequest, merchant_service_client::MerchantServiceClient,
 };
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use shared::utils::mask_api_key;
 use shared::{
     abstract_trait::merchant::http::{
@@ -24,6 +20,7 @@ use shared::{
         MerchantTransactionGrpcClientTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::merchant::{
             CreateMerchantRequest as DomainCreateMerchantRequest,
@@ -48,117 +45,25 @@ use shared::{
         },
     },
     errors::{AppErrorGrpc, HttpError},
-    utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
+    observability::{Method, TracingMetrics},
 };
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
 pub struct MerchantGrpcClientService {
     client: MerchantServiceClient<Channel>,
-    metrics: Metrics,
+    tracing_metrics_core: TracingMetrics,
     cache_store: Arc<CacheStore>,
 }
 
 impl MerchantGrpcClientService {
-    pub fn new(
-        client: MerchantServiceClient<Channel>,
-        cache_store: Arc<CacheStore>,
-    ) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(client: MerchantServiceClient<Channel>, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             client,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("merchant-client-service")
-    }
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("Operation completed successfully: {message}");
-        } else {
-            error!("Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -181,7 +86,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -198,7 +103,8 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
             search: request.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:find_all:page:{page}:size:{page_size}:search:{}",
@@ -211,19 +117,21 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found merchants in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Merchants retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Merchants retrieved from cache")
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_all_merchant(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched merchants",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched merchants",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponse> = inner.data.into_iter().map(Into::into).collect();
@@ -246,7 +154,8 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch merchants")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch merchants")
                     .await;
                 error!("find_all merchants failed: {status:?}");
 
@@ -269,7 +178,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindActiveMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -286,7 +195,8 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
             search: request.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:find_by_active:page:{page}:size:{page_size}:search:{}",
@@ -299,23 +209,25 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found active merchants in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Active merchants retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Active merchants retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_active(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched active merchants",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched active merchants",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseDeleteAt> =
@@ -339,12 +251,13 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch active merchants",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch active merchants",
+                    )
+                    .await;
                 error!("find_active merchants failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -365,7 +278,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTrashedMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -382,7 +295,8 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
             search: request.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:find_by_trashed:page:{page}:size:{page_size}:search:{}",
@@ -395,23 +309,25 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found trashed merchants in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Trashed merchants retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Trashed merchants retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_trashed(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched trashed merchants",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched trashed merchants",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseDeleteAt> =
@@ -435,12 +351,13 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch trashed merchants",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch trashed merchants",
+                    )
+                    .await;
                 error!("find_trashed merchants failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -455,7 +372,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
         info!("fetching merchant by api_key: *** (masked)");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindByApiKeyMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -467,7 +384,8 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
             api_key: api_key.to_string(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let masked_key = mask_api_key(api_key);
 
@@ -479,19 +397,21 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found merchant in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Merchant retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Merchant retrieved from cache")
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_api_key(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched merchant by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched merchant by api key",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -514,12 +434,13 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch merchant by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch merchant by api key",
+                    )
+                    .await;
                 error!("find merchant by api_key failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -534,7 +455,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
         info!("fetching merchants by user_id: {user_id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindByMerchantUserId",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -545,7 +466,8 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindByMerchantUserIdRequest { user_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("merchant:find_by_user_id:user_id:{user_id}");
 
@@ -555,23 +477,25 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found merchants for user in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Merchants for user retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Merchants for user retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_merchant_user_id(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched merchants by user id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched merchants by user id",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponse> = inner.data.into_iter().map(Into::into).collect();
@@ -594,12 +518,13 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch merchants by user id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch merchants by user id",
+                    )
+                    .await;
                 error!("find merchants by user_id {user_id} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -611,7 +536,7 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
         info!("fetching merchant by id: {id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindByIdMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -622,7 +547,8 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdMerchantRequest { merchant_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("merchant:find_by_id:id:{id}");
 
@@ -632,19 +558,21 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found merchant in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Merchant retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Merchant retrieved from cache")
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_id_merchant(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched merchant by id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched merchant by id",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -667,7 +595,8 @@ impl MerchantQueryGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch merchant by id")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch merchant by id")
                     .await;
                 error!("find merchant {id} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -693,7 +622,7 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllMerchantTransactions",
             vec![
                 KeyValue::new("component", "merchant_transaction"),
@@ -710,7 +639,8 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
             search: search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant_transaction:find_all:page:{page}:size:{page_size}:search:{:?}",
@@ -723,12 +653,13 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found merchant transactions in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Merchant transactions retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Merchant transactions retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -739,12 +670,13 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched all merchant transactions",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched all merchant transactions",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantTransactionResponse> =
@@ -765,12 +697,13 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch all merchant transactions",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch all merchant transactions",
+                    )
+                    .await;
                 error!("fetch all merchant transactions failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -792,7 +725,7 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllMerchantTransactionsByApiKey",
             vec![
                 KeyValue::new("component", "merchant_transaction"),
@@ -810,7 +743,8 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
             search: search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let masked_key = mask_api_key(&request.api_key);
 
@@ -825,12 +759,13 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found merchant transactions in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Merchant transactions retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Merchant transactions retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -841,12 +776,13 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched merchant transactions by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched merchant transactions by api key",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantTransactionResponse> =
@@ -873,12 +809,13 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch merchant transactions by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch merchant transactions by api key",
+                    )
+                    .await;
                 error!("fetch merchant transactions by api_key failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -900,7 +837,7 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllMerchantTransactionsById",
             vec![
                 KeyValue::new("component", "merchant_transaction"),
@@ -919,7 +856,8 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
             search: request.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant_transaction:find_by_id:merchant_id:{merchant_id}:page:{page}:size:{page_size}:search:{}",
@@ -932,12 +870,13 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found merchant transactions by ID in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Merchant transactions by ID retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Merchant transactions by ID retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -948,12 +887,13 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched merchant transactions by id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched merchant transactions by id",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantTransactionResponse> =
@@ -981,12 +921,13 @@ impl MerchantTransactionGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch merchant transactions by id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch merchant transactions by id",
+                    )
+                    .await;
                 error!(
                     "fetch transactions for merchant {} failed: {status:?}",
                     request.merchant_id
@@ -1007,7 +948,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
         info!("creating merchant for user_id: {}", request.user_id);
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "CreateMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1021,16 +962,14 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
             user_id: request.user_id,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().create_merchant(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully created merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully created merchant")
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -1083,7 +1022,8 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to create merchant")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to create merchant")
                     .await;
                 error!(
                     "create merchant for user_id {} failed: {status:?}",
@@ -1106,7 +1046,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
         info!("updating merchant id: {merchant_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "UpdateMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1122,16 +1062,14 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
             status: request.status.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().update_merchant(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully updated merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully updated merchant")
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -1180,7 +1118,8 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to update merchant")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to update merchant")
                     .await;
                 error!("update merchant {merchant_id} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -1193,7 +1132,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
         info!("trashing merchant id: {id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "TrashMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1204,16 +1143,14 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdMerchantRequest { merchant_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().trashed_merchant(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully trashed merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully trashed merchant")
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -1252,7 +1189,8 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to trash merchant")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to trash merchant")
                     .await;
                 error!("trash merchant {id} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -1265,7 +1203,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
         info!("restoring merchant id: {id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1276,16 +1214,18 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdMerchantRequest { merchant_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_merchant(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully restored merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully restored merchant",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -1324,7 +1264,8 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to restore merchant")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to restore merchant")
                     .await;
                 error!("restore merchant {id} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -1337,7 +1278,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
         info!("permanently deleting merchant id: {id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1348,7 +1289,8 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdMerchantRequest { merchant_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self
             .client
@@ -1357,12 +1299,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted merchant permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted merchant permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1390,12 +1333,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete merchant permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete merchant permanently",
+                    )
+                    .await;
                 error!("delete merchant {id} permanently failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1407,7 +1351,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
         info!("restoring all trashed merchants");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreAllMerchants",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1417,16 +1361,18 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_all_merchant(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully restored all trashed merchants",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully restored all trashed merchants",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1454,12 +1400,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to restore all trashed merchants",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to restore all trashed merchants",
+                    )
+                    .await;
                 error!("restore all merchants failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1471,7 +1418,7 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
         info!("permanently deleting all merchants");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteAllMerchants",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1481,7 +1428,8 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self
             .client
@@ -1490,12 +1438,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted all merchants permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted all merchants permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1523,12 +1472,13 @@ impl MerchantCommandGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete all merchants permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete all merchants permanently",
+                    )
+                    .await;
                 error!("delete all merchants permanently failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1546,7 +1496,7 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
         info!("fetching monthly AMOUNT stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyAmountMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1557,7 +1507,8 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearMerchant { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("merchant:monthly:year:{year}");
 
@@ -1567,12 +1518,13 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found monthly merchant amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly merchant amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly merchant amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1583,12 +1535,13 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly merchant amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly merchant amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseMonthlyAmount> =
@@ -1612,12 +1565,13 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly merchant amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly merchant amount",
+                    )
+                    .await;
                 error!("fetch monthly AMOUNT for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1632,7 +1586,7 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
         info!("fetching yearly AMOUNT stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyAmountMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1643,7 +1597,8 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearMerchant { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("merchant:yearly:year:{year}");
 
@@ -1653,12 +1608,13 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found yearly merchant amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly merchant amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly merchant amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1669,12 +1625,13 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly merchant amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly merchant amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseYearlyAmount> =
@@ -1698,12 +1655,13 @@ impl MerchantStatsAmountGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly merchant amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly merchant amount",
+                    )
+                    .await;
                 error!("fetch yearly AMOUNT for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1721,7 +1679,7 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
         info!("fetching monthly PAYMENT METHOD stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyMethodMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1732,7 +1690,8 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearMerchant { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("merchant:monthly_method:year:{year}");
 
@@ -1742,12 +1701,13 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found monthly payment method statistics in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly payment method statistics retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly payment method statistics retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1758,12 +1718,13 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly payment method stats",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly payment method stats",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseMonthlyPaymentMethod> =
@@ -1787,12 +1748,13 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly payment method stats",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly payment method stats",
+                    )
+                    .await;
                 error!("fetch monthly PAYMENT METHOD for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1807,7 +1769,7 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
         info!("fetching yearly PAYMENT METHOD stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyMethodMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1818,7 +1780,8 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearMerchant { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("merchant:yearly_method:year:{year}");
 
@@ -1828,12 +1791,13 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found yearly payment method statistics in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly payment method statistics retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly payment method statistics retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1844,12 +1808,13 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly payment method stats",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly payment method stats",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseYearlyPaymentMethod> =
@@ -1873,12 +1838,13 @@ impl MerchantStatsMethodGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly payment method stats",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly payment method stats",
+                    )
+                    .await;
                 error!("fetch yearly PAYMENT METHOD for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1896,7 +1862,7 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
         info!("fetching monthly TOTAL AMOUNT stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyTotalAmountMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1907,7 +1873,8 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearMerchant { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("merchant:monthly_total:year:{year}");
 
@@ -1917,12 +1884,13 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found monthly total transaction amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly total transaction amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly total transaction amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1933,12 +1901,13 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly total amount stats",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly total amount stats",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseMonthlyTotalAmount> =
@@ -1962,12 +1931,13 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly total amount stats",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly total amount stats",
+                    )
+                    .await;
                 error!("fetch monthly TOTAL AMOUNT for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1982,7 +1952,7 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
         info!("fetching yearly TOTAL AMOUNT stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyTotalAmountMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -1993,7 +1963,8 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearMerchant { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("merchant:yearly_total:year:{year}");
 
@@ -2003,12 +1974,13 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             info!("✅ Found yearly total transaction amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly total transaction amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly total transaction amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2019,12 +1991,13 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly total amount stats",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly total amount stats",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseYearlyTotalAmount> =
@@ -2048,12 +2021,13 @@ impl MerchantStatsTotalAmountGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly total amount stats",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly total amount stats",
+                    )
+                    .await;
                 error!("fetch yearly TOTAL AMOUNT for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -2074,7 +2048,7 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyAmountByMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -2089,7 +2063,8 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:monthly_amount:merchant_id:{}:year:{}",
@@ -2105,12 +2080,13 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
                 "✅ Found monthly transaction amounts in cache for merchant_id: {}",
                 req.merchant_id
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transaction amounts by merchant retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transaction amounts by merchant retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2121,12 +2097,13 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly amount by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly amount by merchant",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseMonthlyAmount> =
@@ -2152,12 +2129,13 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly amount by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly amount by merchant",
+                    )
+                    .await;
                 error!(
                     "fetch monthly AMOUNT for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
@@ -2178,7 +2156,7 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyAmountByMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -2193,7 +2171,8 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:yearly_amount:merchant_id:{}:year:{}",
@@ -2209,12 +2188,13 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
                 "✅ Found yearly transaction amounts in cache for merchant_id: {}",
                 req.merchant_id
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transaction amounts by merchant retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transaction amounts by merchant retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2225,12 +2205,13 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly amount by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly amount by merchant",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseYearlyAmount> =
@@ -2256,12 +2237,13 @@ impl MerchantStatsAmountByMerchantGrpcClientTrait for MerchantGrpcClientService 
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly amount by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly amount by merchant",
+                    )
+                    .await;
                 error!(
                     "fetch yearly AMOUNT for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
@@ -2285,7 +2267,7 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyMethodByMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -2300,7 +2282,8 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:monthly_method:merchant_id:{}:year:{}",
@@ -2316,12 +2299,13 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
                 "✅ Found monthly payment method statistics in cache for merchant_id: {}",
                 req.merchant_id
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly payment method statistics by merchant retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly payment method statistics by merchant retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2332,12 +2316,13 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly payment method by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly payment method by merchant",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseMonthlyPaymentMethod> =
@@ -2363,12 +2348,13 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly payment method by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly payment method by merchant",
+                    )
+                    .await;
                 error!(
                     "fetch monthly PAYMENT METHOD for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
@@ -2389,7 +2375,7 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyMethodByMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -2404,7 +2390,8 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:yearly_method:merchant_id:{}:year:{}",
@@ -2420,12 +2407,13 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
                 "✅ Found yearly payment method statistics in cache for merchant_id: {}",
                 req.merchant_id
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly payment method statistics by merchant retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly payment method statistics by merchant retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2436,12 +2424,13 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly payment method by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly payment method by merchant",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseYearlyPaymentMethod> =
@@ -2467,12 +2456,13 @@ impl MerchantStatsMethodByMerchantGrpcClientTrait for MerchantGrpcClientService 
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly payment method by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly payment method by merchant",
+                    )
+                    .await;
                 error!(
                     "fetch yearly PAYMENT METHOD for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
@@ -2496,7 +2486,7 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyTotalAmountByMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -2511,7 +2501,8 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:monthly_total_amount:merchant_id:{}:year:{}",
@@ -2527,12 +2518,13 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
                 "✅ Found monthly total transaction amounts in cache for merchant_id: {}",
                 req.merchant_id
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly total transaction amounts by merchant retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly total transaction amounts by merchant retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2543,12 +2535,13 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly total amount by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly total amount by merchant",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseMonthlyTotalAmount> =
@@ -2573,12 +2566,13 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly total amount by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly total amount by merchant",
+                    )
+                    .await;
                 error!(
                     "fetch monthly TOTAL AMOUNT for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
@@ -2599,7 +2593,7 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyTotalAmountByMerchant",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -2614,7 +2608,8 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:yearly_total_amount:merchant_id:{}:year:{}",
@@ -2630,12 +2625,13 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
                 "✅ Found yearly total transaction amounts in cache for merchant_id: {}",
                 req.merchant_id
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly total transaction amounts by merchant retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly total transaction amounts by merchant retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2646,12 +2642,13 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly total amount by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly total amount by merchant",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseYearlyTotalAmount> =
@@ -2677,12 +2674,13 @@ impl MerchantStatsTotalAmountByMerchantGrpcClientTrait for MerchantGrpcClientSer
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly total amount by merchant",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly total amount by merchant",
+                    )
+                    .await;
                 error!(
                     "fetch yearly TOTAL AMOUNT for merchant {} year {} failed: {status:?}",
                     req.merchant_id, req.year
@@ -2706,7 +2704,7 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyAmountByApiKey",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -2720,7 +2718,8 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:monthly_amount:api_key:{}:year:{}",
@@ -2737,12 +2736,13 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                 "✅ Found monthly transaction amounts in cache for api_key: {}",
                 mask_api_key(&req.api_key)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transaction amounts by API key retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transaction amounts by API key retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2753,12 +2753,13 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly amount by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly amount by api key",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseMonthlyAmount> =
@@ -2783,12 +2784,13 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly amount by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly amount by api key",
+                    )
+                    .await;
                 error!(
                     "fetch monthly AMOUNT by api_key for year {} failed: {status:?}",
                     req.year
@@ -2809,7 +2811,7 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyAmountByApiKey",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -2823,7 +2825,8 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:yearly_amount:api_key:{}:year:{}",
@@ -2840,12 +2843,13 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                 "✅ Found yearly transaction amounts in cache for api_key: {}",
                 mask_api_key(&req.api_key)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transaction amounts by API key retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transaction amounts by API key retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2856,12 +2860,13 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly amount by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly amount by api key",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseYearlyAmount> =
@@ -2886,12 +2891,13 @@ impl MerchantStatsAmountByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly amount by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly amount by api key",
+                    )
+                    .await;
                 error!(
                     "fetch yearly AMOUNT by api_key for year {} failed: {status:?}",
                     req.year
@@ -2915,7 +2921,7 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyMethodByApiKey",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -2929,7 +2935,8 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:monthly_method:api_key:{}:year:{}",
@@ -2946,12 +2953,13 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                 "✅ Found monthly payment method statistics in cache for api_key: {}",
                 mask_api_key(&req.api_key)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly payment method statistics by API key retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly payment method statistics by API key retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2962,12 +2970,13 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly payment method by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly payment method by api key",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseMonthlyPaymentMethod> =
@@ -2991,12 +3000,13 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly payment method by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly payment method by api key",
+                    )
+                    .await;
                 error!(
                     "fetch monthly PAYMENT METHOD by api_key for year {} failed: {status:?}",
                     req.year
@@ -3017,7 +3027,7 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyMethodByApiKey",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -3031,7 +3041,8 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:yearly_method:api_key:{}:year:{}",
@@ -3048,12 +3059,13 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                 "✅ Found yearly payment method statistics in cache for api_key: {}",
                 mask_api_key(&req.api_key)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly payment method statistics by API key retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly payment method statistics by API key retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -3064,12 +3076,13 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly payment method by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly payment method by api key",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseYearlyPaymentMethod> =
@@ -3094,12 +3107,13 @@ impl MerchantStatsMethodByApiKeyGrpcClientTrait for MerchantGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly payment method by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly payment method by api key",
+                    )
+                    .await;
                 error!(
                     "fetch yearly PAYMENT METHOD by api_key for year {} failed: {status:?}",
                     req.year
@@ -3123,7 +3137,7 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyTotalAmountByApiKey",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -3137,7 +3151,8 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:monthly_total_amount:api_key:{}:year:{}",
@@ -3154,12 +3169,13 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
                 "✅ Found monthly total transaction amounts in cache for api_key: {}",
                 mask_api_key(&req.api_key)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly total transaction amounts by API key retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly total transaction amounts by API key retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -3170,12 +3186,13 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly total amount by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly total amount by api key",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseMonthlyTotalAmount> =
@@ -3200,12 +3217,13 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly total amount by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly total amount by api key",
+                    )
+                    .await;
                 error!(
                     "fetch monthly TOTAL AMOUNT by api_key for year {} failed: {status:?}",
                     req.year
@@ -3226,7 +3244,7 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyTotalAmountByApiKey",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -3240,7 +3258,8 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "merchant:yearly_total_amount:api_key:{}:year:{}",
@@ -3257,12 +3276,13 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
                 "✅ Found yearly total transaction amounts in cache for api_key: {}",
                 mask_api_key(&req.api_key)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly total transaction amounts by API key retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly total transaction amounts by API key retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -3273,12 +3293,13 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly total amount by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly total amount by api key",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<MerchantResponseYearlyTotalAmount> =
@@ -3303,12 +3324,13 @@ impl MerchantStatsTotalAmountByApiKeyGrpcClientTrait for MerchantGrpcClientServi
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly total amount by api key",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly total amount by api key",
+                    )
+                    .await;
                 error!(
                     "fetch yearly TOTAL AMOUNT by api_key for year {} failed: {status:?}",
                     req.year

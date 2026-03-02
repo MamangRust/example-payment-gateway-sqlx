@@ -1,20 +1,21 @@
 use crate::middleware::session::session_middleware;
 use crate::{
-    middleware::{jwt, rate_limit::rate_limit_middleware, validate::SimpleValidatedJson},
+    middleware::{
+        circuit_breaker::circuit_breaker_middleware, jwt,
+        request_limiter::request_limiter_middleware, validate::SimpleValidatedJson,
+    },
     state::AppState,
 };
 use axum::{
     Json,
-    extract::{Extension, Path, Query},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
     routing::{delete, get, post},
 };
 use serde_json::json;
-use shared::abstract_trait::session::DynSessionMiddleware;
 use shared::{
-    abstract_trait::user::http::DynUserGrpcServiceClient,
     domain::{
         requests::user::{CreateUserRequest, FindAllUserRequest, UpdateUserRequest},
         responses::{ApiResponse, ApiResponsePagination, UserResponse, UserResponseDeleteAt},
@@ -37,10 +38,12 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_users(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllUserRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all(&params).await {
+    let user_client = &app_state.di_container.user_clients;
+
+    match user_client.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -59,10 +62,12 @@ pub async fn get_users(
     )
 )]
 pub async fn get_user(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_id(id).await {
+    let user_client = &app_state.di_container.user_clients;
+
+    match user_client.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -81,10 +86,12 @@ pub async fn get_user(
     )
 )]
 pub async fn get_active_users(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllUserRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_active(&params).await {
+    let user_client = &app_state.di_container.user_clients;
+
+    match user_client.find_by_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -103,10 +110,12 @@ pub async fn get_active_users(
     )
 )]
 pub async fn get_trashed_users(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllUserRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_trashed(&params).await {
+    let user_client = &app_state.di_container.user_clients;
+
+    match user_client.find_by_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -126,11 +135,15 @@ pub async fn get_trashed_users(
     )
 )]
 pub async fn create_user(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
+
     SimpleValidatedJson(body): SimpleValidatedJson<CreateUserRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let user_client = &app_state.di_container.user_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -148,7 +161,7 @@ pub async fn create_user(
         ));
     }
 
-    match service.create(&body).await {
+    match user_client.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
     }
@@ -169,12 +182,15 @@ pub async fn create_user(
     )
 )]
 pub async fn update_user(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateUserRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let user_client = &app_state.di_container.user_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -193,7 +209,7 @@ pub async fn update_user(
     }
 
     body.id = Some(id);
-    match service.update(&body).await {
+    match user_client.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -212,11 +228,14 @@ pub async fn update_user(
     )
 )]
 pub async fn trash_user_handler(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let user_client = &app_state.di_container.user_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -234,7 +253,7 @@ pub async fn trash_user_handler(
         ));
     }
 
-    match service.trashed(id).await {
+    match user_client.trashed(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -253,11 +272,14 @@ pub async fn trash_user_handler(
     )
 )]
 pub async fn restore_user_handler(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let user_client = &app_state.di_container.user_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -275,7 +297,7 @@ pub async fn restore_user_handler(
         ));
     }
 
-    match service.restore(id).await {
+    match user_client.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -294,11 +316,14 @@ pub async fn restore_user_handler(
     )
 )]
 pub async fn delete_user(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let user_client = &app_state.di_container.user_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -316,7 +341,7 @@ pub async fn delete_user(
         ));
     }
 
-    match service.delete_permanent(id).await {
+    match user_client.delete_permanent(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -339,10 +364,13 @@ pub async fn delete_user(
     )
 )]
 pub async fn restore_all_user_handler(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let user_client = &app_state.di_container.user_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -360,7 +388,7 @@ pub async fn restore_all_user_handler(
         ));
     }
 
-    match service.restore_all().await {
+    match user_client.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -383,10 +411,13 @@ pub async fn restore_all_user_handler(
     )
 )]
 pub async fn delete_all_user_handler(
-    Extension(service): Extension<DynUserGrpcServiceClient>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let user_client = &app_state.di_container.user_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -404,7 +435,7 @@ pub async fn delete_all_user_handler(
         ));
     }
 
-    match service.delete_all().await {
+    match user_client.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -415,7 +446,8 @@ pub async fn delete_all_user_handler(
         Err(err) => Err(err),
     }
 }
-pub fn user_routes(app_state: Arc<AppState>) -> OpenApiRouter {
+
+pub fn user_routes(state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/users", get(get_users))
         .route("/api/users/{id}", get(get_user))
@@ -428,11 +460,18 @@ pub fn user_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/users/delete/{id}", delete(delete_user))
         .route("/api/users/restore-all", post(restore_all_user_handler))
         .route("/api/users/delete-all", post(delete_all_user_handler))
-        .route_layer(middleware::from_fn(session_middleware))
-        .route_layer(middleware::from_fn(jwt::auth))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
-        .layer(Extension(app_state.di_container.role_clients.clone()))
-        .layer(Extension(app_state.di_container.user_clients.clone()))
-        .layer(Extension(app_state.rate_limit.clone()))
-        .layer(Extension(app_state.jwt_config.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            session_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(state.clone(), jwt::auth))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            circuit_breaker_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_limiter_middleware,
+        ))
+        .with_state(state)
 }

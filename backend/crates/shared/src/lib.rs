@@ -1,9 +1,12 @@
 pub mod abstract_trait;
 pub mod cache;
 pub mod config;
+pub mod context;
 pub mod domain;
 pub mod errors;
 pub mod model;
+pub mod observability;
 pub mod repository;
+pub mod resilience;
 pub mod service;
 pub mod utils;

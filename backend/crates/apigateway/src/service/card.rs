@@ -6,11 +6,7 @@ use genproto::card::{
     FindByUserIdCardRequest, FindYearAmount, FindYearAmountCardNumber, FindYearBalance,
     FindYearBalanceCardNumber, UpdateCardRequest, card_service_client::CardServiceClient,
 };
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use shared::{
     abstract_trait::card::http::{
         CardCommandGrpcClientTrait, CardDashboardGrpcClientTrait, CardGrpcClientServiceTrait,
@@ -22,6 +18,7 @@ use shared::{
         CardStatsWithdrawGrpcClientTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::card::{
             CreateCardRequest as DomainCreateCardRequest, FindAllCards as DomainFindAllCardRequest,
@@ -35,119 +32,27 @@ use shared::{
         },
     },
     errors::{AppErrorGrpc, HttpError},
-    utils::{
-        MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_card_number,
-        naive_date_to_timestamp,
-    },
+    observability::{Method, TracingMetrics},
+    utils::{mask_card_number, naive_date_to_timestamp},
 };
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
+#[derive(Clone)]
 pub struct CardGrpcClientService {
     client: CardServiceClient<Channel>,
-    metrics: Metrics,
+    tracing_metrics_core: TracingMetrics,
     cache_store: Arc<CacheStore>,
 }
 
 impl CardGrpcClientService {
-    pub fn new(client: CardServiceClient<Channel>, cache_store: Arc<CacheStore>) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(client: CardServiceClient<Channel>, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             client,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("card-client-service")
-    }
-
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("Operation completed successfully: {message}");
-        } else {
-            error!("Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -160,7 +65,7 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
     async fn get_dashboard(&self) -> Result<ApiResponse<DashboardCard>, HttpError> {
         let method = Method::Get;
 
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetDashboard",
             vec![
                 KeyValue::new("component", "card"),
@@ -170,7 +75,8 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
 
         let mut request = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = "dashboard:global".to_string();
 
@@ -180,23 +86,25 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found global dashboard in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Global dashboard retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Global dashboard retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         match self.client.clone().dashboard_card(request).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched dashboard data",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched dashboard data",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -221,7 +129,8 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch dashboard data")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch dashboard data")
                     .await;
                 error!("gRPC error: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -236,22 +145,23 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
     ) -> Result<ApiResponse<DashboardCardCardNumber>, HttpError> {
         let method = Method::Get;
 
-        let tracing_ctx = self.start_tracing(
+        let card_number_ = card_number.clone();
+
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetDashboardByCardNumber",
             vec![
                 KeyValue::new("component", "card"),
                 KeyValue::new("operation", "get_dashboard_by_card"),
-                KeyValue::new("card_number", card_number.clone()),
+                KeyValue::new("card_number", card_number_.clone()),
             ],
         );
 
-        let mut request = Request::new(FindByCardNumberRequest {
-            card_number: card_number.clone(),
-        });
+        let mut request = Request::new(FindByCardNumberRequest { card_number });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
-        let cache_key = format!("dashboard:card:{}", mask_card_number(&card_number));
+        let cache_key = format!("dashboard:card:{}", mask_card_number(&card_number_));
 
         if let Some(cache) = self
             .cache_store
@@ -259,28 +169,30 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found global dashboard in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Global dashboard retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Global dashboard retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         match self.client.clone().dashboard_card_number(request).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched dashboard data by card number",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched dashboard data by card number",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
                 let dashboard_data = inner.data.ok_or_else(|| {
-                    error!("card {card_number} - missing data in gRPC response");
+                    error!("card missing data in gRPC response");
 
                     HttpError::Internal("Dashboard Card data is missing in gRPC response".into())
                 })?;
@@ -300,13 +212,14 @@ impl CardDashboardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch dashboard data by card number",
-                )
-                .await;
-                error!("card {card_number} - gRPC failed: {status:?}");
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch dashboard data by card number",
+                    )
+                    .await;
+                error!("card  - gRPC failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
         }
@@ -330,7 +243,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -347,7 +260,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
             search: search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card:find_all:page:{page}:size:{page_size}:search:{:?}",
@@ -360,14 +274,16 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found all cards in cache for key: {}", &cache_key);
-            self.complete_tracing_success(&tracing_ctx, method, "All cards retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "All cards retrieved from cache")
                 .await;
             return Ok(cached_result);
         }
 
         match self.client.clone().find_all_card(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully fetched cards")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully fetched cards")
                     .await;
 
                 let inner = response.into_inner();
@@ -391,7 +307,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch cards")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch cards")
                     .await;
                 error!("find_all failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -414,7 +331,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindActiveCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -431,7 +348,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
             search: search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "user:find_by_active:page:{page}:size:{page_size}:search:{}",
@@ -444,23 +362,21 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found active cards in cache for key: {}", &cache_key);
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Active cards retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Active cards retrieved from cache")
+                .await;
             return Ok(cached_result);
         }
 
         match self.client.clone().find_by_active_card(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched active cards",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched active cards",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseDeleteAt> =
@@ -484,7 +400,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch active cards")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch active cards")
                     .await;
                 error!("find_active failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -507,7 +424,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTrashedCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -524,7 +441,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
             search: search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "user:find_by_trashed:page:{page}:size:{page_size}:search:{}",
@@ -537,23 +455,25 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found trashed cards in cache for key: {}", &cache_key);
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Trashed cards retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Trashed cards retrieved from cache",
+                )
+                .await;
             return Ok(cached_result);
         }
 
         match self.client.clone().find_by_trashed_card(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched trashed cards",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched trashed cards",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseDeleteAt> =
@@ -577,7 +497,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed cards")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed cards")
                     .await;
                 error!("find_trashed failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -590,7 +511,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
         info!("fetching card by id: {id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindCardById",
             vec![
                 KeyValue::new("component", "card"),
@@ -601,7 +522,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdCardRequest { card_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card:find_by_id:id:{id}");
         if let Some(cached_result) = self
@@ -610,19 +532,21 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found card by id in cache for key: {}", cache_key);
-            self.complete_tracing_success(&tracing_ctx, method, "Card by id retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Card by id retrieved from cache")
                 .await;
             return Ok(cached_result);
         }
 
         match self.client.clone().find_by_id_card(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched card by id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched card by id",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -647,7 +571,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch card by id")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch card by id")
                     .await;
                 error!("card {id} - gRPC failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -660,7 +585,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
         info!("fetching card by user_id: {user_id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindCardByUserId",
             vec![
                 KeyValue::new("component", "card"),
@@ -671,7 +596,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindByUserIdCardRequest { user_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card:find_by_user_id:user_id:{user_id}");
         if let Some(cached_result) = self
@@ -680,23 +606,25 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found card by user_id in cache for key: {cache_key}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Card by user_id retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Card by user_id retrieved from cache",
+                )
+                .await;
             return Ok(cached_result);
         }
 
         match self.client.clone().find_by_user_id_card(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched card by user id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched card by user id",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -721,12 +649,9 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch card by user id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch card by user id")
+                    .await;
                 error!("user {user_id} - gRPC failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -741,7 +666,7 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
         info!("fetching card by card_number: {card_number}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindCardByNumber",
             vec![
                 KeyValue::new("component", "card"),
@@ -754,7 +679,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
             card_number: card_number.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card:find_by_card_number:number:{card_number}");
         if let Some(cached_result) = self
@@ -763,23 +689,25 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found card by number in cache for key: {}", cache_key);
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Card by number retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Card by number retrieved from cache",
+                )
+                .await;
             return Ok(cached_result);
         }
 
         match self.client.clone().find_by_card_number(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched card by number",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched card by number",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -804,7 +732,8 @@ impl CardQueryGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch card by number")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch card by number")
                     .await;
                 error!("card {card_number} - gRPC failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -823,7 +752,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
         info!("creating card for user_id: {}", req.user_id);
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "CreateCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -842,11 +771,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
             card_provider: req.card_provider.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().create_card(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully created card")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully created card")
                     .await;
 
                 let inner = response.into_inner();
@@ -875,7 +806,8 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to create card")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to create card")
                     .await;
                 error!("create card failed for user {}: {status:?}", req.user_id);
                 Err(AppErrorGrpc::from(status).into())
@@ -895,7 +827,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
         info!("updating card id: {card_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "UpdateCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -915,11 +847,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
             card_provider: req.card_provider.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().update_card(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully updated card")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully updated card")
                     .await;
 
                 let inner = response.into_inner();
@@ -958,7 +892,8 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to update card")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to update card")
                     .await;
                 error!("update card {card_id} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -971,7 +906,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
         info!("trashing card id: {id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "TrashCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -982,11 +917,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdCardRequest { card_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().trashed_card(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully trashed card")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully trashed card")
                     .await;
 
                 let inner = response.into_inner();
@@ -1018,7 +955,8 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to trash card")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to trash card")
                     .await;
                 error!("trash card {id} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -1031,7 +969,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
         info!("restoring card id: {id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -1042,11 +980,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdCardRequest { card_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_card(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully restored card")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully restored card")
                     .await;
 
                 let inner = response.into_inner();
@@ -1081,7 +1021,8 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to restore card")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to restore card")
                     .await;
                 error!("restore card {id} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -1094,7 +1035,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
         info!("permanently deleting card id: {id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -1105,16 +1046,18 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdCardRequest { card_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().delete_card_permanent(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted card permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted card permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1141,12 +1084,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete card permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete card permanently",
+                    )
+                    .await;
                 error!("delete card {id} permanently failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1158,7 +1102,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
         info!("restoring all trashed cards");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreAllCards",
             vec![
                 KeyValue::new("component", "card"),
@@ -1168,16 +1112,18 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_all_card(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully restored all trashed cards",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully restored all trashed cards",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 info!("all trashed cards restored successfully");
@@ -1201,12 +1147,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to restore all trashed cards",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to restore all trashed cards",
+                    )
+                    .await;
                 error!("restore all cards failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1218,7 +1165,7 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
         info!("permanently deleting all cards");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteAllCards",
             vec![
                 KeyValue::new("component", "card"),
@@ -1228,7 +1175,8 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self
             .client
@@ -1237,12 +1185,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted all cards permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted all cards permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1267,12 +1216,13 @@ impl CardCommandGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete all cards permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete all cards permanently",
+                    )
+                    .await;
                 error!("delete all cards permanently failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1290,7 +1240,7 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
         info!("fetching monthly balance for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyBalance",
             vec![
                 KeyValue::new("component", "card"),
@@ -1301,7 +1251,8 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearBalance { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_balance:monthly:year:{year}");
 
@@ -1311,23 +1262,25 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found monthly balance in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly balance retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly balance retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_monthly_balance(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly balance",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly balance",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthBalance> =
@@ -1350,12 +1303,9 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly balance",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch monthly balance")
+                    .await;
                 error!("fetch monthly balance for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1370,7 +1320,7 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
         info!("fetching yearly balance for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyBalance",
             vec![
                 KeyValue::new("component", "card"),
@@ -1381,7 +1331,8 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearBalance { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_balance:yearly:year:{year}");
 
@@ -1391,23 +1342,25 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found yearly balance in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly balance retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly balance retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_yearly_balance(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly balance",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly balance",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearlyBalance> =
@@ -1431,7 +1384,8 @@ impl CardStatsBalanceGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch yearly balance")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch yearly balance")
                     .await;
                 error!("fetch yearly balance for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
@@ -1450,7 +1404,7 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
         info!("fetching monthly topup amount for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyTopupAmount",
             vec![
                 KeyValue::new("component", "card"),
@@ -1461,7 +1415,8 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearAmount { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_topup:monthly:year:{year}");
 
@@ -1471,12 +1426,13 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found monthly top-up amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly top-up amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly top-up amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1487,12 +1443,13 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly topup amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly topup amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthAmount> =
@@ -1515,12 +1472,13 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly topup amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly topup amount",
+                    )
+                    .await;
                 error!("fetch monthly topup amount for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1535,7 +1493,7 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
         info!("fetching yearly topup amount for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyTopupAmount",
             vec![
                 KeyValue::new("component", "card"),
@@ -1546,7 +1504,8 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearAmount { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_topup:yearly:year:{year}");
 
@@ -1556,23 +1515,25 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found yearly top-up amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly top-up amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly top-up amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_yearly_topup_amount(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly topup amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly topup amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearAmount> =
@@ -1595,12 +1556,13 @@ impl CardStatsTopupGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly topup amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly topup amount",
+                    )
+                    .await;
                 error!("fetch yearly topup amount for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1618,7 +1580,7 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
         info!("fetching monthly TRANSACTION amount for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyTransactionAmount",
             vec![
                 KeyValue::new("component", "card"),
@@ -1629,7 +1591,8 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearAmount { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_transaction:monthly:year:{year}");
 
@@ -1639,12 +1602,13 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found monthly transaction amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transaction amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transaction amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1655,12 +1619,13 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transaction amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transaction amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthAmount> =
@@ -1683,12 +1648,13 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transaction amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transaction amount",
+                    )
+                    .await;
                 error!("fetch monthly TRANSACTION amount for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1703,7 +1669,7 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
         info!("fetching yearly TRANSACTION amount for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyTransactionAmount",
             vec![
                 KeyValue::new("component", "card"),
@@ -1714,7 +1680,8 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearAmount { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_transaction:yearly:year:{year}");
 
@@ -1724,12 +1691,13 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found yearly transaction amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transaction amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transaction amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1740,12 +1708,13 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transaction amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transaction amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearAmount> =
@@ -1768,12 +1737,13 @@ impl CardStatsTransactionGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transaction amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transaction amount",
+                    )
+                    .await;
                 error!("fetch yearly TRANSACTION amount for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1791,7 +1761,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
         info!("fetching monthly TRANSFER amount (sender) for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyTransferSenderAmount",
             vec![
                 KeyValue::new("component", "card"),
@@ -1802,7 +1772,8 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearAmount { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_transfer:monthly_sender:year:{year}");
 
@@ -1812,12 +1783,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found monthly transfer amounts (sent) in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transfer amounts (sent) retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transfer amounts (sent) retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1828,12 +1800,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transfer sender amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transfer sender amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthAmount> =
@@ -1857,12 +1830,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transfer sender amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transfer sender amount",
+                    )
+                    .await;
                 error!("fetch monthly TRANSFER amount (sender) for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1877,7 +1851,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
         info!("fetching yearly TRANSFER amount (sender) for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyTransferSenderAmount",
             vec![
                 KeyValue::new("component", "card"),
@@ -1888,7 +1862,8 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearAmount { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_transfer:yearly_sender:year:{year}");
 
@@ -1898,12 +1873,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found yearly transfer amounts (sent) in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transfer amounts (sent) retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transfer amounts (sent) retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1914,12 +1890,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transfer sender amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transfer sender amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearAmount> =
@@ -1941,12 +1918,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transfer sender amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transfer sender amount",
+                    )
+                    .await;
                 error!("fetch yearly TRANSFER amount (sender) for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -1961,7 +1939,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
         info!("fetching monthly TRANSFER amount (receiver) for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyTransferReceiverAmount",
             vec![
                 KeyValue::new("component", "card"),
@@ -1972,7 +1950,8 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearAmount { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_transfer:monthly_receiver:year:{year}");
 
@@ -1982,12 +1961,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found monthly transfer amounts (received) in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transfer amounts (received) retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transfer amounts (received) retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1998,12 +1978,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transfer receiver amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transfer receiver amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthAmount> =
@@ -2027,12 +2008,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transfer receiver amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transfer receiver amount",
+                    )
+                    .await;
                 error!(
                     "fetch monthly TRANSFER amount (receiver) for year {year} failed: {status:?}"
                 );
@@ -2049,7 +2031,7 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
         info!("fetching yearly TRANSFER amount (receiver) for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyTransferReceiverAmount",
             vec![
                 KeyValue::new("component", "card"),
@@ -2060,7 +2042,8 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearAmount { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_transfer:yearly_receiver:year:{year}");
 
@@ -2070,12 +2053,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found yearly transfer amounts (received) in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transfer amounts (received) retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transfer amounts (received) retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2086,12 +2070,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transfer receiver amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transfer receiver amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearAmount> =
@@ -2114,12 +2099,13 @@ impl CardStatsTransferGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transfer receiver amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transfer receiver amount",
+                    )
+                    .await;
                 error!(
                     "fetch yearly TRANSFER amount (receiver) for year {year} failed: {status:?}"
                 );
@@ -2139,7 +2125,7 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
         info!("fetching monthly WITHDRAW amount for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyWithdrawAmount",
             vec![
                 KeyValue::new("component", "card"),
@@ -2150,7 +2136,8 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearAmount { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_withdraw:monthly:year:{year}");
 
@@ -2160,12 +2147,13 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found monthly withdrawal amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly withdrawal amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly withdrawal amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2176,12 +2164,13 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly withdraw amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly withdraw amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthAmount> =
@@ -2204,12 +2193,13 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly withdraw amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly withdraw amount",
+                    )
+                    .await;
                 error!("fetch monthly WITHDRAW amount for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -2224,7 +2214,7 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
         info!("fetching yearly WITHDRAW amount for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyWithdrawAmount",
             vec![
                 KeyValue::new("component", "card"),
@@ -2235,7 +2225,8 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearAmount { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("card_stats_withdraw:yearly:year:{year}");
 
@@ -2245,12 +2236,13 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
             .await
         {
             info!("✅ Found yearly withdrawal amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly withdrawal amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly withdrawal amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2261,12 +2253,13 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly withdraw amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly withdraw amount",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearAmount> =
@@ -2289,12 +2282,13 @@ impl CardStatsWithdrawGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly withdraw amount",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly withdraw amount",
+                    )
+                    .await;
                 error!("fetch yearly WITHDRAW amount for year {year} failed: {status:?}");
                 Err(AppErrorGrpc::from(status).into())
             }
@@ -2315,7 +2309,7 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyBalanceByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -2330,7 +2324,8 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_balance:monthly:card:{}:year:{}",
@@ -2347,12 +2342,13 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found monthly balance in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly balance retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly balance retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2363,12 +2359,13 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly balance by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly balance by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthBalance> =
@@ -2393,12 +2390,13 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly balance by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly balance by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly BALANCE for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -2419,7 +2417,7 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyBalanceByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -2434,7 +2432,8 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_balance:yearly:card:{}:year:{}",
@@ -2451,12 +2450,13 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found yearly balance in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly balance retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly balance retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2467,12 +2467,13 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly balance by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly balance by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearlyBalance> =
@@ -2498,12 +2499,13 @@ impl CardStatsBalanceByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly balance by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly balance by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly BALANCE for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -2527,7 +2529,7 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyTopupAmountByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -2542,7 +2544,8 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_topup:monthly:card:{}:year:{}",
@@ -2559,12 +2562,13 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found monthly top-up amounts in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly top-up amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly top-up amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2575,12 +2579,13 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly topup amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly topup amount by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthAmount> =
@@ -2606,12 +2611,13 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly topup amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly topup amount by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly TOPUP for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -2632,7 +2638,7 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyTopupAmountByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -2647,7 +2653,8 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_topup:yearly:card:{}:year:{}",
@@ -2664,12 +2671,13 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found yearly top-up amounts in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly top-up amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly top-up amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2680,12 +2688,13 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly topup amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly topup amount by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearAmount> =
@@ -2710,12 +2719,13 @@ impl CardStatsTopupByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly topup amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly topup amount by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly TOPUP for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -2739,7 +2749,7 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyTransactionAmountByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -2754,7 +2764,8 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_transaction:monthly:card:{}:year:{}",
@@ -2771,12 +2782,13 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found monthly transaction amounts in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transaction amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transaction amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2787,12 +2799,13 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transaction amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transaction amount by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthAmount> =
@@ -2818,12 +2831,13 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transaction amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transaction amount by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly TRANSACTION for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -2844,7 +2858,7 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyTransactionAmountByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -2859,7 +2873,8 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_transaction:yearly:card:{}:year:{}",
@@ -2876,12 +2891,13 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found yearly transaction amounts in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transaction amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transaction amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2892,12 +2908,13 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transaction amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transaction amount by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearAmount> =
@@ -2923,12 +2940,13 @@ impl CardStatsTransactionByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transaction amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transaction amount by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly TRANSACTION for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -2952,7 +2970,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyAmountSenderByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -2967,7 +2985,8 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_transfer:monthly_sender:card:{}:year:{}",
@@ -2984,12 +3003,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found monthly transfer amounts (sent) in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transfer amounts (sent) retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transfer amounts (sent) retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -3000,12 +3020,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transfer sender amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transfer sender amount by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthAmount> =
@@ -3031,12 +3052,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transfer sender amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transfer sender amount by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly TRANSFER (sender) for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -3057,7 +3079,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyAmountSenderByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -3072,7 +3094,8 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_transfer:yearly_sender:card:{}:year:{}",
@@ -3089,12 +3112,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found yearly transfer amounts (sent) in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transfer amounts (sent) retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transfer amounts (sent) retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -3105,12 +3129,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transfer sender amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transfer sender amount by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearAmount> =
@@ -3136,12 +3161,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transfer sender amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transfer sender amount by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly TRANSFER (sender) for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -3162,7 +3188,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyAmountReceiverByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -3177,7 +3203,8 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_transfer:monthly_receiver:card:{}:year:{}",
@@ -3194,12 +3221,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found monthly transfer amounts (received) in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transfer amounts (received) retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transfer amounts (received) retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -3210,12 +3238,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transfer receiver amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transfer receiver amount by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthAmount> =
@@ -3241,12 +3270,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transfer receiver amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transfer receiver amount by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly TRANSFER (receiver) for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -3267,7 +3297,7 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyAmountReceiverByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -3282,7 +3312,8 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_transfer:yearly_receiver:card:{}:year:{}",
@@ -3299,12 +3330,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found yearly transfer amounts (received) in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transfer amounts (received) retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transfer amounts (received) retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -3315,12 +3347,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transfer receiver amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transfer receiver amount by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearAmount> =
@@ -3346,12 +3379,13 @@ impl CardStatsTransferByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transfer receiver amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transfer receiver amount by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly TRANSFER (receiver) for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -3375,7 +3409,7 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyWithdrawAmountByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -3390,7 +3424,8 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_withdraw:monthly:card:{}:year:{}",
@@ -3407,12 +3442,13 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found monthly withdraw amounts in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly withdraw amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly withdraw amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -3423,12 +3459,13 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly withdraw amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly withdraw amount by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseMonthAmount> =
@@ -3454,12 +3491,13 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly withdraw amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly withdraw amount by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly WITHDRAW for card {} year {} failed: {status:?}",
                     req.card_number, req.year
@@ -3480,7 +3518,7 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyWithdrawAmountByCard",
             vec![
                 KeyValue::new("component", "card"),
@@ -3495,7 +3533,8 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "card_stats_withdraw:yearly:card:{}:year:{}",
@@ -3512,12 +3551,13 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
                 "✅ Found yearly withdraw amounts in cache for card: {}",
                 mask_card_number(&req.card_number)
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly withdraw amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly withdraw amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -3528,12 +3568,13 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly withdraw amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly withdraw amount by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<CardResponseYearAmount> =
@@ -3559,12 +3600,13 @@ impl CardStatsWithdrawByCardGrpcClientTrait for CardGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly withdraw amount by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly withdraw amount by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly WITHDRAW for card {} year {} failed: {status:?}",
                     req.card_number, req.year

@@ -37,6 +37,8 @@ use shared::{
     },
     cache::CacheStore,
     config::{ConnectionPool, RedisPool},
+    context::shared_resources::SharedResources,
+    observability::{CacheMetricsCore, TracingMetricsCore},
     repository::{
         card::query::CardQueryRepository,
         merchant::query::MerchantQueryRepository,
@@ -69,7 +71,15 @@ use shared::{
         },
     },
 };
-use std::{fmt, sync::Arc};
+use std::{fmt, sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
+use tracing::{error, info, warn};
+
+#[derive(Debug, Clone)]
+pub struct DependencyMetrics {
+    pub available_permits: usize,
+    pub cache_ref_count: usize,
+}
 
 #[derive(Clone)]
 pub struct DependenciesInject {
@@ -81,6 +91,8 @@ pub struct DependenciesInject {
     pub transaction_stats_amount_by_card: DynTransactionStatsAmountByCardService,
     pub transaction_stats_method_by_card: DynTransactionStatsMethodByCardService,
     pub transaction_stats_status_by_card: DynTransactionStatsStatusByCardService,
+    pub cache_store: Arc<CacheStore>,
+    pub request_limiter: Arc<Semaphore>,
 }
 
 impl fmt::Debug for DependenciesInject {
@@ -121,13 +133,23 @@ impl fmt::Debug for DependenciesInject {
 
 impl DependenciesInject {
     pub fn new(db: ConnectionPool, redis: RedisPool) -> Result<Self> {
-        let cache_store = Arc::new(CacheStore::new(redis.pool.clone()));
+        let cache_metrics = Arc::new(CacheMetricsCore::new("cache"));
+        let cache_store = Arc::new(CacheStore::new(redis.pool.clone(), cache_metrics));
+
+        let tracing_metrics = Arc::new(
+            TracingMetricsCore::new("transaction-service").context("failed initialize tracing")?,
+        );
+
+        let shared = SharedResources {
+            tracing_metrics,
+            cache_store,
+        };
 
         let transaction_query_repo =
             Arc::new(TransactionQueryRepository::new(db.clone())) as DynTransactionQueryRepository;
 
         let transaction_query = Arc::new(
-            TransactionQueryService::new(transaction_query_repo.clone(), cache_store.clone())
+            TransactionQueryService::new(transaction_query_repo.clone(), &shared)
                 .context("failed to initialize transaction query service")?,
         ) as DynTransactionQueryService;
 
@@ -149,63 +171,56 @@ impl DependenciesInject {
             saldo_query: saldo_query_repo,
             saldo_command: saldo_command_repo,
             card_query: card_query_repo,
-            cache_store: cache_store.clone(),
         };
         let transaction_command = Arc::new(
-            TransactionCommandService::new(command_deps)
+            TransactionCommandService::new(command_deps, &shared)
                 .context("failed to initialize transaction command service")?,
         ) as DynTransactionCommandService;
 
         let amount_repo = Arc::new(TransactionStatsAmountRepository::new(db.clone()))
             as DynTransactionStatsAmountRepository;
         let transaction_stats_amount = Arc::new(
-            TransactionStatsAmountService::new(amount_repo.clone(), cache_store.clone())
+            TransactionStatsAmountService::new(amount_repo.clone(), &shared)
                 .context("failed to initialize transaction stats amount service")?,
         ) as DynTransactionStatsAmountService;
 
         let method_repo = Arc::new(TransactionStatsMethodRepository::new(db.clone()))
             as DynTransactionStatsMethodRepository;
         let transaction_stats_method = Arc::new(
-            TransactionStatsMethodService::new(method_repo.clone(), cache_store.clone())
+            TransactionStatsMethodService::new(method_repo.clone(), &shared)
                 .context("failed to initialize transaction stats method service")?,
         ) as DynTransactionStatsMethodService;
 
         let status_repo = Arc::new(TransactionStatsStatusRepository::new(db.clone()))
             as DynTransactionStatsStatusRepository;
         let transaction_stats_status = Arc::new(
-            TransactionStatsStatusService::new(status_repo.clone(), cache_store.clone())
+            TransactionStatsStatusService::new(status_repo.clone(), &shared)
                 .context("failed to initialize transaction stats status service")?,
         ) as DynTransactionStatsStatusService;
 
         let amount_by_card_repo = Arc::new(TransactionStatsAmountByCardRepository::new(db.clone()))
             as DynTransactionStatsAmountByCardRepository;
         let transaction_stats_amount_by_card = Arc::new(
-            TransactionStatsAmountByCardService::new(
-                amount_by_card_repo.clone(),
-                cache_store.clone(),
-            )
-            .context("failed to initialize transaction stats amount by card service")?,
+            TransactionStatsAmountByCardService::new(amount_by_card_repo.clone(), &shared)
+                .context("failed to initialize transaction stats amount by card service")?,
         ) as DynTransactionStatsAmountByCardService;
 
         let method_by_card_repo = Arc::new(TransactionStatsMethodByCardRepository::new(db.clone()))
             as DynTransactionStatsMethodByCardRepository;
         let transaction_stats_method_by_card = Arc::new(
-            TransactionStatsMethodByCardService::new(
-                method_by_card_repo.clone(),
-                cache_store.clone(),
-            )
-            .context("failed to initialize transaction stats method by card service")?,
+            TransactionStatsMethodByCardService::new(method_by_card_repo.clone(), &shared)
+                .context("failed to initialize transaction stats method by card service")?,
         ) as DynTransactionStatsMethodByCardService;
 
         let status_by_card_repo = Arc::new(TransactionStatsStatusByCardRepository::new(db.clone()))
             as DynTransactionStatsStatusByCardRepository;
         let transaction_stats_status_by_card = Arc::new(
-            TransactionStatsStatusByCardService::new(
-                status_by_card_repo.clone(),
-                cache_store.clone(),
-            )
-            .context("failed to initialize transaction stats status by card service")?,
+            TransactionStatsStatusByCardService::new(status_by_card_repo.clone(), &shared)
+                .context("failed to initialize transaction stats status by card service")?,
         ) as DynTransactionStatsStatusByCardService;
+
+        Self::spawn_monitoring_task(Arc::clone(&shared.cache_store));
+        Self::spawn_cleanup_task(Arc::clone(&shared.cache_store));
 
         Ok(Self {
             transaction_command,
@@ -216,6 +231,71 @@ impl DependenciesInject {
             transaction_stats_amount_by_card,
             transaction_stats_method_by_card,
             transaction_stats_status_by_card,
+            request_limiter: Arc::new(Semaphore::new(1000)),
+            cache_store: shared.cache_store,
         })
+    }
+
+    fn spawn_monitoring_task(cache: Arc<CacheStore>) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                let ref_count = Arc::strong_count(&cache);
+                if ref_count > 1000 {
+                    warn!(
+                        "⚠️  High reference count detected on CacheStore: {}",
+                        ref_count
+                    );
+                } else {
+                    info!("📊 CacheStore reference count: {}", ref_count);
+                }
+            }
+        });
+    }
+
+    fn spawn_cleanup_task(cache: Arc<CacheStore>) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(120));
+            loop {
+                interval.tick().await;
+                info!("🧹 Running periodic cache cleanup...");
+
+                let _ = cache.clear_expired().await;
+
+                let ref_count = Arc::strong_count(&cache);
+                info!("✅ Cleanup completed. Current ref count: {}", ref_count);
+            }
+        });
+    }
+
+    pub async fn trigger_cleanup(&self) -> Result<()> {
+        info!("🧹 Triggering manual cleanup...");
+
+        match self.cache_store.clear_expired().await {
+            Ok(scanned) => info!("✅ Manual cleanup scanned {} keys", scanned),
+            Err(e) => error!("❌ Manual cleanup failed: {}", e),
+        }
+
+        if let Ok(stats) = self.cache_store.get_stats().await {
+            info!("📊 Post-cleanup stats:\n{}", stats);
+        }
+
+        Ok(())
+    }
+
+    pub async fn invalidate_cache_pattern(&self, pattern: &str) -> Result<usize> {
+        self.cache_store
+            .invalidate_pattern(pattern)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
+            .context("Failed to invalidate cache pattern")
+    }
+
+    pub fn get_metrics(&self) -> DependencyMetrics {
+        DependencyMetrics {
+            available_permits: self.request_limiter.available_permits(),
+            cache_ref_count: Arc::strong_count(&self.cache_store),
+        }
     }
 }

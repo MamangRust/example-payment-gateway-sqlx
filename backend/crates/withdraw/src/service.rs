@@ -1,4 +1,4 @@
-use crate::di::DependenciesInject;
+use crate::state::AppState;
 use genproto::{
     card::FindByCardNumberRequest,
     withdraw::{
@@ -21,1014 +21,1521 @@ use shared::{
         UpdateWithdrawRequest as DomainUpdateWithdrawRequest, YearMonthCardNumber,
         YearStatusWithdrawCardNumber,
     },
-    errors::AppErrorGrpc,
+    errors::{AppErrorGrpc, CircuitBreakerError},
     utils::{mask_card_number, timestamp_to_naive_datetime},
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 #[derive(Clone)]
 pub struct WithdrawServiceImpl {
-    pub di: Arc<DependenciesInject>,
+    pub state: Arc<AppState>,
 }
 
 impl WithdrawServiceImpl {
-    pub fn new(di: Arc<DependenciesInject>) -> Self {
-        Self { di }
+    pub fn new(state: Arc<AppState>) -> Self {
+        Self { state }
+    }
+    async fn check_rate_limit(&self) -> Result<(), Status> {
+        self.state.load_monitor.record_request();
+
+        if self.state.circuit_breaker.is_open() {
+            warn!("Request rejected: circuit breaker open");
+            return Err(Status::unavailable(
+                "Service temporarily unavailable due to high error rate. Please try again later.",
+            ));
+        }
+
+        match self.state.di_container.request_limiter.try_acquire() {
+            Ok(_permit) => Ok(()),
+            Err(_) => {
+                warn!("Request rejected: rate limit exceeded");
+                Err(Status::resource_exhausted(
+                    "Too many concurrent requests. Please try again later.",
+                ))
+            }
+        }
     }
 }
 
 #[tonic::async_trait]
 impl WithdrawService for WithdrawServiceImpl {
+    #[instrument(skip(self, request), fields(
+        method = "find_all_withdraw",
+        page = request.get_ref().page,
+        page_size = request.get_ref().page_size,
+        search = tracing::field::Empty
+    ))]
     async fn find_all_withdraw(
         &self,
         request: Request<FindAllWithdrawRequest>,
     ) -> Result<Response<ApiResponsePaginationWithdraw>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received find_all_withdraw request: page={}, page_size={}, search={:?}",
-            req.page, req.page_size, req.search
-        );
+        self.check_rate_limit().await?;
 
+        let req = request.into_inner();
         let domain_req = FindAllWithdraws {
             page: req.page,
             page_size: req.page_size,
-            search: req.search,
+            search: req.search.clone(),
         };
 
-        match self.di.withdraw_query.find_all(&domain_req).await {
-            Ok(api_response) => {
-                info!(
-                    "Withdraw records fetched successfully: page={}, page_size={}",
-                    domain_req.page, domain_req.page_size
-                );
-                let grpc_response = ApiResponsePaginationWithdraw {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_query
+                    .find_all(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponsePaginationWithdraw {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     pagination: Some(api_response.pagination.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    page = domain_req.page,
+                    page_size = domain_req.page_size,
+                    "find_all_withdraw success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!("Failed to fetch withdraw records: {:?}", e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            "find_all_withdraw rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            error = %inner,
+                            "find_all_withdraw failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
+    #[instrument(skip(self, request), fields(
+        method = "find_all_withdraw_by_card_number",
+        card_number = tracing::field::Empty,
+        page = request.get_ref().page,
+        page_size = request.get_ref().page_size,
+        search = tracing::field::Empty
+    ))]
     async fn find_all_withdraw_by_card_number(
         &self,
         request: Request<FindAllWithdrawByCardNumberRequest>,
     ) -> Result<Response<ApiResponsePaginationWithdraw>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
-        info!(
-            "Received find_all_withdraw_by_card_number request: card_number=****, page={}, page_size={}, search={:?}",
-            req.page, req.page_size, req.search
-        );
+        let card_number = req.card_number.clone();
+        let masked_card = mask_card_number(&card_number);
+        tracing::Span::current().record("card_number", &masked_card);
 
         let domain_req = FindAllWithdrawCardNumber {
-            card_number: req.card_number.clone(),
-            search: req.search,
+            card_number,
+            search: req.search.clone(),
             page: req.page,
             page_size: req.page_size,
         };
 
-        match self
-            .di
-            .withdraw_query
-            .find_all_by_card_number(&domain_req)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Withdraw records by card fetched successfully: card_number=****, page={}, page_size={}",
-                    domain_req.page, domain_req.page_size
-                );
-                let grpc_response = ApiResponsePaginationWithdraw {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_query
+                    .find_all_by_card_number(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponsePaginationWithdraw {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     pagination: Some(api_response.pagination.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    card_number = masked_card,
+                    page = domain_req.page,
+                    page_size = domain_req.page_size,
+                    "find_all_withdraw_by_card_number success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch withdraw records by card number: card_number=****, error={:?}",
-                    e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            card_number = masked_card,
+                            "find_all_withdraw_by_card_number rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            card_number = masked_card,
+                            error = %inner,
+                            "find_all_withdraw_by_card_number failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
+    #[instrument(skip(self, request), fields(method = "find_by_id_withdraw", withdraw_id = request.get_ref().withdraw_id))]
     async fn find_by_id_withdraw(
         &self,
         request: Request<FindByIdWithdrawRequest>,
     ) -> Result<Response<ApiResponseWithdraw>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received find_by_id_withdraw request: withdraw_id={}",
-            req.withdraw_id
-        );
+        self.check_rate_limit().await?;
 
-        match self.di.withdraw_query.find_by_id(req.withdraw_id).await {
-            Ok(api_response) => {
-                info!(
-                    "Withdraw record fetched successfully: withdraw_id={}",
-                    req.withdraw_id
-                );
-                let grpc_response = ApiResponseWithdraw {
+        let req = request.into_inner();
+        let withdraw_id = req.withdraw_id;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_query
+                    .find_by_id(withdraw_id)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdraw {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(withdraw_id = withdraw_id, "find_by_id_withdraw success");
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch withdraw record by ID {}: {:?}",
-                    req.withdraw_id, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            withdraw_id = withdraw_id,
+                            "find_by_id_withdraw rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(withdraw_id = withdraw_id, error = %inner, "find_by_id_withdraw failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
+    #[instrument(skip(self, request), fields(
+        method = "find_monthly_withdraw_status_success",
+        year = request.get_ref().year,
+        month = request.get_ref().month
+    ))]
     async fn find_monthly_withdraw_status_success(
         &self,
         request: Request<FindMonthlyWithdrawStatus>,
     ) -> Result<Response<ApiResponseWithdrawMonthStatusSuccess>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
-        info!(
-            "Received find_monthly_withdraw_status_success request: year={}, month={}",
-            req.year, req.month
-        );
+        let year = req.year;
+        let month = req.month;
 
-        let domain_req = MonthStatusWithdraw {
-            year: req.year,
-            month: req.month,
-        };
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let domain_req = MonthStatusWithdraw { year, month };
 
-        match self
-            .di
-            .withdraw_stats_status
-            .get_month_status_success(&domain_req)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Monthly withdraw status fetched successfully: year={}, month={}",
-                    req.year, req.month
-                );
-                let grpc_response = ApiResponseWithdrawMonthStatusSuccess {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_status
+                    .get_month_status_success(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawMonthStatusSuccess {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    year = year,
+                    month = month,
+                    "find_monthly_withdraw_status_success success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch monthly withdraw status for {}/{}: {:?}",
-                    req.year, req.month, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            year = year,
+                            month = month,
+                            "find_monthly_withdraw_status_success rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(year = year, month = month, error = %inner, "find_monthly_withdraw_status_success failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
-    #[instrument(
-        skip(self, request),
-        fields(method = "find_yearly_withdraw_status_success")
-    )]
+
+    #[instrument(skip(self, request), fields(
+        method = "find_yearly_withdraw_status_success",
+        year = request.get_ref().year
+    ))]
     async fn find_yearly_withdraw_status_success(
         &self,
         request: Request<FindYearWithdrawStatus>,
     ) -> Result<Response<ApiResponseWithdrawYearStatusSuccess>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received find_yearly_withdraw_status_success request for year={}",
-            req.year
-        );
+        self.check_rate_limit().await?;
 
-        match self
-            .di
-            .withdraw_stats_status
-            .get_yearly_status_success(req.year)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Yearly withdraw success status fetched successfully for year={}",
-                    req.year
-                );
-                let grpc_response = ApiResponseWithdrawYearStatusSuccess {
+        let req = request.into_inner();
+        let year = req.year;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_status
+                    .get_yearly_status_success(year)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawYearStatusSuccess {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(year = year, "find_yearly_withdraw_status_success success");
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch yearly withdraw success status for year={}: {:?}",
-                    req.year, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            year = year,
+                            "find_yearly_withdraw_status_success rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(year = year, error = %inner, "find_yearly_withdraw_status_success failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(method = "find_monthly_withdraw_status_failed")
-    )]
+    #[instrument(skip(self, request), fields(
+        method = "find_monthly_withdraw_status_failed",
+        year = request.get_ref().year,
+        month = request.get_ref().month
+    ))]
     async fn find_monthly_withdraw_status_failed(
         &self,
         request: Request<FindMonthlyWithdrawStatus>,
     ) -> Result<Response<ApiResponseWithdrawMonthStatusFailed>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
-        info!(
-            "Received find_monthly_withdraw_status_failed request for year={}, month={}",
-            req.year, req.month
-        );
+        let year = req.year;
+        let month = req.month;
 
-        let domain_req = MonthStatusWithdraw {
-            year: req.year,
-            month: req.month,
-        };
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let domain_req = MonthStatusWithdraw { year, month };
 
-        match self
-            .di
-            .withdraw_stats_status
-            .get_month_status_failed(&domain_req)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Monthly withdraw failed status fetched successfully for {}/{}",
-                    req.year, req.month
-                );
-                let grpc_response = ApiResponseWithdrawMonthStatusFailed {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_status
+                    .get_month_status_failed(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawMonthStatusFailed {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    year = year,
+                    month = month,
+                    "find_monthly_withdraw_status_failed success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch monthly withdraw failed status for {}/{}: {:?}",
-                    req.year, req.month, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            year = year,
+                            month = month,
+                            "find_monthly_withdraw_status_failed rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(year = year, month = month, error = %inner, "find_monthly_withdraw_status_failed failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(method = "find_yearly_withdraw_status_failed")
-    )]
+    #[instrument(skip(self, request), fields(
+        method = "find_yearly_withdraw_status_failed",
+        year = request.get_ref().year
+    ))]
     async fn find_yearly_withdraw_status_failed(
         &self,
         request: Request<FindYearWithdrawStatus>,
     ) -> Result<Response<ApiResponseWithdrawYearStatusFailed>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received find_yearly_withdraw_status_failed request for year={}",
-            req.year
-        );
+        self.check_rate_limit().await?;
 
-        match self
-            .di
-            .withdraw_stats_status
-            .get_yearly_status_failed(req.year)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Yearly withdraw failed status fetched successfully for year={}",
-                    req.year
-                );
-                let grpc_response = ApiResponseWithdrawYearStatusFailed {
+        let req = request.into_inner();
+        let year = req.year;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_status
+                    .get_yearly_status_failed(year)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawYearStatusFailed {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(year = year, "find_yearly_withdraw_status_failed success");
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch yearly withdraw failed status for year={}: {:?}",
-                    req.year, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            year = year,
+                            "find_yearly_withdraw_status_failed rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(year = year, error = %inner, "find_yearly_withdraw_status_failed failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(method = "find_monthly_withdraw_status_success_card_number")
-    )]
+    #[instrument(skip(self, request), fields(
+        method = "find_monthly_withdraw_status_success_card_number",
+        card_number = tracing::field::Empty,
+        year = request.get_ref().year,
+        month = request.get_ref().month
+    ))]
     async fn find_monthly_withdraw_status_success_card_number(
         &self,
         request: Request<FindMonthlyWithdrawStatusCardNumber>,
     ) -> Result<Response<ApiResponseWithdrawMonthStatusSuccess>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
+        let card_number = req.card_number.clone();
+        let masked_card = mask_card_number(&card_number);
+        tracing::Span::current().record("card_number", &masked_card);
 
-        let masked_card = mask_card_number(&req.card_number);
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let domain_req = MonthStatusWithdrawCardNumber {
+                    card_number,
+                    year: req.year,
+                    month: req.month,
+                };
 
-        info!(
-            "Received find_monthly_withdraw_status_success_card_number request for card={}, year={}, month={}",
-            masked_card, req.year, req.month
-        );
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_status_by_card
+                    .get_month_status_success_by_card(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
 
-        let domain_req = MonthStatusWithdrawCardNumber {
-            card_number: req.card_number,
-            year: req.year,
-            month: req.month,
-        };
-
-        match self
-            .di
-            .withdraw_stats_status_by_card
-            .get_month_status_success_by_card(&domain_req)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Monthly withdraw success status by card fetched successfully for card={}, {}/{}",
-                    masked_card, req.year, req.month
-                );
-                let grpc_response = ApiResponseWithdrawMonthStatusSuccess {
+                Ok(Response::new(ApiResponseWithdrawMonthStatusSuccess {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    card_number = masked_card,
+                    year = req.year,
+                    month = req.month,
+                    "find_monthly_withdraw_status_success_card_number success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch monthly withdraw success status by card for card={}, {}/{}: {:?}",
-                    masked_card, req.year, req.month, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            card_number = masked_card,
+                            "find_monthly_withdraw_status_success_card_number rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            card_number = masked_card,
+                            error = %inner,
+                            "find_monthly_withdraw_status_success_card_number failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(method = "find_yearly_withdraw_status_success_card_number")
-    )]
+    #[instrument(skip(self, request), fields(
+        method = "find_yearly_withdraw_status_success_card_number",
+        card_number = tracing::field::Empty,
+        year = request.get_ref().year
+    ))]
     async fn find_yearly_withdraw_status_success_card_number(
         &self,
         request: Request<FindYearWithdrawStatusCardNumber>,
     ) -> Result<Response<ApiResponseWithdrawYearStatusSuccess>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
+        let card_number = req.card_number.clone();
+        let masked_card = mask_card_number(&card_number);
+        tracing::Span::current().record("card_number", &masked_card);
 
-        let masked_card = mask_card_number(&req.card_number);
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let domain_req = YearStatusWithdrawCardNumber {
+                    card_number,
+                    year: req.year,
+                };
 
-        info!(
-            "Received find_yearly_withdraw_status_success_card_number request for card={}, year={}",
-            masked_card, req.year
-        );
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_status_by_card
+                    .get_yearly_status_success_by_card(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
 
-        let domain_req = YearStatusWithdrawCardNumber {
-            card_number: req.card_number,
-            year: req.year,
-        };
-
-        match self
-            .di
-            .withdraw_stats_status_by_card
-            .get_yearly_status_success_by_card(&domain_req)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Yearly withdraw success status by card fetched successfully for card={}, year={}",
-                    masked_card, req.year
-                );
-                let grpc_response = ApiResponseWithdrawYearStatusSuccess {
+                Ok(Response::new(ApiResponseWithdrawYearStatusSuccess {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    card_number = masked_card,
+                    year = req.year,
+                    "find_yearly_withdraw_status_success_card_number success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch yearly withdraw success status by card for card={}, year={}: {:?}",
-                    masked_card, req.year, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            card_number = masked_card,
+                            "find_yearly_withdraw_status_success_card_number rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            card_number = masked_card,
+                            error = %inner,
+                            "find_yearly_withdraw_status_success_card_number failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(method = "find_monthly_withdraw_status_failed_card_number")
-    )]
+    #[instrument(skip(self, request), fields(
+        method = "find_monthly_withdraw_status_failed_card_number",
+        card_number = tracing::field::Empty,
+        year = request.get_ref().year,
+        month = request.get_ref().month
+    ))]
     async fn find_monthly_withdraw_status_failed_card_number(
         &self,
         request: Request<FindMonthlyWithdrawStatusCardNumber>,
     ) -> Result<Response<ApiResponseWithdrawMonthStatusFailed>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
+        let card_number = req.card_number.clone();
+        let masked_card = mask_card_number(&card_number);
+        tracing::Span::current().record("card_number", &masked_card);
 
-        let masked_card = mask_card_number(&req.card_number);
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let domain_req = MonthStatusWithdrawCardNumber {
+                    card_number,
+                    year: req.year,
+                    month: req.month,
+                };
 
-        info!(
-            "Received find_monthly_withdraw_status_failed_card_number request for card={}, year={}, month={}",
-            masked_card, req.year, req.month
-        );
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_status_by_card
+                    .get_month_status_failed_by_card(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
 
-        let domain_req = MonthStatusWithdrawCardNumber {
-            card_number: req.card_number,
-            year: req.year,
-            month: req.month,
-        };
-
-        match self
-            .di
-            .withdraw_stats_status_by_card
-            .get_month_status_failed_by_card(&domain_req)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Monthly withdraw failed status by card fetched successfully for card={}, {}/{}",
-                    masked_card, req.year, req.month
-                );
-                let grpc_response = ApiResponseWithdrawMonthStatusFailed {
+                Ok(Response::new(ApiResponseWithdrawMonthStatusFailed {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    card_number = masked_card,
+                    year = req.year,
+                    month = req.month,
+                    "find_monthly_withdraw_status_failed_card_number success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch monthly withdraw failed status by card for card={}, {}/{}: {:?}",
-                    masked_card, req.year, req.month, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            card_number = masked_card,
+                            "find_monthly_withdraw_status_failed_card_number rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            card_number = masked_card,
+                            error = %inner,
+                            "find_monthly_withdraw_status_failed_card_number failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(method = "find_yearly_withdraw_status_failed_card_number")
-    )]
+    #[instrument(skip(self, request), fields(
+        method = "find_yearly_withdraw_status_failed_card_number",
+        card_number = tracing::field::Empty,
+        year = request.get_ref().year
+    ))]
     async fn find_yearly_withdraw_status_failed_card_number(
         &self,
         request: Request<FindYearWithdrawStatusCardNumber>,
     ) -> Result<Response<ApiResponseWithdrawYearStatusFailed>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
+        let card_number = req.card_number.clone();
+        let masked_card = mask_card_number(&card_number);
+        tracing::Span::current().record("card_number", &masked_card);
 
-        let masked_card = mask_card_number(&req.card_number);
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let domain_req = YearStatusWithdrawCardNumber {
+                    card_number,
+                    year: req.year,
+                };
 
-        info!(
-            "Received find_yearly_withdraw_status_failed_card_number request for card={}, year={}",
-            masked_card, req.year
-        );
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_status_by_card
+                    .get_yearly_status_failed_by_card(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
 
-        let domain_req = YearStatusWithdrawCardNumber {
-            card_number: req.card_number,
-            year: req.year,
-        };
-
-        match self
-            .di
-            .withdraw_stats_status_by_card
-            .get_yearly_status_failed_by_card(&domain_req)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Yearly withdraw failed status by card fetched successfully for card={}, year={}",
-                    masked_card, req.year
-                );
-                let grpc_response = ApiResponseWithdrawYearStatusFailed {
+                Ok(Response::new(ApiResponseWithdrawYearStatusFailed {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    card_number = masked_card,
+                    year = req.year,
+                    "find_yearly_withdraw_status_failed_card_number success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch yearly withdraw failed status by card for card={}, year={}: {:?}",
-                    masked_card, req.year, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            card_number = masked_card,
+                            "find_yearly_withdraw_status_failed_card_number rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            card_number = masked_card,
+                            error = %inner,
+                            "find_yearly_withdraw_status_failed_card_number failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), fields(method = "find_monthly_withdraws"))]
+    #[instrument(skip(self, request), fields(
+        method = "find_monthly_withdraws",
+        year = request.get_ref().year
+    ))]
     async fn find_monthly_withdraws(
         &self,
         request: Request<FindYearWithdrawStatus>,
     ) -> Result<Response<ApiResponseWithdrawMonthAmount>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received find_monthly_withdraws request for year={}",
-            req.year
-        );
+        self.check_rate_limit().await?;
 
-        match self
-            .di
-            .withdraw_stats_amount
-            .get_monthly_withdraws(req.year)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Monthly withdraw amounts fetched successfully for year={}",
-                    req.year
-                );
-                let grpc_response = ApiResponseWithdrawMonthAmount {
+        let req = request.into_inner();
+        let year = req.year;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_amount
+                    .get_monthly_withdraws(year)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawMonthAmount {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(year = year, "find_monthly_withdraws success");
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch monthly withdraw amounts for year={}: {:?}",
-                    req.year, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            year = year,
+                            "find_monthly_withdraws rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(year = year, error = %inner, "find_monthly_withdraws failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), fields(method = "find_yearly_withdraws"))]
+    #[instrument(skip(self, request), fields(
+        method = "find_yearly_withdraws",
+        year = request.get_ref().year
+    ))]
     async fn find_yearly_withdraws(
         &self,
         request: Request<FindYearWithdrawStatus>,
     ) -> Result<Response<ApiResponseWithdrawYearAmount>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received find_yearly_withdraws request for year={}",
-            req.year
-        );
+        self.check_rate_limit().await?;
 
-        match self
-            .di
-            .withdraw_stats_amount
-            .get_yearly_withdraws(req.year)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Yearly withdraw amounts fetched successfully for year={}",
-                    req.year
-                );
-                let grpc_response = ApiResponseWithdrawYearAmount {
+        let req = request.into_inner();
+        let year = req.year;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_amount
+                    .get_yearly_withdraws(year)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawYearAmount {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(year = year, "find_yearly_withdraws success");
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch yearly withdraw amounts for year={}: {:?}",
-                    req.year, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            year = year,
+                            "find_yearly_withdraws rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(year = year, error = %inner, "find_yearly_withdraws failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(method = "find_monthly_withdraws_by_card_number")
-    )]
+    #[instrument(skip(self, request), fields(
+        method = "find_monthly_withdraws_by_card_number",
+        card_number = tracing::field::Empty,
+        year = request.get_ref().year
+    ))]
     async fn find_monthly_withdraws_by_card_number(
         &self,
         request: Request<FindYearWithdrawCardNumber>,
     ) -> Result<Response<ApiResponseWithdrawMonthAmount>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
+        let card_number = req.card_number.clone();
+        let masked_card = mask_card_number(&card_number);
+        tracing::Span::current().record("card_number", &masked_card);
 
-        let masked_card = mask_card_number(&req.card_number);
-        info!(
-            "Received find_monthly_withdraws_by_card_number request for card={}, year={}",
-            masked_card, req.year
-        );
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let domain_req = YearMonthCardNumber {
+                    card_number,
+                    year: req.year,
+                };
 
-        let domain_req = YearMonthCardNumber {
-            card_number: req.card_number,
-            year: req.year,
-        };
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_amount_by_card
+                    .get_monthly_by_card_number(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
 
-        match self
-            .di
-            .withdraw_stats_amount_by_card
-            .get_monthly_by_card_number(&domain_req)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Monthly withdraw amounts by card fetched successfully for card={}, year={}",
-                    masked_card, req.year
-                );
-                let grpc_response = ApiResponseWithdrawMonthAmount {
+                Ok(Response::new(ApiResponseWithdrawMonthAmount {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    card_number = masked_card,
+                    year = req.year,
+                    "find_monthly_withdraws_by_card_number success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch monthly withdraw amounts by card for card={}, year={}: {:?}",
-                    masked_card, req.year, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            card_number = masked_card,
+                            "find_monthly_withdraws_by_card_number rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            card_number = masked_card,
+                            error = %inner,
+                            "find_monthly_withdraws_by_card_number failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(method = "find_yearly_withdraws_by_card_number")
-    )]
+    #[instrument(skip(self, request), fields(
+        method = "find_yearly_withdraws_by_card_number",
+        card_number = tracing::field::Empty,
+        year = request.get_ref().year
+    ))]
     async fn find_yearly_withdraws_by_card_number(
         &self,
         request: Request<FindYearWithdrawCardNumber>,
     ) -> Result<Response<ApiResponseWithdrawYearAmount>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
+        let card_number = req.card_number.clone();
+        let masked_card = mask_card_number(&card_number);
+        tracing::Span::current().record("card_number", &masked_card);
 
-        let masked_card = mask_card_number(&req.card_number);
-        info!(
-            "Received find_yearly_withdraws_by_card_number request for card={}, year={}",
-            masked_card, req.year
-        );
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let domain_req = YearMonthCardNumber {
+                    card_number,
+                    year: req.year,
+                };
 
-        let domain_req = YearMonthCardNumber {
-            card_number: req.card_number,
-            year: req.year,
-        };
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_stats_amount_by_card
+                    .get_yearly_by_card_number(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
 
-        match self
-            .di
-            .withdraw_stats_amount_by_card
-            .get_yearly_by_card_number(&domain_req)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Yearly withdraw amounts by card fetched successfully for card={}, year={}",
-                    masked_card, req.year
-                );
-                let grpc_response = ApiResponseWithdrawYearAmount {
+                Ok(Response::new(ApiResponseWithdrawYearAmount {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    card_number = masked_card,
+                    year = req.year,
+                    "find_yearly_withdraws_by_card_number success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch yearly withdraw amounts by card for card={}, year={}: {:?}",
-                    masked_card, req.year, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            card_number = masked_card,
+                            "find_yearly_withdraws_by_card_number rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            card_number = masked_card,
+                            error = %inner,
+                            "find_yearly_withdraws_by_card_number failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), fields(method = "find_by_card_number"))]
+    #[instrument(skip(self, request), fields(
+        method = "find_by_card_number",
+        card_number = tracing::field::Empty
+    ))]
     async fn find_by_card_number(
         &self,
         request: Request<FindByCardNumberRequest>,
     ) -> Result<Response<ApiResponsesWithdraw>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
+        let card_number = req.card_number.clone();
+        let masked_card = mask_card_number(&card_number);
+        tracing::Span::current().record("card_number", &masked_card);
 
-        let masked_card = mask_card_number(&req.card_number);
-        info!(
-            "Received find_by_card_number request for card={}",
-            masked_card
-        );
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_query
+                    .find_by_card(&card_number)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
 
-        match self.di.withdraw_query.find_by_card(&req.card_number).await {
-            Ok(api_response) => {
-                info!(
-                    "Withdraw records by card fetched successfully for card={}",
-                    masked_card
-                );
-                let grpc_response = ApiResponsesWithdraw {
+                Ok(Response::new(ApiResponsesWithdraw {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(card_number = masked_card, "find_by_card_number success");
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch withdraw records by card for card={}: {:?}",
-                    masked_card, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            card_number = masked_card,
+                            "find_by_card_number rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(card_number = masked_card, error = %inner, "find_by_card_number failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), fields(method = "find_by_active"))]
+    #[instrument(skip(self, request), fields(
+        method = "find_by_active",
+        page = request.get_ref().page,
+        page_size = request.get_ref().page_size,
+        search = tracing::field::Empty
+    ))]
     async fn find_by_active(
         &self,
         request: Request<FindAllWithdrawRequest>,
     ) -> Result<Response<ApiResponsePaginationWithdrawDeleteAt>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received find_by_active request: page={}, page_size={}, search={:?}",
-            req.page, req.page_size, req.search
-        );
+        self.check_rate_limit().await?;
 
+        let req = request.into_inner();
         let domain_req = FindAllWithdraws {
             page: req.page,
             page_size: req.page_size,
-            search: req.search,
+            search: req.search.clone(),
         };
 
-        match self.di.withdraw_query.find_by_active(&domain_req).await {
-            Ok(api_response) => {
-                info!(
-                    "Active withdraw records fetched successfully: page={}, page_size={}",
-                    domain_req.page, domain_req.page_size
-                );
-                let grpc_response = ApiResponsePaginationWithdrawDeleteAt {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_query
+                    .find_by_active(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponsePaginationWithdrawDeleteAt {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     pagination: Some(api_response.pagination.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    page = domain_req.page,
+                    page_size = domain_req.page_size,
+                    "find_by_active success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch active withdraw records: page={}, page_size={}, error={:?}",
-                    req.page, req.page_size, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            "find_by_active rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            error = %inner,
+                            "find_by_active failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), fields(method = "find_by_trashed"))]
+    #[instrument(skip(self, request), fields(
+        method = "find_by_trashed",
+        page = request.get_ref().page,
+        page_size = request.get_ref().page_size,
+        search = tracing::field::Empty
+    ))]
     async fn find_by_trashed(
         &self,
         request: Request<FindAllWithdrawRequest>,
     ) -> Result<Response<ApiResponsePaginationWithdrawDeleteAt>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received find_by_trashed request: page={}, page_size={}, search={:?}",
-            req.page, req.page_size, req.search
-        );
+        self.check_rate_limit().await?;
 
+        let req = request.into_inner();
         let domain_req = FindAllWithdraws {
             page: req.page,
             page_size: req.page_size,
-            search: req.search,
+            search: req.search.clone(),
         };
 
-        match self.di.withdraw_query.find_by_trashed(&domain_req).await {
-            Ok(api_response) => {
-                info!(
-                    "Trashed withdraw records fetched successfully: page={}, page_size={}",
-                    domain_req.page, domain_req.page_size
-                );
-                let grpc_response = ApiResponsePaginationWithdrawDeleteAt {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_query
+                    .find_by_trashed(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponsePaginationWithdrawDeleteAt {
                     data: api_response.data.into_iter().map(Into::into).collect(),
                     pagination: Some(api_response.pagination.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    page = domain_req.page,
+                    page_size = domain_req.page_size,
+                    "find_by_trashed success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to fetch trashed withdraw records: page={}, page_size={}, error={:?}",
-                    req.page, req.page_size, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            "find_by_trashed rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(
+                            page = domain_req.page,
+                            page_size = domain_req.page_size,
+                            error = %inner,
+                            "find_by_trashed failed"
+                        );
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), fields(method = "create_withdraw"))]
+    #[instrument(skip(self, request), fields(
+        method = "create_withdraw",
+        card_number = tracing::field::Empty
+    ))]
     async fn create_withdraw(
         &self,
         request: Request<CreateWithdrawRequest>,
     ) -> Result<Response<ApiResponseWithdraw>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
+        let card_number = req.card_number.clone();
+        let masked_card = mask_card_number(&card_number);
+        tracing::Span::current().record("card_number", &masked_card);
 
-        let masked_card = mask_card_number(&req.card_number);
-        info!(
-            "Received create_withdraw request for card={}, amount={}, withdraw_time={:?}",
-            masked_card, req.withdraw_amount, req.withdraw_time
-        );
-
-        let date = timestamp_to_naive_datetime(req.withdraw_time).ok_or_else(|| {
-            let err_msg = "Invalid withdraw_time timestamp";
-            error!("{} for card={}", err_msg, masked_card);
-            Status::invalid_argument(err_msg)
-        })?;
+        let date = timestamp_to_naive_datetime(req.withdraw_time)
+            .ok_or_else(|| Status::invalid_argument("withdraw_time invalid"))?;
 
         let domain_req = DomainCreateWithdrawRequest {
-            card_number: req.card_number,
+            card_number,
             withdraw_amount: req.withdraw_amount,
             withdraw_time: date,
         };
 
-        match self.di.withdraw_command.create(&domain_req).await {
-            Ok(api_response) => {
-                info!(
-                    "Withdraw created successfully for card={}, amount={}",
-                    masked_card, req.withdraw_amount
-                );
-                let grpc_response = ApiResponseWithdraw {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_command
+                    .create(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdraw {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(card_number = masked_card, "create_withdraw success");
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to create withdraw for card={}, amount={}: {:?}",
-                    masked_card, req.withdraw_amount, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            card_number = masked_card,
+                            "create_withdraw rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(card_number = masked_card, error = %inner, "create_withdraw failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), fields(method = "update_withdraw"))]
+    #[instrument(skip(self, request), fields(
+        method = "update_withdraw",
+        withdraw_id = request.get_ref().withdraw_id,
+        card_number = tracing::field::Empty
+    ))]
     async fn update_withdraw(
         &self,
         request: Request<UpdateWithdrawRequest>,
     ) -> Result<Response<ApiResponseWithdraw>, Status> {
+        self.check_rate_limit().await?;
+
         let req = request.into_inner();
+        let withdraw_id = req.withdraw_id;
+        let card_number = req.card_number.clone();
+        let masked_card = mask_card_number(&card_number);
+        tracing::Span::current().record("card_number", &masked_card);
 
-        let masked_card = mask_card_number(&req.card_number);
-        info!(
-            "Received update_withdraw request for withdraw_id={}, card={}, amount={}, withdraw_time={:?}",
-            req.withdraw_id, masked_card, req.withdraw_amount, req.withdraw_time
-        );
-
-        let date = timestamp_to_naive_datetime(req.withdraw_time).ok_or_else(|| {
-            let err_msg = "Invalid withdraw_time timestamp";
-            error!("{err_msg} for withdraw_id={}", req.withdraw_id);
-            Status::invalid_argument(err_msg)
-        })?;
+        let date = timestamp_to_naive_datetime(req.withdraw_time)
+            .ok_or_else(|| Status::invalid_argument("withdraw_time invalid"))?;
 
         let domain_req = DomainUpdateWithdrawRequest {
-            card_number: req.card_number,
+            card_number,
             withdraw_id: Some(req.withdraw_id),
             withdraw_amount: req.withdraw_amount,
             withdraw_time: date,
         };
 
-        match self.di.withdraw_command.update(&domain_req).await {
-            Ok(api_response) => {
-                info!(
-                    "Withdraw updated successfully for withdraw_id={}, card={}",
-                    req.withdraw_id, masked_card
-                );
-                let grpc_response = ApiResponseWithdraw {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_command
+                    .update(&domain_req)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdraw {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    withdraw_id = withdraw_id,
+                    card_number = masked_card,
+                    "update_withdraw success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to update withdraw for withdraw_id={}, card={}: {:?}",
-                    req.withdraw_id, masked_card, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            withdraw_id = withdraw_id,
+                            "update_withdraw rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(withdraw_id = withdraw_id, error = %inner, "update_withdraw failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), fields(method = "trashed_withdraw"))]
+    #[instrument(skip(self, request), fields(method = "trashed_withdraw", withdraw_id = request.get_ref().withdraw_id))]
     async fn trashed_withdraw(
         &self,
         request: Request<FindByIdWithdrawRequest>,
     ) -> Result<Response<ApiResponseWithdrawDeleteAt>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received trashed_withdraw request for withdraw_id={}",
-            req.withdraw_id
-        );
+        self.check_rate_limit().await?;
 
-        match self
-            .di
-            .withdraw_command
-            .trashed_withdraw(req.withdraw_id)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Withdraw trashed successfully for withdraw_id={}",
-                    req.withdraw_id
-                );
-                let grpc_response = ApiResponseWithdrawDeleteAt {
+        let req = request.into_inner();
+        let withdraw_id = req.withdraw_id;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_command
+                    .trashed_withdraw(withdraw_id)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawDeleteAt {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(withdraw_id = withdraw_id, "trashed_withdraw success");
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to trash withdraw for withdraw_id={}: {:?}",
-                    req.withdraw_id, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            withdraw_id = withdraw_id,
+                            "trashed_withdraw rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(withdraw_id = withdraw_id, error = %inner, "trashed_withdraw failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
 
-    #[instrument(skip(self, request), fields(method = "restore_withdraw"))]
+    #[instrument(skip(self, request), fields(method = "restore_withdraw", withdraw_id = request.get_ref().withdraw_id))]
     async fn restore_withdraw(
         &self,
         request: Request<FindByIdWithdrawRequest>,
     ) -> Result<Response<ApiResponseWithdrawDeleteAt>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received restore_withdraw request for withdraw_id={}",
-            req.withdraw_id
-        );
+        self.check_rate_limit().await?;
 
-        match self.di.withdraw_command.restore(req.withdraw_id).await {
-            Ok(api_response) => {
-                info!(
-                    "Withdraw restored successfully for withdraw_id={}",
-                    req.withdraw_id
-                );
-                let grpc_response = ApiResponseWithdrawDeleteAt {
+        let req = request.into_inner();
+        let withdraw_id = req.withdraw_id;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_command
+                    .restore(withdraw_id)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawDeleteAt {
                     data: Some(api_response.data.into()),
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(withdraw_id = withdraw_id, "restore_withdraw success");
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to restore withdraw for withdraw_id={}: {:?}",
-                    req.withdraw_id, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            withdraw_id = withdraw_id,
+                            "restore_withdraw rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(withdraw_id = withdraw_id, error = %inner, "restore_withdraw failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
-    #[instrument(skip(self, request), fields(method = "delete_withdraw_permanent"))]
+
+    #[instrument(skip(self, request), fields(method = "delete_withdraw_permanent", withdraw_id = request.get_ref().withdraw_id))]
     async fn delete_withdraw_permanent(
         &self,
         request: Request<FindByIdWithdrawRequest>,
     ) -> Result<Response<ApiResponseWithdrawDelete>, Status> {
-        let req = request.into_inner();
-        info!(
-            "Received delete_withdraw_permanent request for withdraw_id={}",
-            req.withdraw_id
-        );
+        self.check_rate_limit().await?;
 
-        match self
-            .di
-            .withdraw_command
-            .delete_permanent(req.withdraw_id)
-            .await
-        {
-            Ok(api_response) => {
-                info!(
-                    "Withdraw permanently deleted for withdraw_id={}",
-                    req.withdraw_id
-                );
-                let grpc_response = ApiResponseWithdrawDelete {
+        let req = request.into_inner();
+        let withdraw_id = req.withdraw_id;
+
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_command
+                    .delete_permanent(withdraw_id)
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawDelete {
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!(
+                    withdraw_id = withdraw_id,
+                    "delete_withdraw_permanent success"
+                );
+                Ok(resp)
             }
             Err(e) => {
-                error!(
-                    "Failed to permanently delete withdraw for withdraw_id={}: {:?}",
-                    req.withdraw_id, e
-                );
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!(
+                            withdraw_id = withdraw_id,
+                            "delete_withdraw_permanent rejected: circuit breaker open"
+                        );
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(withdraw_id = withdraw_id, error = %inner, "delete_withdraw_permanent failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
@@ -1038,20 +1545,42 @@ impl WithdrawService for WithdrawServiceImpl {
         &self,
         _request: Request<()>,
     ) -> Result<Response<ApiResponseWithdrawAll>, Status> {
-        info!("Received restore_all_withdraw request");
+        self.check_rate_limit().await?;
 
-        match self.di.withdraw_command.restore_all().await {
-            Ok(api_response) => {
-                info!("All trashed withdraws restored successfully");
-                let grpc_response = ApiResponseWithdrawAll {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_command
+                    .restore_all()
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawAll {
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!("restore_all_withdraw success");
+                Ok(resp)
             }
             Err(e) => {
-                error!("Failed to restore all withdraws: {:?}", e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!("restore_all_withdraw rejected: circuit breaker open");
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(error = %inner, "restore_all_withdraw failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }
@@ -1061,20 +1590,42 @@ impl WithdrawService for WithdrawServiceImpl {
         &self,
         _request: Request<()>,
     ) -> Result<Response<ApiResponseWithdrawAll>, Status> {
-        info!("Received delete_all_withdraw_permanent request");
+        self.check_rate_limit().await?;
 
-        match self.di.withdraw_command.delete_all().await {
-            Ok(api_response) => {
-                info!("All withdraws permanently deleted successfully");
-                let grpc_response = ApiResponseWithdrawAll {
+        let result = self
+            .state
+            .circuit_breaker
+            .call_async(|| async {
+                let api_response = self
+                    .state
+                    .di_container
+                    .withdraw_command
+                    .delete_all()
+                    .await
+                    .map_err(AppErrorGrpc::from)?;
+
+                Ok(Response::new(ApiResponseWithdrawAll {
                     message: api_response.message,
                     status: api_response.status,
-                };
-                Ok(Response::new(grpc_response))
+                }))
+            })
+            .await;
+
+        match result {
+            Ok(resp) => {
+                info!("delete_all_withdraw_permanent success");
+                Ok(resp)
             }
             Err(e) => {
-                error!("Failed to permanently delete all withdraws: {:?}", e);
-                Err(AppErrorGrpc::from(e).into())
+                match &e {
+                    CircuitBreakerError::Open => {
+                        warn!("delete_all_withdraw_permanent rejected: circuit breaker open");
+                    }
+                    CircuitBreakerError::Inner(inner) => {
+                        error!(error = %inner, "delete_all_withdraw_permanent failed");
+                    }
+                }
+                Err(e.into())
             }
         }
     }

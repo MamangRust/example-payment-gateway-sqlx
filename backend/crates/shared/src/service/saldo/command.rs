@@ -7,24 +7,19 @@ use crate::{
         },
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::saldo::{CreateSaldoRequest, UpdateSaldoRequest},
         responses::{ApiResponse, SaldoResponse, SaldoResponseDeleteAt},
     },
     errors::{ServiceError, format_validation_errors},
-    utils::{
-        MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_card_number,
-    },
+    observability::{Method, TracingMetrics},
+    utils::mask_card_number,
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::Request;
 use tracing::{error, info};
 use validator::Validate;
@@ -32,119 +27,28 @@ use validator::Validate;
 pub struct SaldoCommandService {
     pub command: DynSaldoCommandRepository,
     pub card_query: DynCardQueryRepository,
-    pub metrics: Metrics,
+    pub tracing_metrics_core: TracingMetrics,
     pub cache_store: Arc<CacheStore>,
 }
 
 pub struct SaldoCommandServiceDeps {
     pub card_query: DynCardQueryRepository,
     pub command: DynSaldoCommandRepository,
-    pub cache_store: Arc<CacheStore>,
 }
 
 impl SaldoCommandService {
-    pub fn new(deps: SaldoCommandServiceDeps) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(deps: SaldoCommandServiceDeps, shared: &SharedResources) -> Result<Self> {
         let SaldoCommandServiceDeps {
             card_query,
             command,
-            cache_store,
         } = deps;
 
         Ok(Self {
             card_query,
             command,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("saldo-command-service")
-    }
-
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("✅ Operation completed successfully: {message}");
-        } else {
-            error!("❌ Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -164,7 +68,7 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         info!("Creating saldo for card_number={}", masked_card);
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "create_saldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -174,16 +78,18 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         );
 
         let mut request_obj = Request::new(request.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let _card = match self.card_query.find_by_card(&request.card_number).await {
             Ok(card) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method.clone(),
-                    "Card fetched successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method.clone(),
+                        "Card fetched successfully",
+                    )
+                    .await;
 
                 card
             }
@@ -192,7 +98,8 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
 
                 error!("Failed to find card {}: {e:?}", masked_card);
 
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
                     .await;
 
                 return Err(ServiceError::Custom("Card not found".into()));
@@ -205,14 +112,16 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
                     "Saldo created successfully with id={} for card={}",
                     saldo.saldo_id, masked_card
                 );
-                self.complete_tracing_success(&tracing_ctx, method, "Saldo created successfully")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Saldo created successfully")
                     .await;
                 saldo
             }
             Err(e) => {
                 let error_msg = format!("Failed to create saldo for card {}: {:?}", masked_card, e);
                 error!("Failed to create saldo for card {}: {e:?}", masked_card);
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
                     .await;
                 return Err(ServiceError::Custom("Failed to create saldo".into()));
             }
@@ -256,7 +165,7 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         info!("Updating saldo id={saldo_id} for card={}", masked_card);
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "update_saldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -267,16 +176,18 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         );
 
         let mut request_obj = Request::new(request.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let _card = match self.card_query.find_by_card(&request.card_number).await {
             Ok(card) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method.clone(),
-                    "Card fetched successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method.clone(),
+                        "Card fetched successfully",
+                    )
+                    .await;
 
                 card
             }
@@ -285,7 +196,8 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
 
                 error!("Failed to find card {}: {e:?}", masked_card);
 
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
                     .await;
 
                 return Err(ServiceError::Custom("Card not found".into()));
@@ -298,7 +210,8 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
                     "Saldo updated successfully with id={} for card={}",
                     saldo.saldo_id, masked_card
                 );
-                self.complete_tracing_success(&tracing_ctx, method, "Saldo updated successfully")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Saldo updated successfully")
                     .await;
                 saldo
             }
@@ -311,7 +224,8 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
                     "Failed to update saldo id={saldo_id} for card {}: {e:?}",
                     masked_card
                 );
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
                     .await;
                 return Err(ServiceError::Custom("Failed to update saldo".into()));
             }
@@ -341,7 +255,7 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         info!("🗑️ Trashing saldo with id={id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "trash_saldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -351,23 +265,26 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         );
 
         let mut request = Request::new(id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let saldo = match self.command.trash(id).await {
             Ok(saldo) => {
                 info!("Saldo trashed successfully with id={}", saldo.saldo_id);
-                self.complete_tracing_success(&tracing_ctx, method, "Saldo trashed successfully")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Saldo trashed successfully")
                     .await;
                 saldo
             }
             Err(e) => {
                 error!("❌ Failed to trash saldo with id={id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to trash saldo: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to trash saldo: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom("Failed to trash saldo".into()));
             }
         };
@@ -397,7 +314,7 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         info!("♻️ Restoring saldo with id={id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "restore_saldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -407,23 +324,26 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         );
 
         let mut request = Request::new(id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let saldo = match self.command.restore(id).await {
             Ok(saldo) => {
                 info!("Saldo restored successfully with id={}", saldo.saldo_id);
-                self.complete_tracing_success(&tracing_ctx, method, "Saldo restored successfully")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Saldo restored successfully")
                     .await;
                 saldo
             }
             Err(e) => {
                 error!("❌ Failed to restore saldo with id={id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to restore saldo: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to restore saldo: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom("Failed to restore saldo".into()));
             }
         };
@@ -453,7 +373,7 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         info!("💀 Permanently deleting saldo with id={id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "delete_saldo",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -463,17 +383,19 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         );
 
         let mut request = Request::new(id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.delete_permanent(id).await {
             Ok(_) => {
                 info!("Saldo permanently deleted with id={id}");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Saldo permanently deleted successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Saldo permanently deleted successfully",
+                    )
+                    .await;
 
                 let cache_keys = vec![
                     format!("saldo:find_by_id:id:{id}"),
@@ -494,12 +416,13 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
             }
             Err(e) => {
                 error!("❌ Failed to permanently delete saldo with id={id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to permanently delete saldo: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to permanently delete saldo: {:?}", e),
+                    )
+                    .await;
                 Err(ServiceError::Custom(
                     "Failed to permanently delete saldo".into(),
                 ))
@@ -511,7 +434,7 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         info!("♻️ Restoring all trashed saldos");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "restore_all_saldos",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -520,17 +443,19 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         );
 
         let mut request = Request::new(());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.restore_all().await {
             Ok(_) => {
                 info!("All saldos restored successfully");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "All saldos restored successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "All saldos restored successfully",
+                    )
+                    .await;
 
                 let cache_keys = vec![
                     "saldo:find_by_trashed:*",
@@ -550,12 +475,13 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
             }
             Err(e) => {
                 error!("❌ Failed to restore all saldos: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to restore all saldos: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to restore all saldos: {:?}", e),
+                    )
+                    .await;
                 Err(ServiceError::Custom("Failed to restore all saldos".into()))
             }
         }
@@ -565,7 +491,7 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         info!("💀 Permanently deleting all trashed saldos");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "delete_all_saldos",
             vec![
                 KeyValue::new("component", "saldo"),
@@ -574,17 +500,19 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
         );
 
         let mut request = Request::new(());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.delete_all().await {
             Ok(_) => {
                 info!("All saldos permanently deleted");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "All saldos permanently deleted successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "All saldos permanently deleted successfully",
+                    )
+                    .await;
 
                 let cache_keys = vec![
                     "saldo:find_by_trashed:*",
@@ -604,12 +532,13 @@ impl SaldoCommandServiceTrait for SaldoCommandService {
             }
             Err(e) => {
                 error!("❌ Failed to delete all saldos: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to delete all saldos: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to delete all saldos: {:?}", e),
+                    )
+                    .await;
                 Err(ServiceError::Custom("Failed to delete all saldos".into()))
             }
         }

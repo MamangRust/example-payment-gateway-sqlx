@@ -9,6 +9,7 @@ use crate::{
         user_roles::DynUserRoleCommandRepository,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::{
             user::{CreateUserRequest, UpdateUserRequest},
@@ -17,17 +18,12 @@ use crate::{
         responses::{ApiResponse, UserResponse, UserResponseDeleteAt},
     },
     errors::{ServiceError, format_validation_errors},
-    utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
+    observability::{Method, TracingMetrics},
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::Request;
 use tracing::{error, info};
 use validator::Validate;
@@ -38,7 +34,7 @@ pub struct UserCommandService {
     pub hashing: DynHashing,
     pub user_role: DynUserRoleCommandRepository,
     pub role: DynRoleQueryRepository,
-    pub metrics: Metrics,
+    pub tracing_metrics_core: TracingMetrics,
     pub cache_store: Arc<CacheStore>,
 }
 
@@ -48,21 +44,17 @@ pub struct UserCommandServiceDeps {
     pub hashing: DynHashing,
     pub user_role: DynUserRoleCommandRepository,
     pub role: DynRoleQueryRepository,
-    pub cache_store: Arc<CacheStore>,
 }
 
 impl UserCommandService {
-    pub fn new(deps: UserCommandServiceDeps) -> Result<Self> {
+    pub fn new(deps: UserCommandServiceDeps, shared: &SharedResources) -> Result<Self> {
         let UserCommandServiceDeps {
             query,
             command,
             hashing,
             user_role,
             role,
-            cache_store,
         } = deps;
-
-        let metrics = Metrics::new();
 
         Ok(Self {
             query,
@@ -70,96 +62,9 @@ impl UserCommandService {
             hashing,
             user_role,
             role,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("user-command-service")
-    }
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("✅ Operation completed successfully: {message}");
-        } else {
-            error!("❌ Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -178,7 +83,7 @@ impl UserCommandServiceTrait for UserCommandService {
         info!("🆕 Creating user: {} {}", req.firstname, req.lastname);
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "create_user",
             vec![
                 KeyValue::new("component", "user"),
@@ -188,23 +93,26 @@ impl UserCommandServiceTrait for UserCommandService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let existing_email = match self.query.find_by_email(req.email.clone()).await {
             Ok(opt) => {
                 info!("Checked existing email {}", req.email);
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Checked existing email {}", req.email),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Checked existing email {}", req.email),
+                    )
+                    .await;
                 opt
             }
             Err(e) => {
                 let msg = format!("💥 Failed to check existing email {}: {:?}", req.email, e);
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom(msg));
             }
@@ -213,7 +121,8 @@ impl UserCommandServiceTrait for UserCommandService {
         if existing_email.is_some() {
             let msg = format!("📧 Email {} already registered", req.email);
             error!("{msg}");
-            self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                 .await;
             return Err(ServiceError::Custom(msg));
         }
@@ -223,7 +132,8 @@ impl UserCommandServiceTrait for UserCommandService {
             Err(e) => {
                 let msg = format!("❌ Failed to hash password: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::InternalServerError(
                     "Failed to hash password".into(),
@@ -237,14 +147,16 @@ impl UserCommandServiceTrait for UserCommandService {
             Ok(None) => {
                 let msg = format!("❌ Role not found: {}", DEFAULT_ROLE_NAME);
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom("Default role not found".to_string()));
             }
             Err(e) => {
                 let msg = format!("❌ Failed to query role: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Repo(e));
             }
@@ -267,7 +179,8 @@ impl UserCommandServiceTrait for UserCommandService {
             Err(e) => {
                 let msg = format!("💥 Failed to create user {}: {e:?}", req.email);
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom(msg));
             }
@@ -288,14 +201,16 @@ impl UserCommandServiceTrait for UserCommandService {
                 role.role_id, new_user.user_id,
             );
             error!("{msg}");
-            self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                 .await;
             return Err(ServiceError::Repo(e));
         }
 
         let response = UserResponse::from(new_user);
 
-        self.complete_tracing_success(&tracing_ctx, method, "User created successfully")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "User created successfully")
             .await;
 
         let cache_keys = vec![
@@ -333,7 +248,7 @@ impl UserCommandServiceTrait for UserCommandService {
         info!("🔄 Updating user id={user_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "update_user",
             vec![
                 KeyValue::new("component", "user"),
@@ -343,14 +258,16 @@ impl UserCommandServiceTrait for UserCommandService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let user = match self.query.find_by_id(user_id).await {
             Ok(user) => user,
             Err(e) => {
                 let msg = format!("👤 User not found with id {user_id}: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom(msg));
             }
@@ -367,7 +284,8 @@ impl UserCommandServiceTrait for UserCommandService {
                     Ok(Some(_)) => {
                         let msg = format!("📧 Email {new_email} already used by another user");
                         error!("{msg}");
-                        self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                        self.tracing_metrics_core
+                            .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                             .await;
                         return Err(ServiceError::Custom(msg));
                     }
@@ -377,7 +295,8 @@ impl UserCommandServiceTrait for UserCommandService {
                     Err(e) => {
                         let msg = format!("💥 Failed to check email {new_email}: {e:?}");
                         error!("{msg}");
-                        self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                        self.tracing_metrics_core
+                            .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                             .await;
                         return Err(ServiceError::Custom(msg));
                     }
@@ -396,7 +315,8 @@ impl UserCommandServiceTrait for UserCommandService {
             Err(e) => {
                 let msg = format!("💥 Failed to update user {user_id}: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom(msg));
             }
@@ -404,7 +324,8 @@ impl UserCommandServiceTrait for UserCommandService {
 
         let response = UserResponse::from(updated_user);
 
-        self.complete_tracing_success(&tracing_ctx, method, "User updated successfully")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "User updated successfully")
             .await;
 
         let cache_pattern = format!("user:find_by_id:id:{}", user_id);
@@ -427,7 +348,7 @@ impl UserCommandServiceTrait for UserCommandService {
         info!("🗑️ Trashing user id={}", user_id);
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "trash_user",
             vec![
                 KeyValue::new("component", "user"),
@@ -437,14 +358,16 @@ impl UserCommandServiceTrait for UserCommandService {
         );
 
         let mut request = Request::new(user_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let _user = match self.query.find_by_id(user_id).await {
             Ok(user) => user,
             Err(e) => {
                 let msg = format!("👤 User not found with id {user_id}: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom(msg));
             }
@@ -459,7 +382,8 @@ impl UserCommandServiceTrait for UserCommandService {
             Err(e) => {
                 let msg = format!("💥 Failed to trash user {user_id}: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom(msg));
             }
@@ -467,7 +391,8 @@ impl UserCommandServiceTrait for UserCommandService {
 
         let response = UserResponseDeleteAt::from(trashed_user);
 
-        self.complete_tracing_success(&tracing_ctx, method, "User trashed successfully")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "User trashed successfully")
             .await;
 
         let cache_keys = vec![
@@ -495,7 +420,7 @@ impl UserCommandServiceTrait for UserCommandService {
         info!("♻️ Restoring user id={user_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "restore_user",
             vec![
                 KeyValue::new("component", "user"),
@@ -505,14 +430,16 @@ impl UserCommandServiceTrait for UserCommandService {
         );
 
         let mut request = Request::new(user_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let _user = match self.query.find_by_id(user_id).await {
             Ok(user) => user,
             Err(e) => {
                 let msg = format!("👤 User not found with id {user_id}: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom(msg));
             }
@@ -527,7 +454,8 @@ impl UserCommandServiceTrait for UserCommandService {
             Err(e) => {
                 let msg = format!("💥 Failed to restore user {user_id}: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom(msg));
             }
@@ -535,7 +463,8 @@ impl UserCommandServiceTrait for UserCommandService {
 
         let response = UserResponseDeleteAt::from(restored_user);
 
-        self.complete_tracing_success(&tracing_ctx, method, "User restored successfully")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "User restored successfully")
             .await;
 
         let cache_keys = vec![
@@ -560,7 +489,7 @@ impl UserCommandServiceTrait for UserCommandService {
         info!("🧨 Permanently deleting user id={user_id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "delete_permanent_user",
             vec![
                 KeyValue::new("component", "user"),
@@ -570,14 +499,16 @@ impl UserCommandServiceTrait for UserCommandService {
         );
 
         let mut request = Request::new(user_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let user = match self.query.find_by_id(user_id).await {
             Ok(user) => user,
             Err(e) => {
                 let msg = format!("👤 User not found with id {user_id}: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom(msg));
             }
@@ -587,7 +518,8 @@ impl UserCommandServiceTrait for UserCommandService {
             Ok(_) => {
                 let msg = format!("✅ User permanently deleted: {}", user.email);
                 info!("{msg}");
-                self.complete_tracing_success(&tracing_ctx, method, "User permanently deleted")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "User permanently deleted")
                     .await;
 
                 let cache_keys = vec![
@@ -610,7 +542,8 @@ impl UserCommandServiceTrait for UserCommandService {
             Err(e) => {
                 let msg = format!("💥 Failed to permanently delete user {user_id}: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 Err(ServiceError::Custom(msg))
             }
@@ -621,7 +554,7 @@ impl UserCommandServiceTrait for UserCommandService {
         info!("🔄 Restoring ALL trashed users");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "restore_all_users",
             vec![
                 KeyValue::new("component", "user"),
@@ -630,17 +563,19 @@ impl UserCommandServiceTrait for UserCommandService {
         );
 
         let mut request = Request::new(());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.restore_all().await {
             Ok(_) => {
                 info!("✅ All users restored successfully");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "All users restored successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "All users restored successfully",
+                    )
+                    .await;
 
                 let cache_keys = vec![
                     "user:find_all:*".to_string(),
@@ -661,7 +596,8 @@ impl UserCommandServiceTrait for UserCommandService {
             Err(e) => {
                 let msg = format!("💥 Failed to restore all users: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 Err(ServiceError::Custom(msg))
             }
@@ -672,7 +608,7 @@ impl UserCommandServiceTrait for UserCommandService {
         info!("💣 Permanently deleting ALL trashed users");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "delete_all_users",
             vec![
                 KeyValue::new("component", "user"),
@@ -681,17 +617,15 @@ impl UserCommandServiceTrait for UserCommandService {
         );
 
         let mut request = Request::new(());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.delete_all().await {
             Ok(_) => {
                 info!("✅ All users permanently deleted");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "All users permanently deleted",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "All users permanently deleted")
+                    .await;
 
                 let cache_keys = vec![
                     "user:find_all:*".to_string(),
@@ -712,7 +646,8 @@ impl UserCommandServiceTrait for UserCommandService {
             Err(e) => {
                 let msg = format!("💥 Failed to permanently delete all users: {e:?}");
                 error!("{msg}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 Err(ServiceError::Custom(msg))
             }

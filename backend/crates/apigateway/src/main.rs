@@ -1,3 +1,8 @@
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 use anyhow::{Context, Result};
 use apigateway::{handler::AppRouter, state::AppState};
 use dotenv::dotenv;

@@ -21,3 +21,11 @@ scrape_configs:
       - targets: [ "node-exporter:9100" ]
         labels:
           application: "node-exporter"
+
+  - job_name: "postgres-exporter"
+    scrape_interval: 5s
+    static_configs:
+      - targets: [ "postgres-exporter:9187" ]
+        labels:
+          application: "postgres"
+          environment: "production"

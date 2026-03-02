@@ -3,6 +3,7 @@ use crate::{
         repository::query::DynMerchantQueryRepository, service::query::MerchantQueryServiceTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::merchant::FindAllMerchants,
         responses::{
@@ -11,124 +12,30 @@ use crate::{
         },
     },
     errors::{RepositoryError, ServiceError},
-    utils::{
-        MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_api_key,
-    },
+    observability::{Method, TracingMetrics},
+    utils::mask_api_key,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Duration;
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::Request;
 use tracing::{error, info};
 
 pub struct MerchantQueryService {
     pub query: DynMerchantQueryRepository,
-    pub metrics: Metrics,
+    pub tracing_metrics_core: TracingMetrics,
     pub cache_store: Arc<CacheStore>,
 }
 
 impl MerchantQueryService {
-    pub fn new(query: DynMerchantQueryRepository, cache_store: Arc<CacheStore>) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(query: DynMerchantQueryRepository, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             query,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("merchant-query-service")
-    }
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("✅ Operation completed successfully: {message}");
-        } else {
-            error!("❌ Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -156,7 +63,7 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_all_merchants",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -168,7 +75,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!(
             "merchant:find_all:page:{page}:size:{page_size}:search:{}",
@@ -181,7 +89,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
             .await
         {
             info!("✅ Found merchants in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Merchants retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Merchants retrieved from cache")
                 .await;
             return Ok(cache);
         }
@@ -189,22 +98,24 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         let (merchants, total_items) = match self.query.find_all(req).await {
             Ok((merchants, total_items)) => {
                 info!("✅ Found {} merchants", merchants.len());
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Merchants retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Merchants retrieved successfully",
+                    )
+                    .await;
                 (merchants, total_items)
             }
             Err(e) => {
                 error!("❌ Failed to fetch all merchants: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to fetch all merchants: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to fetch all merchants: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };
@@ -255,7 +166,7 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_active_merchants",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -267,7 +178,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!(
             "merchant:find_active:page:{page}:size:{page_size}:search:{}",
@@ -280,34 +192,37 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
             .await
         {
             info!("✅ Found active merchants in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Active merchants retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Active merchants retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         let (merchants, total_items) = match self.query.find_active(req).await {
             Ok((merchants, total_items)) => {
                 info!("✅ Retrieved {} active merchants", merchants.len());
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Active merchants retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Active merchants retrieved successfully",
+                    )
+                    .await;
                 (merchants, total_items)
             }
             Err(e) => {
                 error!("❌ Failed to fetch active merchants: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to fetch active merchants: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to fetch active merchants: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::InternalServerError(e.to_string()));
             }
         };
@@ -360,7 +275,7 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_trashed_merchants",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -372,7 +287,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!(
             "merchant:find_trashed:page:{page}:size:{page_size}:search:{}",
@@ -385,34 +301,37 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
             .await
         {
             info!("✅ Found trashed merchants in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Trashed merchants retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Trashed merchants retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         let (merchants, total_items) = match self.query.find_trashed(req).await {
             Ok((merchants, total_items)) => {
                 info!("🗑️  Found {} trashed merchants", merchants.len());
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Trashed merchants retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Trashed merchants retrieved successfully",
+                    )
+                    .await;
                 (merchants, total_items)
             }
             Err(e) => {
                 error!("❌ Failed to fetch trashed merchants: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to fetch trashed merchants: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to fetch trashed merchants: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::InternalServerError(e.to_string()));
             }
         };
@@ -447,7 +366,7 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         info!("🔍 Finding merchant by ID: {}", id);
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_merchant_by_id",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -457,7 +376,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         );
 
         let mut request = Request::new(id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("merchant:find_by_id:id:{id}");
 
@@ -467,7 +387,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
             .await
         {
             info!("✅ Found merchant in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Merchant retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Merchant retrieved from cache")
                 .await;
             return Ok(cache);
         }
@@ -475,12 +396,13 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         let merchant = match self.query.find_by_id(id).await {
             Ok(merchant) => {
                 info!("✅ Merchant retrieved successfully (ID: {id})");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Merchant retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Merchant retrieved successfully",
+                    )
+                    .await;
                 merchant
             }
             Err(e) => {
@@ -495,7 +417,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
                     }
                 };
 
-                self.complete_tracing_error(&tracing_ctx, method.clone(), error_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), error_msg)
                     .await;
 
                 return match e {
@@ -529,7 +452,7 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         info!("🔑 Finding merchant by API key: {masked_key}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_merchant_by_apikey",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -539,7 +462,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         );
 
         let mut request = Request::new(api_key.to_string());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("merchant:find_by_apikey:key:{masked_key}");
 
@@ -549,7 +473,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
             .await
         {
             info!("✅ Found merchant in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Merchant retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Merchant retrieved from cache")
                 .await;
             return Ok(cache);
         }
@@ -557,12 +482,13 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         let merchant = match self.query.find_by_apikey(api_key).await {
             Ok(merchant) => {
                 info!("✅ Merchant found for API key: {masked_key}");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Merchant retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Merchant retrieved successfully",
+                    )
+                    .await;
                 merchant
             }
             Err(e) => {
@@ -577,7 +503,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
                     }
                 };
 
-                self.complete_tracing_error(&tracing_ctx, method.clone(), error_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), error_msg)
                     .await;
 
                 return match e {
@@ -609,7 +536,7 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         info!("👥 Finding merchants for user ID: {user_id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_merchants_by_user_id",
             vec![
                 KeyValue::new("component", "merchant"),
@@ -619,7 +546,8 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
         );
 
         let mut request = Request::new(user_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("merchant:find_by_user_id:user_id:{user_id}");
 
@@ -629,12 +557,13 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
             .await
         {
             info!("✅ Found merchants for user in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Merchants for user retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Merchants for user retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -644,22 +573,24 @@ impl MerchantQueryServiceTrait for MerchantQueryService {
                     "✅ Found {} merchants for user ID {user_id}",
                     merchants.len()
                 );
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Merchants for user retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Merchants for user retrieved successfully",
+                    )
+                    .await;
                 merchants
             }
             Err(e) => {
                 error!("❌ Failed to fetch merchants for user ID {user_id}: {e:?}",);
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to fetch merchants for user: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to fetch merchants for user: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::InternalServerError(e.to_string()));
             }
         };

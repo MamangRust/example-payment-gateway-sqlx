@@ -1,6 +1,6 @@
 use opentelemetry::{
     KeyValue, global,
-    metrics::{Counter, Gauge, Histogram},
+    metrics::{Counter, Gauge, Histogram, Meter},
 };
 use std::fmt::{Display, Formatter};
 use std::{
@@ -165,16 +165,14 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    pub fn new() -> Self {
-        let meter = global::meter("http_metrics");
-
+    pub fn new(meter: Meter) -> Self {
         let request_counter = meter
-            .u64_counter("http.server.requests.total")
+            .u64_counter("requests_total")
             .with_description("Total number of HTTP requests")
             .build();
 
         let request_duration = meter
-            .f64_histogram("http.server.request.duration")
+            .f64_histogram("request_duration_seconds")
             .with_description("HTTP request duration in seconds")
             .with_unit("s")
             .build();
@@ -198,7 +196,7 @@ impl Metrics {
 
 impl Default for Metrics {
     fn default() -> Self {
-        Self::new()
+        Self::new(global::meter("http_status"))
     }
 }
 

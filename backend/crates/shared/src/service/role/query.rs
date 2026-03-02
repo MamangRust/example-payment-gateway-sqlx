@@ -3,6 +3,7 @@ use crate::{
         repository::query::DynRoleQueryRepository, service::query::RoleQueryServiceTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::role::FindAllRoles,
         responses::{
@@ -10,122 +11,29 @@ use crate::{
         },
     },
     errors::ServiceError,
-    utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
+    observability::{Method, TracingMetrics},
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Duration;
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::Request;
 use tracing::{error, info};
 
 pub struct RoleQueryService {
     pub query: DynRoleQueryRepository,
-    pub metrics: Metrics,
+    pub tracing_metrics_core: TracingMetrics,
     pub cache_store: Arc<CacheStore>,
 }
 
 impl RoleQueryService {
-    pub fn new(query: DynRoleQueryRepository, cache_store: Arc<CacheStore>) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(query: DynRoleQueryRepository, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             query,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("role-query-service")
-    }
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("✅ Operation completed successfully: {message}");
-        } else {
-            error!("❌ Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -156,7 +64,7 @@ impl RoleQueryServiceTrait for RoleQueryService {
 
         let method = Method::Get;
 
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_all_roles",
             vec![
                 KeyValue::new("component", "role"),
@@ -168,7 +76,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
         );
 
         let mut request_obj = Request::new(request.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let cache_key = format!(
             "role:find_all:page:{page}:size:{page_size}:search:{}",
@@ -182,7 +91,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
         {
             let log_msg = format!("✅ Found {} roles in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -191,18 +101,20 @@ impl RoleQueryServiceTrait for RoleQueryService {
             Ok(res) => {
                 let log_msg = format!("✅ Found {} roles", res.0.len());
                 info!("{log_msg}");
-                self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, &log_msg)
                     .await;
                 res
             }
             Err(e) => {
                 error!("❌ Failed to fetch all roles: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("❌ Failed to fetch all roles: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("❌ Failed to fetch all roles: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };
@@ -260,7 +172,7 @@ impl RoleQueryServiceTrait for RoleQueryService {
 
         let method = Method::Get;
 
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_active_roles",
             vec![
                 KeyValue::new("component", "role"),
@@ -272,7 +184,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
         );
 
         let mut request_obj = Request::new(request.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let cache_key = format!(
             "role:find_active:page:{page}:size:{page_size}:search:{}",
@@ -286,7 +199,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
         {
             let log_msg = format!("✅ Found {} active roles in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -295,18 +209,20 @@ impl RoleQueryServiceTrait for RoleQueryService {
             Ok(res) => {
                 let log_msg = format!("✅ Found {} active roles", res.0.len());
                 info!("{log_msg}");
-                self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, &log_msg)
                     .await;
                 res
             }
             Err(e) => {
                 error!("❌ Failed to fetch active roles: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("❌ Failed to fetch active roles: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("❌ Failed to fetch active roles: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };
@@ -365,7 +281,7 @@ impl RoleQueryServiceTrait for RoleQueryService {
 
         let method = Method::Get;
 
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_trashed_roles",
             vec![
                 KeyValue::new("component", "role"),
@@ -377,7 +293,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
         );
 
         let mut request_obj = Request::new(request.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let cache_key = format!(
             "role:find_trashed:page:{page}:size:{page_size}:search:{}",
@@ -391,7 +308,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
         {
             let log_msg = format!("✅ Found {} trashed roles in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -400,18 +318,20 @@ impl RoleQueryServiceTrait for RoleQueryService {
             Ok(res) => {
                 let log_msg = format!("✅ Found {} trashed roles", res.0.len());
                 info!("{log_msg}");
-                self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, &log_msg)
                     .await;
                 res
             }
             Err(e) => {
                 error!("❌ Failed to fetch trashed roles: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("❌ Failed to fetch trashed roles: {e:?}"),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("❌ Failed to fetch trashed roles: {e:?}"),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };
@@ -449,7 +369,7 @@ impl RoleQueryServiceTrait for RoleQueryService {
 
         let method = Method::Get;
 
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_role_by_id",
             vec![
                 KeyValue::new("component", "role"),
@@ -459,7 +379,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
         );
 
         let mut request = Request::new(id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("role:find_by_id:id:{id}");
 
@@ -469,7 +390,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
             .await
         {
             info!("✅ Found role in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Role retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Role retrieved from cache")
                 .await;
             return Ok(cache);
         }
@@ -477,13 +399,15 @@ impl RoleQueryServiceTrait for RoleQueryService {
         let role = match self.query.find_by_id(id).await {
             Ok(Some(role)) => {
                 info!("✅ Found role with ID: {id}");
-                self.complete_tracing_success(&tracing_ctx, method, "Role retrieved successfully")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Role retrieved successfully")
                     .await;
                 role
             }
             Ok(None) => {
                 error!("❌ Role with ID {id} not found");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Role not found")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Role not found")
                     .await;
                 return Err(ServiceError::NotFound(format!(
                     "Role with ID {id} not found"
@@ -491,7 +415,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
             }
             Err(e) => {
                 error!("❌ Database error while finding role by ID {id}: {e:?}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
                     .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
@@ -518,7 +443,7 @@ impl RoleQueryServiceTrait for RoleQueryService {
 
         let method = Method::Get;
 
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_roles_by_user_id",
             vec![
                 KeyValue::new("component", "role"),
@@ -528,7 +453,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
         );
 
         let mut request = Request::new(user_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("role:find_by_user_id:user_id:{user_id}");
 
@@ -538,34 +464,37 @@ impl RoleQueryServiceTrait for RoleQueryService {
             .await
         {
             info!("✅ Found roles for user in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Roles for user retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Roles for user retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         let roles = match self.query.find_by_user_id(user_id).await {
             Ok(roles) => {
                 info!("✅ Found {} roles for user ID: {user_id}", roles.len());
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Roles for user retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Roles for user retrieved successfully",
+                    )
+                    .await;
                 roles
             }
             Err(e) => {
                 error!("❌ Failed to fetch roles for user ID {user_id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to fetch roles for user: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to fetch roles for user: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };
@@ -590,7 +519,7 @@ impl RoleQueryServiceTrait for RoleQueryService {
 
         let method = Method::Get;
 
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_role_by_name",
             vec![
                 KeyValue::new("component", "role"),
@@ -600,7 +529,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
         );
 
         let mut request = Request::new(name.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("role:find_by_name:name:{}", name);
 
@@ -610,29 +540,28 @@ impl RoleQueryServiceTrait for RoleQueryService {
             .await
         {
             info!("✅ Found role by name in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Role by name retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Role by name retrieved from cache")
+                .await;
             return Ok(cache);
         }
 
         let role = match self.query.find_by_name(&name).await {
             Ok(Some(role)) => {
                 info!("✅ Found role with name: {name}");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Role by name retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Role by name retrieved successfully",
+                    )
+                    .await;
                 role
             }
             Ok(None) => {
                 error!("❌ Role with name '{name}' not found");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Role not found")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Role not found")
                     .await;
                 return Err(ServiceError::NotFound(format!(
                     "Role with name '{name}' not found"
@@ -640,7 +569,8 @@ impl RoleQueryServiceTrait for RoleQueryService {
             }
             Err(e) => {
                 error!("❌ Database error while finding role by name '{name}': {e:?}",);
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
                     .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }

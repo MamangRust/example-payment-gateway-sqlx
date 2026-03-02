@@ -46,6 +46,8 @@ use shared::{
     },
     cache::CacheStore,
     config::{ConnectionPool, RedisPool},
+    context::shared_resources::SharedResources,
+    observability::{CacheMetricsCore, TracingMetricsCore},
     repository::{
         merchant::{
             command::MerchantCommandRepository,
@@ -87,7 +89,15 @@ use shared::{
         transactions::MerchantTransactionService,
     },
 };
-use std::{fmt, sync::Arc};
+use std::{fmt, sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
+use tracing::{error, info, warn};
+
+#[derive(Debug, Clone)]
+pub struct DependencyMetrics {
+    pub available_permits: usize,
+    pub cache_ref_count: usize,
+}
 
 #[derive(Clone)]
 pub struct DependenciesInject {
@@ -109,6 +119,9 @@ pub struct DependenciesInject {
     pub merchant_stats_amount_by_merchant: DynMerchantStatsAmountByMerchantService,
     pub merchant_stats_method_by_merchant: DynMerchantStatsMethodByMerchantService,
     pub merchant_stats_total_amount_by_merchant: DynMerchantStatsTotalAmountByMerchantService,
+
+    pub cache_store: Arc<CacheStore>,
+    pub request_limiter: Arc<Semaphore>,
 }
 
 impl fmt::Debug for DependenciesInject {
@@ -173,13 +186,23 @@ impl fmt::Debug for DependenciesInject {
 
 impl DependenciesInject {
     pub fn new(db: ConnectionPool, redis: RedisPool) -> Result<Self> {
-        let cache_store = Arc::new(CacheStore::new(redis.pool.clone()));
+        let cache_metrics = Arc::new(CacheMetricsCore::new("cache"));
+        let cache_store = Arc::new(CacheStore::new(redis.pool.clone(), cache_metrics));
+
+        let tracing_metrics = Arc::new(
+            TracingMetricsCore::new("merchant-service").context("failed initialize tracing")?,
+        );
+
+        let shared = SharedResources {
+            tracing_metrics,
+            cache_store,
+        };
 
         // query
         let merchant_query_repo =
             Arc::new(MerchantQueryRepository::new(db.clone())) as DynMerchantQueryRepository;
         let merchant_query = Arc::new(
-            MerchantQueryService::new(merchant_query_repo.clone(), cache_store.clone())
+            MerchantQueryService::new(merchant_query_repo.clone(), &shared)
                 .context("failed to initialize merchant query service")?,
         ) as DynMerchantQueryService;
 
@@ -187,7 +210,7 @@ impl DependenciesInject {
         let merchant_transaction_repo = Arc::new(MerchantTransactionRepository::new(db.clone()))
             as DynMerchantTransactionRepository;
         let merchant_transaction = Arc::new(
-            MerchantTransactionService::new(merchant_transaction_repo.clone(), cache_store.clone())
+            MerchantTransactionService::new(merchant_transaction_repo.clone(), &shared)
                 .context("failed to initialize merchant transaction service")?,
         ) as DynMerchantTransactionService;
 
@@ -200,7 +223,7 @@ impl DependenciesInject {
             MerchantCommandService::new(
                 merchant_command_repo.clone(),
                 user_query_repo.clone(),
-                cache_store.clone(),
+                &shared,
             )
             .context("failed to initialize merchant command service")?,
         ) as DynMerchantCommandService;
@@ -209,32 +232,23 @@ impl DependenciesInject {
         let merchant_stats_amount_repo = Arc::new(MerchantStatsAmountRepository::new(db.clone()))
             as DynMerchantStatsAmountRepository;
         let merchant_stats_amount = Arc::new(
-            MerchantStatsAmountService::new(
-                merchant_stats_amount_repo.clone(),
-                cache_store.clone(),
-            )
-            .context("failed to initialize merchant stats amount service")?,
+            MerchantStatsAmountService::new(merchant_stats_amount_repo.clone(), &shared)
+                .context("failed to initialize merchant stats amount service")?,
         ) as DynMerchantStatsAmountService;
 
         let merchant_stats_method_repo = Arc::new(MerchantStatsMethodRepository::new(db.clone()))
             as DynMerchantStatsMethodRepository;
         let merchant_stats_method = Arc::new(
-            MerchantStatsMethodService::new(
-                merchant_stats_method_repo.clone(),
-                cache_store.clone(),
-            )
-            .context("failed to initialize merchant stats method service")?,
+            MerchantStatsMethodService::new(merchant_stats_method_repo.clone(), &shared)
+                .context("failed to initialize merchant stats method service")?,
         ) as DynMerchantStatsMethodService;
 
         let merchant_stats_total_amount_repo =
             Arc::new(MerchantStatsTotalAmountRepository::new(db.clone()))
                 as DynMerchantStatsTotalAmountRepository;
         let merchant_stats_total_amount = Arc::new(
-            MerchantStatsTotalAmountService::new(
-                merchant_stats_total_amount_repo.clone(),
-                cache_store.clone(),
-            )
-            .context("failed to initialize merchant stats total amount service")?,
+            MerchantStatsTotalAmountService::new(merchant_stats_total_amount_repo.clone(), &shared)
+                .context("failed to initialize merchant stats total amount service")?,
         ) as DynMerchantStatsTotalAmountService;
 
         // stats by apikey
@@ -244,7 +258,7 @@ impl DependenciesInject {
         let merchant_stats_amount_by_apikey = Arc::new(
             MerchantStatsAmountByApiKeyService::new(
                 merchant_stats_amount_by_apikey_repo.clone(),
-                cache_store.clone(),
+                &shared,
             )
             .context("failed to initialize merchant stats amount by apikey service")?,
         ) as DynMerchantStatsAmountByApiKeyService;
@@ -255,7 +269,7 @@ impl DependenciesInject {
         let merchant_stats_method_by_apikey = Arc::new(
             MerchantStatsMethodByApiKeyService::new(
                 merchant_stats_method_by_apikey_repo.clone(),
-                cache_store.clone(),
+                &shared,
             )
             .context("failed to initialize merchant stats method by apikey service")?,
         ) as DynMerchantStatsMethodByApiKeyService;
@@ -266,7 +280,7 @@ impl DependenciesInject {
         let merchant_stats_total_amount_by_apikey = Arc::new(
             MerchantStatsTotalAmountByApiKeyService::new(
                 merchant_stats_total_amount_by_apikey_repo.clone(),
-                cache_store.clone(),
+                &shared,
             )
             .context("failed to initialize merchant stats total amount by apikey service")?,
         )
@@ -279,7 +293,7 @@ impl DependenciesInject {
         let merchant_stats_amount_by_merchant = Arc::new(
             MerchantStatsAmountByMerchantService::new(
                 merchant_stats_amount_by_merchant_repo.clone(),
-                cache_store.clone(),
+                &shared,
             )
             .context("failed to initialize merchant stats amount by merchant service")?,
         )
@@ -291,7 +305,7 @@ impl DependenciesInject {
         let merchant_stats_method_by_merchant = Arc::new(
             MerchantStatsMethodByMerchantService::new(
                 merchant_stats_method_by_merchant_repo.clone(),
-                cache_store.clone(),
+                &shared,
             )
             .context("failed to initialize merchant stats method by merchant service")?,
         )
@@ -304,11 +318,14 @@ impl DependenciesInject {
         let merchant_stats_total_amount_by_merchant = Arc::new(
             MerchantStatsTotalAmountByMerchantService::new(
                 merchant_stats_total_amount_by_merchant_repo.clone(),
-                cache_store.clone(),
+                &shared,
             )
             .context("failed to initialize merchant stats total amount by merchant service")?,
         )
             as DynMerchantStatsTotalAmountByMerchantService;
+
+        Self::spawn_monitoring_task(Arc::clone(&shared.cache_store));
+        Self::spawn_cleanup_task(Arc::clone(&shared.cache_store));
 
         Ok(Self {
             merchant_query,
@@ -330,6 +347,72 @@ impl DependenciesInject {
             merchant_stats_amount_by_merchant,
             merchant_stats_method_by_merchant,
             merchant_stats_total_amount_by_merchant,
+
+            request_limiter: Arc::new(Semaphore::new(1000)),
+            cache_store: shared.cache_store,
         })
+    }
+
+    fn spawn_monitoring_task(cache: Arc<CacheStore>) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                let ref_count = Arc::strong_count(&cache);
+                if ref_count > 1000 {
+                    warn!(
+                        "⚠️  High reference count detected on CacheStore: {}",
+                        ref_count
+                    );
+                } else {
+                    info!("📊 CacheStore reference count: {}", ref_count);
+                }
+            }
+        });
+    }
+
+    fn spawn_cleanup_task(cache: Arc<CacheStore>) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(120));
+            loop {
+                interval.tick().await;
+                info!("🧹 Running periodic cache cleanup...");
+
+                let _ = cache.clear_expired().await;
+
+                let ref_count = Arc::strong_count(&cache);
+                info!("✅ Cleanup completed. Current ref count: {}", ref_count);
+            }
+        });
+    }
+
+    pub async fn trigger_cleanup(&self) -> Result<()> {
+        info!("🧹 Triggering manual cleanup...");
+
+        match self.cache_store.clear_expired().await {
+            Ok(scanned) => info!("✅ Manual cleanup scanned {} keys", scanned),
+            Err(e) => error!("❌ Manual cleanup failed: {}", e),
+        }
+
+        if let Ok(stats) = self.cache_store.get_stats().await {
+            info!("📊 Post-cleanup stats:\n{}", stats);
+        }
+
+        Ok(())
+    }
+
+    pub async fn invalidate_cache_pattern(&self, pattern: &str) -> Result<usize> {
+        self.cache_store
+            .invalidate_pattern(pattern)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
+            .context("Failed to invalidate cache pattern")
+    }
+
+    pub fn get_metrics(&self) -> DependencyMetrics {
+        DependencyMetrics {
+            available_permits: self.request_limiter.available_permits(),
+            cache_ref_count: Arc::strong_count(&self.cache_store),
+        }
     }
 }

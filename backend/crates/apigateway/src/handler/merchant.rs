@@ -1,22 +1,21 @@
 use crate::{
     middleware::{
-        jwt, rate_limit::rate_limit_middleware, session::session_middleware,
+        circuit_breaker::circuit_breaker_middleware, jwt, rate_limit::rate_limit_middleware,
+        request_limiter::request_limiter_middleware, session::session_middleware,
         validate::SimpleValidatedJson,
     },
     state::AppState,
 };
 use axum::{
     Json,
-    extract::{Extension, Path, Query},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
     routing::{delete, get, post},
 };
 use serde_json::json;
-use shared::abstract_trait::session::DynSessionMiddleware;
 use shared::{
-    abstract_trait::merchant::http::DynMerchantGrpcClientService,
     domain::{
         requests::{
             merchant::{
@@ -54,10 +53,12 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_merchants(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllMerchants>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all(&params).await {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    match merchant_client.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -76,10 +77,12 @@ pub async fn get_merchants(
     )
 )]
 pub async fn get_active_merchants(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllMerchants>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_active(&params).await {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    match merchant_client.find_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -98,10 +101,12 @@ pub async fn get_active_merchants(
     )
 )]
 pub async fn get_trashed_merchants(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllMerchants>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_trashed(&params).await {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    match merchant_client.find_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -120,10 +125,12 @@ pub async fn get_trashed_merchants(
     )
 )]
 pub async fn get_merchant(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_id(id).await {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    match merchant_client.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -142,10 +149,12 @@ pub async fn get_merchant(
     )
 )]
 pub async fn get_merchant_by_apikey(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(api_key): Path<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_apikey(&api_key).await {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    match merchant_client.find_by_apikey(&api_key).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -164,10 +173,12 @@ pub async fn get_merchant_by_apikey(
     )
 )]
 pub async fn get_merchants_by_user_id(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(user_id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_merchant_user_id(user_id).await {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    match merchant_client.find_merchant_user_id(user_id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -187,10 +198,12 @@ pub async fn get_merchants_by_user_id(
     )
 )]
 pub async fn create_merchant(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateMerchantRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.create(&body).await {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    match merchant_client.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
     }
@@ -211,12 +224,14 @@ pub async fn create_merchant(
     )
 )]
 pub async fn update_merchant(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateMerchantRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
     body.merchant_id = Some(id);
-    match service.update(&body).await {
+    match merchant_client.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -235,11 +250,14 @@ pub async fn update_merchant(
     )
 )]
 pub async fn trash_merchant_handler(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -257,7 +275,7 @@ pub async fn trash_merchant_handler(
         ));
     }
 
-    match service.trash(id).await {
+    match merchant_client.trash(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -276,11 +294,14 @@ pub async fn trash_merchant_handler(
     )
 )]
 pub async fn restore_merchant_handler(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -298,7 +319,7 @@ pub async fn restore_merchant_handler(
         ));
     }
 
-    match service.restore(id).await {
+    match merchant_client.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -317,11 +338,14 @@ pub async fn restore_merchant_handler(
     )
 )]
 pub async fn delete_merchant(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -339,7 +363,7 @@ pub async fn delete_merchant(
         ));
     }
 
-    match service.delete(id).await {
+    match merchant_client.delete(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -362,10 +386,13 @@ pub async fn delete_merchant(
     )
 )]
 pub async fn restore_all_merchant_handler(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -383,7 +410,7 @@ pub async fn restore_all_merchant_handler(
         ));
     }
 
-    match service.restore_all().await {
+    match merchant_client.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -406,10 +433,13 @@ pub async fn restore_all_merchant_handler(
     )
 )]
 pub async fn delete_all_merchant_handler(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -427,7 +457,7 @@ pub async fn delete_all_merchant_handler(
         ));
     }
 
-    match service.delete_all().await {
+    match merchant_client.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -452,11 +482,14 @@ pub async fn delete_all_merchant_handler(
     )
 )]
 pub async fn get_monthly_amount(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -474,7 +507,7 @@ pub async fn get_monthly_amount(
         ));
     }
 
-    match service.get_monthly_amount(req.year).await {
+    match merchant_client.get_monthly_amount(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -493,11 +526,14 @@ pub async fn get_monthly_amount(
     )
 )]
 pub async fn get_yearly_amount(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -515,7 +551,7 @@ pub async fn get_yearly_amount(
         ));
     }
 
-    match service.get_yearly_amount(req.year).await {
+    match merchant_client.get_yearly_amount(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -534,11 +570,14 @@ pub async fn get_yearly_amount(
     )
 )]
 pub async fn get_monthly_method(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -556,7 +595,7 @@ pub async fn get_monthly_method(
         ));
     }
 
-    match service.get_monthly_method(req.year).await {
+    match merchant_client.get_monthly_method(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -575,11 +614,14 @@ pub async fn get_monthly_method(
     )
 )]
 pub async fn get_yearly_method(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -597,7 +639,7 @@ pub async fn get_yearly_method(
         ));
     }
 
-    match service.get_yearly_method(req.year).await {
+    match merchant_client.get_yearly_method(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -616,11 +658,14 @@ pub async fn get_yearly_method(
     )
 )]
 pub async fn get_monthly_total_amount(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -638,7 +683,7 @@ pub async fn get_monthly_total_amount(
         ));
     }
 
-    match service.get_monthly_total_amount(req.year).await {
+    match merchant_client.get_monthly_total_amount(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -657,11 +702,14 @@ pub async fn get_monthly_total_amount(
     )
 )]
 pub async fn get_yearly_total_amount(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -679,7 +727,7 @@ pub async fn get_yearly_total_amount(
         ));
     }
 
-    match service.get_yearly_total_amount(req.year).await {
+    match merchant_client.get_yearly_total_amount(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -698,11 +746,14 @@ pub async fn get_yearly_total_amount(
     )
 )]
 pub async fn get_monthly_amount_by_merchant(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearAmountMerchant>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -720,7 +771,7 @@ pub async fn get_monthly_amount_by_merchant(
         ));
     }
 
-    match service.get_monthly_amount_bymerchant(&params).await {
+    match merchant_client.get_monthly_amount_bymerchant(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -739,11 +790,14 @@ pub async fn get_monthly_amount_by_merchant(
     )
 )]
 pub async fn get_yearly_amount_by_merchant(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearAmountMerchant>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -761,7 +815,7 @@ pub async fn get_yearly_amount_by_merchant(
         ));
     }
 
-    match service.get_yearly_amount_bymerchant(&params).await {
+    match merchant_client.get_yearly_amount_bymerchant(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -780,11 +834,14 @@ pub async fn get_yearly_amount_by_merchant(
     )
 )]
 pub async fn get_monthly_method_by_merchant(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearPaymentMethodMerchant>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -802,7 +859,7 @@ pub async fn get_monthly_method_by_merchant(
         ));
     }
 
-    match service.get_monthly_method_bymerchant(&params).await {
+    match merchant_client.get_monthly_method_bymerchant(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -821,11 +878,14 @@ pub async fn get_monthly_method_by_merchant(
     )
 )]
 pub async fn get_yearly_method_by_merchant(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearPaymentMethodMerchant>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -843,7 +903,7 @@ pub async fn get_yearly_method_by_merchant(
         ));
     }
 
-    match service.get_yearly_method_bymerchant(&params).await {
+    match merchant_client.get_yearly_method_bymerchant(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -862,11 +922,14 @@ pub async fn get_yearly_method_by_merchant(
     )
 )]
 pub async fn get_monthly_total_amount_by_merchant(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearTotalAmountMerchant>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -884,7 +947,10 @@ pub async fn get_monthly_total_amount_by_merchant(
         ));
     }
 
-    match service.get_monthly_total_amount_bymerchant(&params).await {
+    match merchant_client
+        .get_monthly_total_amount_bymerchant(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -903,11 +969,14 @@ pub async fn get_monthly_total_amount_by_merchant(
     )
 )]
 pub async fn get_yearly_total_amount_by_merchant(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearTotalAmountMerchant>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -925,7 +994,10 @@ pub async fn get_yearly_total_amount_by_merchant(
         ));
     }
 
-    match service.get_yearly_total_amount_bymerchant(&params).await {
+    match merchant_client
+        .get_yearly_total_amount_bymerchant(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -944,11 +1016,14 @@ pub async fn get_yearly_total_amount_by_merchant(
     )
 )]
 pub async fn get_monthly_amount_by_apikey(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearAmountApiKey>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -966,7 +1041,7 @@ pub async fn get_monthly_amount_by_apikey(
         ));
     }
 
-    match service.get_monthly_amount_byapikey(&params).await {
+    match merchant_client.get_monthly_amount_byapikey(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -985,11 +1060,14 @@ pub async fn get_monthly_amount_by_apikey(
     )
 )]
 pub async fn get_yearly_amount_by_apikey(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearAmountApiKey>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1007,7 +1085,7 @@ pub async fn get_yearly_amount_by_apikey(
         ));
     }
 
-    match service.get_yearly_amount_byapikey(&params).await {
+    match merchant_client.get_yearly_amount_byapikey(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1026,11 +1104,14 @@ pub async fn get_yearly_amount_by_apikey(
     )
 )]
 pub async fn get_monthly_method_by_apikey(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearPaymentMethodApiKey>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1048,7 +1129,7 @@ pub async fn get_monthly_method_by_apikey(
         ));
     }
 
-    match service.get_monthly_method_byapikey(&params).await {
+    match merchant_client.get_monthly_method_byapikey(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1067,11 +1148,14 @@ pub async fn get_monthly_method_by_apikey(
     )
 )]
 pub async fn get_yearly_method_by_apikey(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearPaymentMethodApiKey>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1089,7 +1173,7 @@ pub async fn get_yearly_method_by_apikey(
         ));
     }
 
-    match service.get_yearly_method_byapikey(&params).await {
+    match merchant_client.get_yearly_method_byapikey(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1108,11 +1192,14 @@ pub async fn get_yearly_method_by_apikey(
     )
 )]
 pub async fn get_monthly_total_amount_by_apikey(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearTotalAmountApiKey>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1130,7 +1217,10 @@ pub async fn get_monthly_total_amount_by_apikey(
         ));
     }
 
-    match service.get_monthly_total_amount_byapikey(&params).await {
+    match merchant_client
+        .get_monthly_total_amount_byapikey(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1149,11 +1239,14 @@ pub async fn get_monthly_total_amount_by_apikey(
     )
 )]
 pub async fn get_yearly_total_amount_by_apikey(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearTotalAmountApiKey>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1171,7 +1264,10 @@ pub async fn get_yearly_total_amount_by_apikey(
         ));
     }
 
-    match service.get_yearly_total_amount_byapikey(&params).await {
+    match merchant_client
+        .get_yearly_total_amount_byapikey(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1190,11 +1286,14 @@ pub async fn get_yearly_total_amount_by_apikey(
     )
 )]
 pub async fn get_merchant_transactions(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllMerchantTransactions>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1212,7 +1311,7 @@ pub async fn get_merchant_transactions(
         ));
     }
 
-    match service.find_all_transactiions(&params).await {
+    match merchant_client.find_all_transactiions(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1231,11 +1330,14 @@ pub async fn get_merchant_transactions(
     )
 )]
 pub async fn get_merchant_transactions_by_id(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllMerchantTransactionsById>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1253,7 +1355,7 @@ pub async fn get_merchant_transactions_by_id(
         ));
     }
 
-    match service.find_all_transactiions_by_id(&params).await {
+    match merchant_client.find_all_transactiions_by_id(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -1272,11 +1374,14 @@ pub async fn get_merchant_transactions_by_id(
     )
 )]
 pub async fn get_merchant_transactions_by_apikey(
-    Extension(service): Extension<DynMerchantGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllMerchantTransactionsByApiKey>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let merchant_client = &app_state.di_container.merchant_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1294,13 +1399,16 @@ pub async fn get_merchant_transactions_by_apikey(
         ));
     }
 
-    match service.find_all_transactiions_by_api_key(&params).await {
+    match merchant_client
+        .find_all_transactiions_by_api_key(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
 }
 
-pub fn merchant_routes(app_state: Arc<AppState>) -> OpenApiRouter {
+pub fn merchant_routes(state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/merchants", get(get_merchants))
         .route("/api/merchants/create", post(create_merchant))
@@ -1408,12 +1516,22 @@ pub fn merchant_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/merchants/transactions/by-apikey",
             get(get_merchant_transactions_by_apikey),
         )
-        .route_layer(middleware::from_fn(session_middleware))
-        .route_layer(middleware::from_fn(jwt::auth))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
-        .layer(Extension(app_state.di_container.merchant_clients.clone()))
-        .layer(Extension(app_state.di_container.role_clients.clone()))
-        .layer(Extension(app_state.session.clone()))
-        .layer(Extension(app_state.rate_limit.clone()))
-        .layer(Extension(app_state.jwt_config.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            session_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(state.clone(), jwt::auth))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            circuit_breaker_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_limiter_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
+        .with_state(state)
 }

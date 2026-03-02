@@ -36,7 +36,6 @@ exporters:
       enabled: true
     enable_open_metrics: true
 
-  # Untuk logs -> Loki
   otlphttp/loki:
     endpoint: "http://loki:3100/otlp"
     tls:

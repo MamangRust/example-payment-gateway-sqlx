@@ -9,11 +9,7 @@ use genproto::transaction::{
     FindYearTransactionStatusCardNumber, UpdateTransactionRequest,
     transaction_service_client::TransactionServiceClient,
 };
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use shared::cache::CacheStore;
 use shared::{
     abstract_trait::transaction::http::{
@@ -23,6 +19,7 @@ use shared::{
         TransactionStatsMethodGrpcClientTrait, TransactionStatsStatusByCardNumberGrpcClientTrait,
         TransactionStatsStatusGrpcClientTrait,
     },
+    context::shared_resources::SharedResources,
     domain::{
         requests::transaction::{
             CreateTransactionRequest as DomainCreateTransactionRequest,
@@ -42,121 +39,29 @@ use shared::{
         },
     },
     errors::{AppErrorGrpc, HttpError},
-    utils::{
-        MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_api_key,
-        mask_card_number, month_name, naive_datetime_to_timestamp,
-    },
+    observability::{Method, TracingMetrics},
+    utils::{mask_api_key, mask_card_number, month_name, naive_datetime_to_timestamp},
 };
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
 pub struct TransactionGrpcClientService {
     client: TransactionServiceClient<Channel>,
-    metrics: Metrics,
+    tracing_metrics_core: TracingMetrics,
     cache_store: Arc<CacheStore>,
 }
 
 impl TransactionGrpcClientService {
     pub fn new(
         client: TransactionServiceClient<Channel>,
-        cache_store: Arc<CacheStore>,
+        shared: &SharedResources,
     ) -> Result<Self> {
-        let metrics = Metrics::new();
-
         Ok(Self {
             client,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("transaction-client-service")
-    }
-
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("Operation completed successfully: {message}");
-        } else {
-            error!("Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -179,7 +84,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -196,7 +101,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:find_all:page:{page}:size:{page_size}:search:{}",
@@ -210,19 +116,21 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
         {
             let log_msg = format!("✅ Found {} transactions in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_all_transaction(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched transactions",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched transactions",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponse> =
@@ -246,7 +154,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch transactions")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch transactions")
                     .await;
                 error!("fetch all transactions failed: {status:?}");
 
@@ -271,7 +180,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllTransactionByCardNumber",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -290,7 +199,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:find_by_card_number:card:{}:page:{page}:size:{page_size}:search:{}",
@@ -308,7 +218,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 masked_card
             );
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -320,12 +231,13 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched transactions by card number",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched transactions by card number",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponse> =
@@ -353,12 +265,13 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch transactions by card number",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch transactions by card number",
+                    )
+                    .await;
                 error!(
                     "fetch transactions for card {} failed: {status:?}",
                     masked_card
@@ -382,7 +295,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindActiveTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -399,7 +312,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:find_by_active:page:{page}:size:{page_size}:search:{}",
@@ -413,7 +327,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
         {
             let log_msg = format!("✅ Found {} active transactions in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -425,12 +340,13 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched active transactions",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched active transactions",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponseDeleteAt> =
@@ -454,12 +370,13 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch active transactions",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch active transactions",
+                    )
+                    .await;
                 error!("fetch active transactions failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -480,7 +397,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTrashedTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -497,7 +414,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:find_by_trashed:page:{page}:size:{page_size}:search:{}",
@@ -514,7 +432,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 cache.data.len()
             );
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -526,12 +445,13 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched trashed transactions",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched trashed transactions",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponseDeleteAt> =
@@ -555,12 +475,13 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch trashed transactions",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch trashed transactions",
+                    )
+                    .await;
                 error!("fetch trashed transactions failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -575,7 +496,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
         info!("fetching transaction by id: {transaction_id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTransactionById",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -586,7 +507,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdTransactionRequest { transaction_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("transaction:find_by_id:id:{transaction_id}");
 
@@ -596,19 +518,21 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             info!("✅ Found transaction in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Transaction retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Transaction retrieved from cache")
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_id_transaction(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched transaction by id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched transaction by id",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -631,12 +555,13 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch transaction by id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch transaction by id",
+                    )
+                    .await;
                 error!("find transaction {transaction_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -651,7 +576,7 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
         info!("fetching transactions by merchant_id: {merchant_id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTransactionByMerchantId",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -662,7 +587,8 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindTransactionByMerchantIdRequest { merchant_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("transaction:find_by_merchant_id:merchant_id:{merchant_id}");
 
@@ -672,12 +598,13 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             info!("✅ Found transactions for merchant in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Transactions for merchant retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Transactions for merchant retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -688,12 +615,13 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched transactions by merchant id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched transactions by merchant id",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponse> =
@@ -712,12 +640,13 @@ impl TransactionQueryGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch transactions by merchant id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch transactions by merchant id",
+                    )
+                    .await;
                 error!("fetch transactions for merchant {merchant_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -741,7 +670,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
         );
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "CreateTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -763,16 +692,18 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
             transaction_time: Some(date),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().create_transaction(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully created transaction",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully created transaction",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -816,7 +747,8 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to create transaction")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to create transaction")
                     .await;
                 error!(
                     "create transaction for card {masked_card} via api_key {masked_api} failed: {status:?}"
@@ -845,7 +777,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
         );
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "UpdateTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -868,16 +800,18 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
             transaction_time: Some(date),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().update_transaction(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully updated transaction",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully updated transaction",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -925,7 +859,8 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to update transaction")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to update transaction")
                     .await;
                 error!(
                     "update transaction {transaction_id} via api_key {masked_api} failed: {status:?}",
@@ -943,7 +878,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
         info!("trashing transaction id: {transaction_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "TrashTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -954,16 +889,18 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdTransactionRequest { transaction_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().trashed_transaction(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully trashed transaction",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully trashed transaction",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -994,7 +931,8 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to trash transaction")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to trash transaction")
                     .await;
                 error!("trash transaction {transaction_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -1010,7 +948,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
         info!("restoring transaction id: {transaction_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1021,16 +959,18 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdTransactionRequest { transaction_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_transaction(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully restored transaction",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully restored transaction",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -1061,7 +1001,8 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to restore transaction")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to restore transaction")
                     .await;
                 error!("restore transaction {transaction_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -1074,7 +1015,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
         info!("permanently deleting transaction id: {transaction_id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteTransactionPermanent",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1085,7 +1026,8 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdTransactionRequest { transaction_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self
             .client
@@ -1094,12 +1036,13 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted transaction permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted transaction permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1127,12 +1070,13 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete transaction permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete transaction permanently",
+                    )
+                    .await;
                 error!("delete transaction {transaction_id} permanently failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1144,7 +1088,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
         info!("restoring all trashed transactions");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreAllTransactions",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1154,16 +1098,18 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_all_transaction(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully restored all trashed transactions",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully restored all trashed transactions",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1191,12 +1137,13 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to restore all trashed transactions",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to restore all trashed transactions",
+                    )
+                    .await;
                 error!("restore all transactions failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1208,7 +1155,7 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
         info!("permanently deleting all transactions");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteAllTransactionsPermanent",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1218,7 +1165,8 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self
             .client
@@ -1227,12 +1175,13 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted all transactions permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted all transactions permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1260,12 +1209,13 @@ impl TransactionCommandGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete all transactions permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete all transactions permanently",
+                    )
+                    .await;
                 error!("delete all transactions permanently failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1283,7 +1233,7 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
         info!("fetching monthly transaction AMOUNT stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyAmountsTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1294,7 +1244,8 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTransactionStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("transaction:monthly_amounts:year:{year}");
 
@@ -1304,23 +1255,25 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             info!("✅ Found monthly transaction amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transaction amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transaction amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_monthly_amounts(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transaction amounts",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transaction amounts",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionMonthAmountResponse> =
@@ -1343,12 +1296,13 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transaction amounts",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transaction amounts",
+                    )
+                    .await;
                 error!("fetch monthly transaction AMOUNT for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1363,7 +1317,7 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
         info!("fetching yearly transaction AMOUNT stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyAmountsTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1374,7 +1328,8 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTransactionStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("transaction:yearly_amounts:year:{year}");
 
@@ -1384,23 +1339,25 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             info!("✅ Found yearly transaction amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transaction amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transaction amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_yearly_amounts(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transaction amounts",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transaction amounts",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionYearlyAmountResponse> =
@@ -1424,12 +1381,13 @@ impl TransactionStatsAmountGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transaction amounts",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transaction amounts",
+                    )
+                    .await;
                 error!("fetch yearly transaction AMOUNT for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1447,7 +1405,7 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
         info!("fetching monthly transaction METHOD stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyMethodTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1458,7 +1416,8 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTransactionStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("transaction:monthly_method:year:{year}");
 
@@ -1468,12 +1427,13 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             info!("✅ Found monthly transaction methods in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transaction methods retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transaction methods retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1484,12 +1444,13 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transaction methods",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transaction methods",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionMonthMethodResponse> =
@@ -1513,12 +1474,13 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transaction methods",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transaction methods",
+                    )
+                    .await;
                 error!("fetch monthly transaction METHOD for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1533,7 +1495,7 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
         info!("fetching yearly transaction METHOD stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyMethodTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1544,7 +1506,8 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTransactionStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("transaction:yearly_method:year:{year}");
 
@@ -1554,12 +1517,13 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             info!("✅ Found yearly transaction methods in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transaction methods retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transaction methods retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1570,12 +1534,13 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transaction methods",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transaction methods",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionYearMethodResponse> =
@@ -1599,12 +1564,13 @@ impl TransactionStatsMethodGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transaction methods",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transaction methods",
+                    )
+                    .await;
                 error!("fetch yearly transaction METHOD for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1626,7 +1592,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthStatusSuccessTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1641,7 +1607,8 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
             month: req.month,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:monthly_status_success:year:{}:month:{}",
@@ -1657,12 +1624,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
                 "✅ Found successful transactions in cache for month: {}-{}",
                 req.year, req.month
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Successful transactions retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Successful transactions retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1673,12 +1641,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transaction success status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transaction success status",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponseMonthStatusSuccess> =
@@ -1699,12 +1668,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transaction success status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transaction success status",
+                    )
+                    .await;
                 error!(
                     "fetch monthly SUCCESS transaction status for {month_str} {} failed: {status:?}",
                     req.year
@@ -1722,7 +1692,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
         info!("fetching yearly transaction SUCCESS status for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyStatusSuccessTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1733,7 +1703,8 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTransactionStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("transaction:yearly_status_success:year:{year}");
 
@@ -1743,12 +1714,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             info!("✅ Found yearly successful transactions in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly successful transactions retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly successful transactions retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1759,12 +1731,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transaction success status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transaction success status",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponseYearStatusSuccess> =
@@ -1787,12 +1760,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transaction success status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transaction success status",
+                    )
+                    .await;
                 error!(
                     "fetch yearly SUCCESS transaction status for year {year} failed: {status:?}"
                 );
@@ -1813,7 +1787,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthStatusFailedTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1828,7 +1802,8 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
             month: req.month,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:monthly_status_failed:year:{}:month:{}",
@@ -1844,12 +1819,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
                 "✅ Found failed transactions in cache for month: {}-{}",
                 req.year, req.month
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Failed transactions retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Failed transactions retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1860,12 +1836,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transaction failed status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transaction failed status",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponseMonthStatusFailed> =
@@ -1883,12 +1860,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
                 })
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transaction failed status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transaction failed status",
+                    )
+                    .await;
                 error!(
                     "fetch monthly FAILED transaction status for {month_str} {} failed: {status:?}",
                     req.year
@@ -1906,7 +1884,7 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
         info!("fetching yearly transaction FAILED status for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyStatusFailedTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -1917,7 +1895,8 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTransactionStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("transaction:yearly_status_failed:year:{year}");
 
@@ -1927,12 +1906,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             info!("✅ Found yearly failed transactions in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly failed transactions retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly failed transactions retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1943,12 +1923,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transaction failed status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transaction failed status",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponseYearStatusFailed> =
@@ -1971,12 +1952,13 @@ impl TransactionStatsStatusGrpcClientTrait for TransactionGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transaction failed status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transaction failed status",
+                    )
+                    .await;
                 error!("fetch yearly FAILED transaction status for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1998,7 +1980,7 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyAmountsByCardTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -2013,7 +1995,8 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:monthly_amounts:card:{}:year:{}",
@@ -2029,12 +2012,13 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
                 "✅ Found monthly transaction amounts in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transaction amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transaction amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2045,12 +2029,13 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transaction amounts by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transaction amounts by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionMonthAmountResponse> =
@@ -2074,12 +2059,13 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transaction amounts by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transaction amounts by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly transaction AMOUNT for card {masked_card} year {} failed: {status:?}",
                     req.year
@@ -2101,7 +2087,7 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyAmountsByCardTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -2116,7 +2102,8 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:yearly_amounts:card:{}:year:{}",
@@ -2132,12 +2119,13 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
                 "✅ Found yearly transaction amounts in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transaction amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transaction amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2148,12 +2136,13 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transaction amounts by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transaction amounts by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionYearlyAmountResponse> =
@@ -2177,12 +2166,13 @@ impl TransactionStatsAmountByCardNumberGrpcClientTrait for TransactionGrpcClient
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transaction amounts by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transaction amounts by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly transaction AMOUNT for card {masked_card} year {} failed: {status:?}",
                     req.year
@@ -2207,7 +2197,7 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyMethodsByCardTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -2222,7 +2212,8 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:monthly_methods:card:{}:year:{}",
@@ -2238,12 +2229,13 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
                 "✅ Found monthly transaction methods in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly transaction methods retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly transaction methods retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2254,12 +2246,13 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transaction methods by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transaction methods by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionMonthMethodResponse> =
@@ -2280,12 +2273,13 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transaction methods by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transaction methods by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly transaction METHOD for card {masked_card} year {} failed: {status:?}",
                     req.year
@@ -2307,7 +2301,7 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyMethodsByCardTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -2322,7 +2316,8 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:yearly_methods:card:{}:year:{}",
@@ -2338,12 +2333,13 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
                 "✅ Found yearly transaction methods in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly transaction methods retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly transaction methods retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2354,12 +2350,13 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transaction methods by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transaction methods by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionYearMethodResponse> =
@@ -2380,12 +2377,13 @@ impl TransactionStatsMethodByCardNumberGrpcClientTrait for TransactionGrpcClient
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transaction methods by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transaction methods by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly transaction METHOD for card {masked_card} year {} failed: {status:?}",
                     req.year
@@ -2411,7 +2409,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthStatusSuccessByCardTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -2428,7 +2426,8 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
             month: req.month,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:monthly_status_success:card:{}:year:{}:month:{}",
@@ -2444,12 +2443,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                 "✅ Found successful transactions in cache for card: {} ({}-{})",
                 masked_card, req.year, req.month
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Successful transactions retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Successful transactions retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2460,12 +2460,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transaction success status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transaction success status by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponseMonthStatusSuccess> =
@@ -2486,12 +2487,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transaction success status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transaction success status by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly SUCCESS transaction status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
@@ -2513,7 +2515,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyStatusSuccessByCardTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -2528,7 +2530,8 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:yearly_status_success:card:{}:year:{}",
@@ -2544,12 +2547,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                 "✅ Found yearly successful transactions in cache for card: {} ({})",
                 masked_card, req.year
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly successful transactions retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly successful transactions retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2560,12 +2564,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transaction success status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transaction success status by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponseYearStatusSuccess> =
@@ -2586,12 +2591,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transaction success status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transaction success status by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly SUCCESS transaction status for card {masked_card} year {} failed: {status:?}",
                     req.year
@@ -2614,7 +2620,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthStatusFailedByCardTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -2631,7 +2637,8 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
             month: req.month,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:monthly_status_failed:card:{}:year:{}:month:{}",
@@ -2647,12 +2654,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                 "✅ Found failed transactions in cache for card: {} ({}-{})",
                 masked_card, req.year, req.month
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Failed transactions retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Failed transactions retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2663,12 +2671,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly transaction failed status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly transaction failed status by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponseMonthStatusFailed> =
@@ -2688,12 +2697,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly transaction failed status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly transaction failed status by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly FAILED transaction status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
@@ -2715,7 +2725,7 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyStatusFailedByCardTransaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -2730,7 +2740,8 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "transaction:yearly_status_failed:card:{}:year:{}",
@@ -2746,12 +2757,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                 "✅ Found yearly failed transactions in cache for card: {} ({})",
                 masked_card, req.year
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly failed transactions retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly failed transactions retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2762,12 +2774,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly transaction failed status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly transaction failed status by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TransactionResponseYearStatusFailed> =
@@ -2788,12 +2801,13 @@ impl TransactionStatsStatusByCardNumberGrpcClientTrait for TransactionGrpcClient
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly transaction failed status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly transaction failed status by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly FAILED transaction status for card {masked_card} year {} failed: {status:?}",
                     req.year

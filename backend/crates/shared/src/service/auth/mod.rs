@@ -20,18 +20,13 @@ use crate::{
         responses::{ApiResponse, TokenResponse, UserResponse},
     },
     errors::ServiceError,
-    utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
+    observability::{Method, TracingMetrics},
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Duration;
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::Request;
 use tracing::{error, info, warn};
 
@@ -45,7 +40,7 @@ pub struct AuthService {
     refresh_command: DynRefreshTokenCommandRepository,
     jwt_config: DynJwtService,
     token: DynTokenService,
-    metrics: Metrics,
+    tracing_metrics_core: TracingMetrics,
     cache_store: Arc<CacheStore>,
 }
 
@@ -73,13 +68,12 @@ pub struct AuthServiceDeps {
     pub refresh_command: DynRefreshTokenCommandRepository,
     pub jwt_config: DynJwtService,
     pub token: DynTokenService,
+    pub tracing_metrics_core: TracingMetrics,
     pub cache_store: Arc<CacheStore>,
 }
 
 impl AuthService {
     pub fn new(deps: AuthServiceDeps) -> Result<Self> {
-        let metrics = Metrics::new();
-
         let AuthServiceDeps {
             query,
             command,
@@ -90,6 +84,7 @@ impl AuthService {
             jwt_config,
             token,
             cache_store,
+            tracing_metrics_core,
         } = deps;
 
         Ok(Self {
@@ -101,96 +96,9 @@ impl AuthService {
             refresh_command,
             jwt_config,
             token,
-            metrics,
             cache_store,
+            tracing_metrics_core,
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("auth-service")
-    }
-
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {}", operation_name);
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("Operation completed successfully: {}", message);
-        } else {
-            error!("Operation failed: {}", message);
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -206,7 +114,7 @@ impl AuthServiceTrait for AuthService {
         );
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RegisterUser",
             vec![
                 KeyValue::new("component", "auth"),
@@ -215,7 +123,8 @@ impl AuthServiceTrait for AuthService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("auth:registered:{}", req.email);
 
@@ -226,12 +135,13 @@ impl AuthServiceTrait for AuthService {
             );
             info!("{log_msg}");
 
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "User already registered (from cache)",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "User already registered (from cache)",
+                )
+                .await;
 
             return Ok(ApiResponse {
                 status: "success".to_string(),
@@ -243,7 +153,8 @@ impl AuthServiceTrait for AuthService {
         let existing_user = match self.query.find_by_email(req.email.clone()).await {
             Ok(user) => user,
             Err(e) => {
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
                     .await;
                 return Err(ServiceError::Repo(e));
             }
@@ -252,7 +163,9 @@ impl AuthServiceTrait for AuthService {
         if existing_user.is_some() {
             let msg = "Email already exists";
             error!("❌ [REGISTER] Email already taken | Email: {}", req.email);
-            self.complete_tracing_error(&tracing_ctx, method, msg).await;
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method, msg)
+                .await;
             return Err(ServiceError::Custom("Email already registered".to_string()));
         }
 
@@ -260,12 +173,9 @@ impl AuthServiceTrait for AuthService {
             Ok(hash) => hash,
             Err(e) => {
                 error!("❌ Failed to hash password: {:?}", e);
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    "Failed to hash password",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Failed to hash password")
+                    .await;
 
                 return Err(ServiceError::InternalServerError(
                     "Failed to hash password".into(),
@@ -282,7 +192,8 @@ impl AuthServiceTrait for AuthService {
             }
             Err(e) => {
                 error!("❌ Failed to query role: {:?}", e);
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Role query failed")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Role query failed")
                     .await;
                 return Err(ServiceError::Repo(e));
             }
@@ -300,7 +211,8 @@ impl AuthServiceTrait for AuthService {
             Ok(user) => user,
             Err(e) => {
                 error!("❌ Failed to create user: {:?}", e);
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Failed to create user")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Failed to create user")
                     .await;
 
                 return Err(ServiceError::Repo(e));
@@ -321,7 +233,8 @@ impl AuthServiceTrait for AuthService {
                 "❌ Failed to assign role {} to user {}: {:?}",
                 role.role_id, new_user.user_id, e
             );
-            self.complete_tracing_error(&tracing_ctx, method.clone(), "Failed to assign role")
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), "Failed to assign role")
                 .await;
             return Err(ServiceError::Repo(e));
         }
@@ -333,7 +246,8 @@ impl AuthServiceTrait for AuthService {
             user_response.firstname, user_response.lastname, user_response.email
         );
 
-        self.complete_tracing_success(&tracing_ctx, method, "User registered successfully")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "User registered successfully")
             .await;
 
         Ok(ApiResponse {
@@ -351,7 +265,7 @@ impl AuthServiceTrait for AuthService {
         info!("🔐 Incoming login request for user: {}", &req.email);
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "Login",
             vec![
                 KeyValue::new("component", "auth"),
@@ -360,7 +274,8 @@ impl AuthServiceTrait for AuthService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let failed_attempts_key = format!("auth:login_attempts:{email}");
         let current_attempts = self
@@ -372,7 +287,9 @@ impl AuthServiceTrait for AuthService {
         if current_attempts >= 5 {
             let msg = "Too many failed login attempts (rate limited)";
             warn!("❌ {}: {}", msg, email);
-            self.complete_tracing_error(&tracing_ctx, method, msg).await;
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method, msg)
+                .await;
             return Err(ServiceError::Custom(
                 "Too many failed attempts. Try again later.".to_string(),
             ));
@@ -389,13 +306,15 @@ impl AuthServiceTrait for AuthService {
                     .set_to_cache(&failed_attempts_key, &new_attempts, Duration::minutes(15))
                     .await;
 
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "User not found")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "User not found")
                     .await;
                 return Err(ServiceError::Custom("user not found".to_string()));
             }
             Err(err) => {
                 error!("❌ Failed to query user: {}", err);
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
                     .await;
                 return Err(ServiceError::Repo(err));
             }
@@ -415,7 +334,8 @@ impl AuthServiceTrait for AuthService {
                 .set_to_cache(&failed_attempts_key, &new_attempts, Duration::minutes(15))
                 .await;
 
-            self.complete_tracing_error(&tracing_ctx, method.clone(), "Invalid password")
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), "Invalid password")
                 .await;
             return Err(ServiceError::InvalidCredentials);
         }
@@ -428,12 +348,13 @@ impl AuthServiceTrait for AuthService {
             Ok(token) => token,
             Err(e) => {
                 error!("❌ Failed to generate access token: {:?}", e);
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    "Failed to generate access token",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        "Failed to generate access token",
+                    )
+                    .await;
                 return Err(e);
             }
         };
@@ -442,12 +363,13 @@ impl AuthServiceTrait for AuthService {
             Ok(token) => token,
             Err(e) => {
                 error!("❌ Failed to generate refresh token: {:?}", e);
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    "Failed to generate refresh token",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        "Failed to generate refresh token",
+                    )
+                    .await;
                 return Err(e);
             }
         };
@@ -459,7 +381,8 @@ impl AuthServiceTrait for AuthService {
 
         info!("✅ Login successful for email: {email}");
 
-        self.complete_tracing_success(&tracing_ctx, method, "Login successful")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "Login successful")
             .await;
 
         Ok(ApiResponse {
@@ -472,7 +395,7 @@ impl AuthServiceTrait for AuthService {
         info!("📄 Fetching current user profile (get_me)");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMe",
             vec![
                 KeyValue::new("component", "auth"),
@@ -488,7 +411,8 @@ impl AuthServiceTrait for AuthService {
             .await
         {
             info!("✅ Cache hit for user: {id}");
-            self.complete_tracing_success(&tracing_ctx, method, "User fetched from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "User fetched from cache")
                 .await;
             return Ok(ApiResponse {
                 status: "success".into(),
@@ -501,7 +425,8 @@ impl AuthServiceTrait for AuthService {
             Ok(user) => user,
             Err(e) => {
                 error!("❌ Failed to fetch user from DB: {:?}", e);
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
                     .await;
                 return Err(ServiceError::Repo(e));
             }
@@ -513,7 +438,8 @@ impl AuthServiceTrait for AuthService {
             .set_to_cache(&cache_key, &user_response, Duration::minutes(30))
             .await;
 
-        self.complete_tracing_success(&tracing_ctx, method, "User profile fetched")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "User profile fetched")
             .await;
 
         Ok(ApiResponse {
@@ -527,11 +453,13 @@ impl AuthServiceTrait for AuthService {
         info!("🔄 Refreshing access token");
 
         let method = Method::Post;
-        let tracing_ctx =
-            self.start_tracing("RefreshToken", vec![KeyValue::new("component", "auth")]);
+        let tracing_ctx = self
+            .tracing_metrics_core
+            .start_tracing("RefreshToken", vec![KeyValue::new("component", "auth")]);
 
         let mut request = Request::new(token);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let user_id = match self.jwt_config.verify_token(token, "refresh") {
             Ok(uid) => uid,
@@ -543,14 +471,16 @@ impl AuthServiceTrait for AuthService {
                     .delete_from_cache(&format!("auth:refresh:{token}"))
                     .await;
 
-                self.complete_tracing_error(&tracing_ctx, method, "Token expired")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Token expired")
                     .await;
 
                 return Err(ServiceError::TokenExpired);
             }
             Err(e) => {
                 error!("❌ Invalid token: {:?}", e);
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Invalid token")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Invalid token")
                     .await;
                 return Err(ServiceError::Custom("invalid token".to_string()));
             }
@@ -558,12 +488,13 @@ impl AuthServiceTrait for AuthService {
 
         if let Err(e) = self.refresh_command.delete_token(token.to_string()).await {
             error!("❌ Failed to delete old refresh token: {:?}", e);
-            self.complete_tracing_error(
-                &tracing_ctx,
-                method.clone(),
-                "Failed to delete old refresh token",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_error(
+                    &tracing_ctx,
+                    method.clone(),
+                    "Failed to delete old refresh token",
+                )
+                .await;
             return Err(ServiceError::from(e));
         }
 
@@ -571,12 +502,13 @@ impl AuthServiceTrait for AuthService {
             Ok(token) => token,
             Err(e) => {
                 error!("❌ Failed to generate access token: {:?}", e);
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    "Failed to generate access token",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        "Failed to generate access token",
+                    )
+                    .await;
                 return Err(e);
             }
         };
@@ -585,12 +517,13 @@ impl AuthServiceTrait for AuthService {
             Ok(token) => token,
             Err(e) => {
                 error!("❌ Failed to generate refresh token: {:?}", e);
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    "Failed to generate refresh token",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        "Failed to generate refresh token",
+                    )
+                    .await;
                 return Err(e);
             }
         };
@@ -605,7 +538,8 @@ impl AuthServiceTrait for AuthService {
 
         if let Err(e) = self.refresh_command.update(update_req).await {
             error!("❌ Failed to update refresh token: {:?}", e);
-            self.complete_tracing_error(&tracing_ctx, method, "Failed to update refresh token")
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method, "Failed to update refresh token")
                 .await;
             return Err(ServiceError::Custom(
                 "Failed to update refresh token".into(),
@@ -620,7 +554,8 @@ impl AuthServiceTrait for AuthService {
             )
             .await;
 
-        self.complete_tracing_success(&tracing_ctx, method, "Token refreshed successfully")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "Token refreshed successfully")
             .await;
 
         Ok(ApiResponse {

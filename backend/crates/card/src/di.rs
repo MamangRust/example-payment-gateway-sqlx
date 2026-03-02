@@ -48,6 +48,8 @@ use shared::{
     },
     cache::CacheStore,
     config::{ConnectionPool, RedisPool},
+    context::shared_resources::SharedResources,
+    observability::{CacheMetricsCore, TracingMetricsCore},
     repository::{
         card::{
             command::CardCommandRepository,
@@ -88,7 +90,15 @@ use shared::{
         },
     },
 };
-use std::{fmt, sync::Arc};
+use std::{fmt, sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
+use tracing::{error, info, warn};
+
+#[derive(Debug, Clone)]
+pub struct DependencyMetrics {
+    pub available_permits: usize,
+    pub cache_ref_count: usize,
+}
 
 #[derive(Clone)]
 pub struct DependenciesInject {
@@ -107,6 +117,9 @@ pub struct DependenciesInject {
     pub stats_bycard_transaction: DynCardStatsTransactionByCardService,
     pub stats_bycard_transfer: DynCardStatsTransferByCardService,
     pub stats_bycard_withdraw: DynCardStatsWithdrawByCardService,
+
+    pub cache_store: Arc<CacheStore>,
+    pub request_limiter: Arc<Semaphore>,
 }
 
 impl fmt::Debug for DependenciesInject {
@@ -143,7 +156,11 @@ impl fmt::Debug for DependenciesInject {
 
 impl DependenciesInject {
     pub fn new(db: ConnectionPool, redis: RedisPool) -> Result<Self> {
-        let cache_store = Arc::new(CacheStore::new(redis.pool.clone()));
+        let cache_metrics = Arc::new(CacheMetricsCore::new("cache"));
+        let cache_store = Arc::new(CacheStore::new(redis.pool.clone(), cache_metrics));
+
+        let tracing_metrics =
+            Arc::new(TracingMetricsCore::new("card-service").context("failed initialize tracing")?);
 
         let user_query_repo =
             Arc::new(UserQueryRepository::new(db.clone())) as DynUserQueryRepository;
@@ -152,8 +169,13 @@ impl DependenciesInject {
         let card_command_repo =
             Arc::new(CardCommandRepository::new(db.clone())) as DynCardCommandRepository;
 
+        let shared = SharedResources {
+            tracing_metrics,
+            cache_store,
+        };
+
         let card_query = Arc::new(
-            CardQueryService::new(card_query_repo.clone(), cache_store.clone())
+            CardQueryService::new(card_query_repo.clone(), &shared)
                 .context("failed initialize card query")?,
         ) as DynCardQueryService;
 
@@ -161,10 +183,10 @@ impl DependenciesInject {
             user_query: user_query_repo.clone(),
             query: card_query_repo.clone(),
             command: card_command_repo.clone(),
-            cache_store: cache_store.clone(),
         };
         let card_command = Arc::new(
-            CardCommandService::new(card_command_deps).context("failed initialize card command")?,
+            CardCommandService::new(card_command_deps, &shared)
+                .context("failed initialize card command")?,
         ) as DynCardCommandService;
 
         let card_dashboard_deps = CardDashboardServiceDeps {
@@ -178,10 +200,9 @@ impl DependenciesInject {
                 as DynCardDashboardTransferRepository,
             withdraw: Arc::new(CardDashboardWithdrawRepository::new(db.clone()))
                 as DynCardDashboardWithdrawRepository,
-            cache_store: cache_store.clone(),
         };
         let card_dashboard = Arc::new(
-            CardDashboardService::new(card_dashboard_deps)
+            CardDashboardService::new(card_dashboard_deps, &shared)
                 .context("failed initialize card dashboard")?,
         ) as DynCardDashboardService;
 
@@ -191,7 +212,7 @@ impl DependenciesInject {
             CardStatsBalanceService::new(
                 Arc::new(CardStatsBalanceRepository::new(db.clone()))
                     as DynCardStatsBalanceRepository,
-                cache_store.clone(),
+                &shared,
             )
             .context("failed initialize card stats balance")?,
         ) as DynCardStatsBalanceService;
@@ -199,7 +220,7 @@ impl DependenciesInject {
         let stats_topup = Arc::new(
             CardStatsTopupService::new(
                 Arc::new(CardStatsTopupRepository::new(db.clone())) as DynCardStatsTopupRepository,
-                cache_store.clone(),
+                &shared,
             )
             .context("failed initialize card stats topup")?,
         ) as DynCardStatsTopupService;
@@ -208,7 +229,7 @@ impl DependenciesInject {
             CardStatsTransactionService::new(
                 Arc::new(CardStatsTransactionRepository::new(db.clone()))
                     as DynCardStatsTransactionRepository,
-                cache_store.clone(),
+                &shared,
             )
             .context("failed initialize card stats transaction")?,
         ) as DynCardStatsTransactionService;
@@ -217,7 +238,7 @@ impl DependenciesInject {
             CardStatsTransferService::new(
                 Arc::new(CardStatsTransferRepository::new(db.clone()))
                     as DynCardStatsTransferRepository,
-                cache_store.clone(),
+                &shared,
             )
             .context("failed initialize card stats transfer")?,
         ) as DynCardStatsTransferService;
@@ -226,7 +247,7 @@ impl DependenciesInject {
             CardStatsWithdrawService::new(
                 Arc::new(CardStatsWithdrawRepository::new(db.clone()))
                     as DynCardStatsWithdrawRepository,
-                cache_store.clone(),
+                &shared,
             )
             .context("failed initialize card stats withdraw")?,
         ) as DynCardStatsWithdrawService;
@@ -236,7 +257,7 @@ impl DependenciesInject {
             CardStatsBalanceByCardService::new(
                 Arc::new(CardStatsBalanceByCardRepository::new(db.clone()))
                     as DynCardStatsBalanceByCardRepository,
-                cache_store.clone(),
+                &shared,
             )
             .context("Failed to initialize card stats balance service")?,
         ) as DynCardStatsBalanceByCardService;
@@ -245,7 +266,7 @@ impl DependenciesInject {
             CardStatsTopupByCardService::new(
                 Arc::new(CardStatsTopupByCardRepository::new(db.clone()))
                     as DynCardStatsTopupByCardRepository,
-                cache_store.clone(),
+                &shared,
             )
             .context("Failed to initialize card stats topup service")?,
         ) as DynCardStatsTopupByCardService;
@@ -254,7 +275,7 @@ impl DependenciesInject {
             CardStatsTransactionByCardService::new(
                 Arc::new(CardStatsTransactionByCardRepository::new(db.clone()))
                     as DynCardStatsTransactionByCardRepository,
-                cache_store.clone(),
+                &shared,
             )
             .context("Failed to initialize card stats transaction")?,
         ) as DynCardStatsTransactionByCardService;
@@ -263,7 +284,7 @@ impl DependenciesInject {
             CardStatsTransferByCardService::new(
                 Arc::new(CardStatsTransferByCardRepository::new(db.clone()))
                     as DynCardStatsTransferByCardRepository,
-                cache_store.clone(),
+                &shared,
             )
             .context("Failed to initialize card stats transfer")?,
         ) as DynCardStatsTransferByCardService;
@@ -272,10 +293,13 @@ impl DependenciesInject {
             CardStatsWithdrawByCardService::new(
                 Arc::new(CardStatsWithdrawByCardRepository::new(db.clone()))
                     as DynCardStatsWithdrawByCardRepository,
-                cache_store,
+                &shared,
             )
             .context("Failed to initialize card stats withdraw")?,
         ) as DynCardStatsWithdrawByCardService;
+
+        Self::spawn_monitoring_task(Arc::clone(&shared.cache_store));
+        Self::spawn_cleanup_task(Arc::clone(&shared.cache_store));
 
         Ok(Self {
             card_query,
@@ -291,6 +315,71 @@ impl DependenciesInject {
             stats_bycard_transaction,
             stats_bycard_transfer,
             stats_bycard_withdraw,
+            cache_store: shared.cache_store,
+            request_limiter: Arc::new(Semaphore::new(1000)),
         })
+    }
+
+    fn spawn_monitoring_task(cache: Arc<CacheStore>) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                let ref_count = Arc::strong_count(&cache);
+                if ref_count > 1000 {
+                    warn!(
+                        "⚠️  High reference count detected on CacheStore: {}",
+                        ref_count
+                    );
+                } else {
+                    info!("📊 CacheStore reference count: {}", ref_count);
+                }
+            }
+        });
+    }
+
+    fn spawn_cleanup_task(cache: Arc<CacheStore>) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(120));
+            loop {
+                interval.tick().await;
+                info!("🧹 Running periodic cache cleanup...");
+
+                let _ = cache.clear_expired().await;
+
+                let ref_count = Arc::strong_count(&cache);
+                info!("✅ Cleanup completed. Current ref count: {}", ref_count);
+            }
+        });
+    }
+
+    pub async fn trigger_cleanup(&self) -> Result<()> {
+        info!("🧹 Triggering manual cleanup...");
+
+        match self.cache_store.clear_expired().await {
+            Ok(scanned) => info!("✅ Manual cleanup scanned {} keys", scanned),
+            Err(e) => error!("❌ Manual cleanup failed: {}", e),
+        }
+
+        if let Ok(stats) = self.cache_store.get_stats().await {
+            info!("📊 Post-cleanup stats:\n{}", stats);
+        }
+
+        Ok(())
+    }
+
+    pub async fn invalidate_cache_pattern(&self, pattern: &str) -> Result<usize> {
+        self.cache_store
+            .invalidate_pattern(pattern)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
+            .context("Failed to invalidate cache pattern")
+    }
+
+    pub fn get_metrics(&self) -> DependencyMetrics {
+        DependencyMetrics {
+            available_permits: self.request_limiter.available_permits(),
+            cache_ref_count: Arc::strong_count(&self.cache_store),
+        }
     }
 }

@@ -7,11 +7,7 @@ use genproto::topup::{
     FindMonthlyTopupStatusCardNumber, FindYearTopupCardNumber, FindYearTopupStatus,
     FindYearTopupStatusCardNumber, UpdateTopupRequest, topup_service_client::TopupServiceClient,
 };
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use shared::{
     abstract_trait::topup::http::{
         TopupCommandGrpcClientTrait, TopupGrpcClientServiceTrait, TopupQueryGrpcClientTrait,
@@ -20,6 +16,7 @@ use shared::{
         TopupStatsStatusByCardNumberGrpcClientTrait, TopupStatsStatusGrpcClientTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::topup::{
             CreateTopupRequest as DomainCreateTopupRequest, FindAllTopups as DomainFindAllTopups,
@@ -38,118 +35,26 @@ use shared::{
         },
     },
     errors::{AppErrorGrpc, HttpError},
-    utils::{
-        MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_card_number,
-        month_name,
-    },
+    observability::{Method, TracingMetrics},
+    utils::{mask_card_number, month_name},
 };
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::{Request, transport::Channel};
 use tracing::{error, info, instrument};
 
 pub struct TopupGrpcClientService {
     client: TopupServiceClient<Channel>,
-    metrics: Metrics,
+    tracing_metrics_core: TracingMetrics,
     cache_store: Arc<CacheStore>,
 }
 
 impl TopupGrpcClientService {
-    pub fn new(client: TopupServiceClient<Channel>, cache_store: Arc<CacheStore>) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(client: TopupServiceClient<Channel>, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             client,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("topup-client-service")
-    }
-
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("Operation completed successfully: {message}");
-        } else {
-            error!("Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -172,7 +77,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -189,7 +94,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:find_all:page:{page}:size:{page_size}:search:{}",
@@ -203,14 +109,16 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
         {
             let log_msg = format!("✅ Found {} topups in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_all_topup(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully fetched topups")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully fetched topups")
                     .await;
 
                 let inner = response.into_inner();
@@ -234,7 +142,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch topups")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch topups")
                     .await;
                 error!("fetch all topups failed: {status:?}");
 
@@ -259,7 +168,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllTopupByCardNumber",
             vec![
                 KeyValue::new("component", "topup"),
@@ -278,7 +187,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:find_by_card_number:card:{}:page:{page}:size:{page_size}:search:{}",
@@ -296,7 +206,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 masked_card
             );
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -308,12 +219,13 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched topups by card number",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched topups by card number",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponse> = inner.data.into_iter().map(Into::into).collect();
@@ -340,12 +252,13 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch topups by card number",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch topups by card number",
+                    )
+                    .await;
                 error!("fetch topups for card {} failed: {status:?}", masked_card);
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -366,7 +279,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindActiveTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -383,7 +296,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:find_by_active:page:{page}:size:{page_size}:search:{}",
@@ -397,19 +311,21 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
         {
             let log_msg = format!("✅ Found {} active topups in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_active(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched active topups",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched active topups",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponseDeleteAt> =
@@ -432,7 +348,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch active topups")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch active topups")
                     .await;
                 error!("fetch active topups failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -454,7 +371,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTrashedTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -471,7 +388,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:find_by_trashed:page:{page}:size:{page_size}:search:{}",
@@ -485,19 +403,21 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
         {
             let log_msg = format!("✅ Found {} trashed topups in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_trashed(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched trashed topups",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched trashed topups",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponseDeleteAt> =
@@ -521,7 +441,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed topups")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch trashed topups")
                     .await;
                 error!("fetch trashed topups failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -538,7 +459,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
         info!("fetching topups by card: {masked_card}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTopupByCard",
             vec![
                 KeyValue::new("component", "topup"),
@@ -551,7 +472,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
             card_number: card_number.to_string(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("topup:find_by_card:card_number:{}", masked_card);
 
@@ -561,7 +483,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             info!("✅ Found topups in cache for card: {masked_card}");
-            self.complete_tracing_success(&tracing_ctx, method, "Topups retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Topups retrieved from cache")
                 .await;
             return Ok(cache);
         }
@@ -573,12 +496,13 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched topups by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched topups by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponse> = inner.data.into_iter().map(Into::into).collect();
@@ -601,7 +525,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch topups by card")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch topups by card")
                     .await;
                 error!("fetch topups by card {masked_card} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -614,7 +539,7 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
         info!("fetching topup by id: {topup_id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTopupById",
             vec![
                 KeyValue::new("component", "topup"),
@@ -625,7 +550,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdTopupRequest { topup_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("topup:find_by_id:id:{topup_id}");
 
@@ -635,19 +561,21 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             info!("✅ Found topup in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Topup retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Topup retrieved from cache")
                 .await;
             return Ok(cache);
         }
 
         match self.client.clone().find_by_id_topup(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched topup by id",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched topup by id",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data = inner.data.ok_or_else(|| {
@@ -672,7 +600,8 @@ impl TopupQueryGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch topup by id")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch topup by id")
                     .await;
                 error!("find topup {topup_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -695,7 +624,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "CreateTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -710,11 +639,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
             topup_method: req.topup_method.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().create_topup(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully created topup")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully created topup")
                     .await;
 
                 let inner = response.into_inner();
@@ -753,7 +684,8 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to create topup")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to create topup")
                     .await;
                 error!("create topup for card {masked_card} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -778,7 +710,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "UpdateTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -795,11 +727,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
             topup_method: req.topup_method.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().update_topup(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully updated topup")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully updated topup")
                     .await;
 
                 let inner = response.into_inner();
@@ -839,7 +773,8 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to update topup")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to update topup")
                     .await;
                 error!("update topup {topup_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -855,7 +790,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
         info!("trashing topup id: {topup_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "TrashTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -866,11 +801,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdTopupRequest { topup_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().trashed_topup(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully trashed topup")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully trashed topup")
                     .await;
 
                 let inner = response.into_inner();
@@ -904,7 +841,8 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to trash topup")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to trash topup")
                     .await;
                 error!("trash topup {topup_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -920,7 +858,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
         info!("restoring topup id: {topup_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -931,11 +869,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdTopupRequest { topup_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_topup(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully restored topup")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully restored topup")
                     .await;
 
                 let inner = response.into_inner();
@@ -970,7 +910,8 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to restore topup")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to restore topup")
                     .await;
                 error!("restore topup {topup_id} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
@@ -983,7 +924,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
         info!("permanently deleting topup id: {topup_id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteTopupPermanent",
             vec![
                 KeyValue::new("component", "topup"),
@@ -994,16 +935,18 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(FindByIdTopupRequest { topup_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().delete_topup_permanent(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted topup permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted topup permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let api_response = ApiResponse {
@@ -1030,12 +973,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete topup permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete topup permanently",
+                    )
+                    .await;
                 error!("delete topup {topup_id} permanently failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1047,7 +991,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
         info!("restoring all trashed topups");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreAllTopups",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1057,16 +1001,18 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self.client.clone().restore_all_topup(grpc_req).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully restored all trashed topups",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully restored all trashed topups",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1094,12 +1040,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to restore all trashed topups",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to restore all trashed topups",
+                    )
+                    .await;
                 error!("restore all topups failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1111,7 +1058,7 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
         info!("permanently deleting all topups");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteAllTopupsPermanent",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1121,7 +1068,8 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         match self
             .client
@@ -1130,12 +1078,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully deleted all topups permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully deleted all topups permanently",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
 
@@ -1163,12 +1112,13 @@ impl TopupCommandGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete all topups permanently",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete all topups permanently",
+                    )
+                    .await;
                 error!("delete all topups permanently failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1186,7 +1136,7 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
         info!("fetching monthly topup AMOUNT stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyAmountsTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1197,7 +1147,8 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTopupStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("topup:monthly_amounts:year:{year}");
 
@@ -1207,12 +1158,13 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             info!("✅ Found monthly top-up amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly top-up amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly top-up amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1223,12 +1175,13 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly topup amounts",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly topup amounts",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupMonthAmountResponse> =
@@ -1251,12 +1204,13 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly topup amounts",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly topup amounts",
+                    )
+                    .await;
                 error!("fetch monthly topup AMOUNT for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1271,7 +1225,7 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
         info!("fetching yearly topup AMOUNT stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyAmountsTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1282,7 +1236,8 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTopupStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("topup:yearly_amounts:year:{year}");
 
@@ -1292,12 +1247,13 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             info!("✅ Found yearly top-up amounts in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly top-up amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly top-up amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1308,12 +1264,13 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly topup amounts",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly topup amounts",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupYearlyAmountResponse> =
@@ -1337,12 +1294,13 @@ impl TopupStatsAmountGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly topup amounts",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly topup amounts",
+                    )
+                    .await;
                 error!("fetch yearly topup AMOUNT for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1360,7 +1318,7 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
         info!("fetching monthly topup METHOD stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyMethodsTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1371,7 +1329,8 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTopupStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("topup:monthly_methods:year:{year}");
 
@@ -1381,12 +1340,13 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             info!("✅ Found monthly top-up methods in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly top-up methods retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly top-up methods retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1397,12 +1357,13 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly topup methods",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly topup methods",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupMonthMethodResponse> =
@@ -1426,12 +1387,13 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly topup methods",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly topup methods",
+                    )
+                    .await;
                 error!("fetch monthly topup METHOD for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1446,7 +1408,7 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
         info!("fetching yearly topup METHOD stats for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyMethodsTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1457,7 +1419,8 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTopupStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("topup:yearly_methods:year:{year}");
 
@@ -1467,12 +1430,13 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             info!("✅ Found yearly top-up methods in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly top-up methods retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly top-up methods retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1483,12 +1447,13 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly topup methods",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly topup methods",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupYearlyMethodResponse> =
@@ -1511,12 +1476,13 @@ impl TopupStatsMethodGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly topup methods",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly topup methods",
+                    )
+                    .await;
                 error!("fetch yearly topup METHOD for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1538,7 +1504,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyStatusSuccessTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1553,7 +1519,8 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
             month: req.month,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:monthly_status_success:month:{}:year:{}",
@@ -1569,12 +1536,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
                 "✅ Found successful top-ups in cache for month: {}, year: {}",
                 req.month, req.year
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Successful top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Successful top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1585,12 +1553,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly topup success status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly topup success status",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponseMonthStatusSuccess> =
@@ -1614,12 +1583,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly topup success status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly topup success status",
+                    )
+                    .await;
                 error!(
                     "fetch monthly SUCCESS topup status for {month_str} {} failed: {status:?}",
                     req.year
@@ -1637,7 +1607,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
         info!("fetching yearly topup SUCCESS status for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyStatusSuccessTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1648,7 +1618,8 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTopupStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("topup:yearly_status_success:year:{year}");
 
@@ -1658,12 +1629,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             info!("✅ Found yearly successful top-ups in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly successful top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly successful top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1674,12 +1646,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly topup success status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly topup success status",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponseYearStatusSuccess> =
@@ -1702,12 +1675,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly topup success status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly topup success status",
+                    )
+                    .await;
                 error!("fetch yearly SUCCESS topup status for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1726,7 +1700,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyStatusFailedTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1741,7 +1715,8 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
             month: req.month,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:monthly_status_failed:month:{}:year:{}",
@@ -1757,12 +1732,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
                 "✅ Found failed top-ups in cache for month: {}, year: {}",
                 req.month, req.year
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Failed top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Failed top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1773,12 +1749,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly topup failed status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly topup failed status",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponseMonthStatusFailed> =
@@ -1803,12 +1780,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly topup failed status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly topup failed status",
+                    )
+                    .await;
                 error!(
                     "fetch monthly FAILED topup status for {month_str} {} failed: {status:?}",
                     req.year
@@ -1826,7 +1804,7 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
         info!("fetching yearly topup FAILED status for year: {year}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyStatusFailedTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1837,7 +1815,8 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
 
         let mut grpc_req = Request::new(FindYearTopupStatus { year });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!("topup:yearly_status_failed:year:{year}");
 
@@ -1847,12 +1826,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             info!("✅ Found yearly failed top-ups in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly failed top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly failed top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1863,12 +1843,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly topup failed status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly topup failed status",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponseYearStatusFailed> =
@@ -1892,12 +1873,13 @@ impl TopupStatsStatusGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly topup failed status",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly topup failed status",
+                    )
+                    .await;
                 error!("fetch yearly FAILED topup status for year {year} failed: {status:?}");
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -1919,7 +1901,7 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyAmountsByCardTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -1934,7 +1916,8 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:monthly_amounts:card:{}:year:{}",
@@ -1950,12 +1933,13 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 "✅ Found monthly top-up amounts in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly top-up amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly top-up amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -1966,12 +1950,13 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly topup amounts by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly topup amounts by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupMonthAmountResponse> =
@@ -1995,12 +1980,13 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly topup amounts by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly topup amounts by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly topup AMOUNT for card {masked_card} year {} failed: {status:?}",
                     req.year
@@ -2022,7 +2008,7 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyAmountsByCardTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -2037,7 +2023,8 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:yearly_amounts:card:{}:year:{}",
@@ -2053,12 +2040,13 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 "✅ Found yearly top-up amounts in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly top-up amounts retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly top-up amounts retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2069,12 +2057,13 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly topup amounts by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly topup amounts by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupYearlyAmountResponse> =
@@ -2099,12 +2088,13 @@ impl TopupStatsAmountByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly topup amounts by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly topup amounts by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly topup AMOUNT for card {masked_card} year {} failed: {status:?}",
                     req.year
@@ -2129,7 +2119,7 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyMethodsByCardTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -2144,7 +2134,8 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:monthly_methods:card:{}:year:{}",
@@ -2160,12 +2151,13 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 "✅ Found monthly top-up methods in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Monthly top-up methods retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Monthly top-up methods retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2176,12 +2168,13 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly topup methods by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly topup methods by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupMonthMethodResponse> =
@@ -2205,12 +2198,13 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly topup methods by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly topup methods by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly topup METHOD for card {masked_card} year {} failed: {status:?}",
                     req.year
@@ -2232,7 +2226,7 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyMethodsByCardTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -2247,7 +2241,8 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:yearly_methods:card:{}:year:{}",
@@ -2263,12 +2258,13 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 "✅ Found yearly top-up methods in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly top-up methods retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly top-up methods retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2279,12 +2275,13 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly topup methods by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly topup methods by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupYearlyMethodResponse> =
@@ -2309,12 +2306,13 @@ impl TopupStatsMethodByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly topup methods by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly topup methods by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly topup METHOD for card {masked_card} year {} failed: {status:?}",
                     req.year
@@ -2340,7 +2338,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyStatusSuccessByCardTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -2357,7 +2355,8 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
             month: req.month,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:monthly_status_success:card:{}:year:{}:month:{}",
@@ -2373,12 +2372,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 "✅ Found successful top-ups in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Successful top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Successful top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2389,12 +2389,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly topup success status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly topup success status by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponseMonthStatusSuccess> =
@@ -2418,12 +2419,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly topup success status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly topup success status by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly SUCCESS topup status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
@@ -2445,7 +2447,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyStatusSuccessByCardTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -2460,7 +2462,8 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:yearly_status_success:card:{}:year:{}",
@@ -2476,12 +2479,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 "✅ Found yearly successful top-ups in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly successful top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly successful top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2492,12 +2496,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly topup success status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly topup success status by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponseYearStatusSuccess> =
@@ -2522,12 +2527,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly topup success status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly topup success status by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly SUCCESS topup status for card {masked_card} year {} failed: {status:?}",
                     req.year
@@ -2550,7 +2556,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetMonthlyStatusFailedByCardTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -2567,7 +2573,8 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
             month: req.month,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:monthly_status_failed:card:{}:year:{}:month:{}",
@@ -2580,12 +2587,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             info!("✅ Found failed top-ups in cache for card: {}", masked_card);
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Failed top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Failed top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2596,12 +2604,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched monthly topup failed status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched monthly topup failed status by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponseMonthStatusFailed> =
@@ -2625,12 +2634,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch monthly topup failed status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch monthly topup failed status by card",
+                    )
+                    .await;
                 error!(
                     "fetch monthly FAILED topup status for card {masked_card} {month_str} {} failed: {status:?}",
                     req.year
@@ -2652,7 +2662,7 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "GetYearlyStatusFailedByCardTopup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -2667,7 +2677,8 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
             year: req.year,
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut grpc_req);
 
         let cache_key = format!(
             "topup:yearly_status_failed:card:{}:year:{}",
@@ -2683,12 +2694,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 "✅ Found yearly failed top-ups in cache for card: {}",
                 masked_card
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly failed top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly failed top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -2699,12 +2711,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
             .await
         {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully fetched yearly topup failed status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully fetched yearly topup failed status by card",
+                    )
+                    .await;
 
                 let inner = response.into_inner();
                 let data: Vec<TopupResponseYearStatusFailed> =
@@ -2728,12 +2741,13 @@ impl TopupStatsStatusByCardNumberGrpcClientTrait for TopupGrpcClientService {
                 Ok(api_response)
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to fetch yearly topup failed status by card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to fetch yearly topup failed status by card",
+                    )
+                    .await;
                 error!(
                     "fetch yearly FAILED topup status for card {masked_card} year {} failed: {status:?}",
                     req.year

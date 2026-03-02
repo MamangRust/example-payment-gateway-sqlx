@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 
 #[derive(Clone)]
-pub struct GrpcClientConfig {
+pub struct GrpcServiceEndpoints {
     pub auth: String,
     pub card: String,
     pub merchant: String,
@@ -14,7 +14,7 @@ pub struct GrpcClientConfig {
     pub withdraw: String,
 }
 
-impl GrpcClientConfig {
+impl GrpcServiceEndpoints {
     pub fn init() -> Result<Self> {
         let auth = std::env::var("AUTH_GRPC_ADDR")
             .context("Missing environment variable: AUTH_GRPC_ADDR")?;

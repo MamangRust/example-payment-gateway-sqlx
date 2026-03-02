@@ -3,6 +3,7 @@ use crate::{
         repository::query::DynWithdrawQueryRepository, service::query::WithdrawQueryServiceTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::withdraw::{FindAllWithdrawCardNumber, FindAllWithdraws},
         responses::{
@@ -11,122 +12,29 @@ use crate::{
         },
     },
     errors::ServiceError,
-    utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
+    observability::{Method, TracingMetrics},
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Duration;
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::Request;
 use tracing::{error, info};
 
 pub struct WithdrawQueryService {
     pub query: DynWithdrawQueryRepository,
-    pub metrics: Metrics,
+    pub tracing_metrics_core: TracingMetrics,
     pub cache_store: Arc<CacheStore>,
 }
 
 impl WithdrawQueryService {
-    pub fn new(query: DynWithdrawQueryRepository, cache_store: Arc<CacheStore>) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(query: DynWithdrawQueryRepository, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             query,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("withdraw-query-service")
-    }
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("✅ Operation completed successfully: {message}");
-        } else {
-            error!("❌ Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -152,7 +60,7 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_all_withdrawals",
             vec![
                 KeyValue::new("component", "withdrawal"),
@@ -164,7 +72,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         );
 
         let mut request_obj = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let cache_key = format!(
             "withdrawal:find_all:page:{page}:size:{page_size}:search:{}",
@@ -178,7 +87,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         {
             let log_msg = format!("✅ Found {} withdrawals in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -187,18 +97,20 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
             Ok(res) => {
                 let log_msg = format!("✅ Found {} withdrawals", res.0.len());
                 info!("{log_msg}");
-                self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, &log_msg)
                     .await;
                 res
             }
             Err(e) => {
                 error!("❌ Failed to fetch all withdrawals: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("❌ Failed to fetch all withdrawals: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("❌ Failed to fetch all withdrawals: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };
@@ -254,7 +166,7 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_all_withdrawals_by_card",
             vec![
                 KeyValue::new("component", "withdrawal"),
@@ -267,7 +179,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         );
 
         let mut request_obj = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let cache_key = format!(
             "withdrawal:find_all_by_card:card:{}:page:{page}:size:{page_size}:search:{}",
@@ -286,7 +199,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
                 req.card_number
             );
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -299,7 +213,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
                     req.card_number
                 );
                 info!("{log_msg}");
-                self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, &log_msg)
                     .await;
                 res
             }
@@ -308,12 +223,13 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
                     "❌ Failed to fetch withdrawals for card {}: {e:?}",
                     req.card_number
                 );
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("❌ Failed to fetch withdrawals for card: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("❌ Failed to fetch withdrawals for card: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };
@@ -357,7 +273,7 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         info!("🔍 Finding withdrawal by ID: {withdraw_id}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_withdrawal_by_id",
             vec![
                 KeyValue::new("component", "withdrawal"),
@@ -367,7 +283,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         );
 
         let mut request_obj = Request::new(withdraw_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let cache_key = format!("withdrawal:find_by_id:{}", withdraw_id);
 
@@ -378,7 +295,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         {
             let log_msg = format!("✅ Found withdrawal with ID {withdraw_id} in cache");
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -387,18 +305,20 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
             Ok(withdrawal) => {
                 let log_msg = format!("✅ Found withdrawal with ID: {withdraw_id}");
                 info!("{log_msg}");
-                self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, &log_msg)
                     .await;
                 withdrawal
             }
             Err(e) => {
                 error!("❌ Database error fetching withdrawal ID {withdraw_id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Database error fetching withdrawal: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Database error fetching withdrawal: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };
@@ -423,7 +343,7 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         info!("🔍 Finding withdrawals by card_number: {card_number}");
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_withdrawals_by_card",
             vec![
                 KeyValue::new("component", "withdrawal"),
@@ -433,7 +353,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         );
 
         let mut request_obj = Request::new(card_number);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let cache_key = format!("withdrawal:find_by_card:{}", card_number);
 
@@ -447,7 +368,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
                 cache.data.len()
             );
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -459,7 +381,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
                     withdrawals.len()
                 );
                 info!("{log_msg}");
-                self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, &log_msg)
                     .await;
                 withdrawals
             }
@@ -467,12 +390,13 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
                 error!(
                     "❌ Database error fetching withdrawals for card_number {card_number}: {e:?}"
                 );
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Database error fetching withdrawals for card: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Database error fetching withdrawals for card: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };
@@ -513,7 +437,7 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_active_withdrawals",
             vec![
                 KeyValue::new("component", "withdrawal"),
@@ -525,7 +449,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         );
 
         let mut request_obj = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let cache_key = format!(
             "withdrawal:find_active:page:{page}:size:{page_size}:search:{}",
@@ -539,7 +464,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         {
             let log_msg = format!("✅ Found {} active withdrawals in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -548,18 +474,20 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
             Ok(res) => {
                 let log_msg = format!("✅ Found {} active withdrawals", res.0.len());
                 info!("{log_msg}");
-                self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, &log_msg)
                     .await;
                 res
             }
             Err(e) => {
                 error!("❌ Failed to fetch active withdrawals: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("❌ Failed to fetch active withdrawals: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("❌ Failed to fetch active withdrawals: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };
@@ -614,7 +542,7 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "find_trashed_withdrawals",
             vec![
                 KeyValue::new("component", "withdrawal"),
@@ -626,7 +554,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         );
 
         let mut request_obj = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_obj);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_obj);
 
         let cache_key = format!(
             "withdrawal:find_trashed:page:{page}:size:{page_size}:search:{}",
@@ -640,7 +569,8 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
         {
             let log_msg = format!("✅ Found {} trashed withdrawals in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
@@ -649,18 +579,20 @@ impl WithdrawQueryServiceTrait for WithdrawQueryService {
             Ok(res) => {
                 let log_msg = format!("✅ Found {} trashed withdrawals", res.0.len());
                 info!("{log_msg}");
-                self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, &log_msg)
                     .await;
                 res
             }
             Err(e) => {
                 error!("❌ Failed to fetch trashed withdrawals: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("❌ Failed to fetch trashed withdrawals: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("❌ Failed to fetch trashed withdrawals: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
         };

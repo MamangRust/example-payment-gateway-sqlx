@@ -7,66 +7,173 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: example_sqlx_payment_gateway
+      
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=1000"             
+      - "-c"
+      - "shared_buffers=4GB"
+      - "-c"
+      - "effective_cache_size=12GB"
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "default_statistics_target=100"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=32MB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
+      - "-c"
+      - "max_worker_processes=8"
+      - "-c"
+      - "max_parallel_workers_per_gather=4"
+      - "-c"
+      - "max_parallel_workers=8"
+      - "-c"
+      - "max_parallel_maintenance_workers=4"
+      - "-c"
+      - "log_min_duration_statement=1000"
+      - "-c"
+      - "log_line_prefix=%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h "
+      - "-c"
+      - "superuser_reserved_connections=10"
+      - "-c"
+      - "idle_in_transaction_session_timeout=60000" 
+      - "-c"
+      - "statement_timeout=30000"  
+    
     volumes:
       - postgres_payment_tonic-debug-data:/var/lib/postgresql/data
+    
     networks:
       - app_payment_tonic_debug
+    
     ports:
       - "5432:5432"
+    
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d example_sqlx_payment_gateway" ]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d example_sqlx_payment_gateway"]
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 16G
+        reservations:
+          cpus: '2'
+          memory: 8G
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres_exporter
+    restart: unless-stopped
+    
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:postgres@db:5432/example_sqlx_payment_gateway?sslmode=disable&connect_timeout=10"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "true"
+      PG_EXPORTER_DISABLE_DEFAULT_METRICS: "false"
+      PG_EXPORTER_DISABLE_SETTINGS_METRICS: "false"
+    
+    ports:
+      - "9187:9187"
+    
+    depends_on:
+      - db
+    
+    networks:
+      - app_payment_tonic_debug
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
 
   pgbouncer:
     image: edoburu/pgbouncer:latest
     container_name: pgbouncer_debug
     restart: unless-stopped
+    
     environment:
       DB_HOST: db
       DB_PORT: 5432
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_NAME: example_sqlx_payment_gateway
-
+      
       AUTH_TYPE: scram-sha-256
-
+      
       POOL_MODE: transaction
-      MAX_CLIENT_CONN: 250
-      DEFAULT_POOL_SIZE: 15
-      MIN_POOL_SIZE: 5
-      RESERVE_POOL_SIZE: 5
-      RESERVE_POOL_TIMEOUT: 5
+      
+      DEFAULT_POOL_SIZE: 200              # Increased from 120
+      MIN_POOL_SIZE: 50                   # Increased from 30
+      MAX_DB_CONNECTIONS: 800             # Increased from 300
+      MAX_CLIENT_CONN: 10000               # Increased from 5000
+      RESERVE_POOL_SIZE: 100               # Increased from 40
+      RESERVE_POOL_TIMEOUT: 5             # Increased from 5
+      
+      SERVER_IDLE_TIMEOUT: 600            # 10 minutes
+      QUERY_TIMEOUT: 30                   # 15 seconds
+      SERVER_CONNECT_TIMEOUT: 10
+      SERVER_LOGIN_RETRY: 5
+      
       SERVER_RESET_QUERY: DISCARD ALL
-
+      SERVER_RESET_QUERY_ALWAYS: 0
+      
+      TCP_KEEPALIVE: 1
+      TCP_KEEPCNT: 5
+      TCP_KEEPIDLE: 30
+      TCP_KEEPINTVL: 10
+      
       ADMIN_USERS: postgres
       STATS_USERS: postgres
+      
+      LOG_CONNECTIONS: 0
+      LOG_DISCONNECTIONS: 0
+      LOG_POOLER_ERRORS: 1
+    
     ports:
       - "6432:5432"
+    
     depends_on:
       db:
         condition: service_healthy
+    
     networks:
       - app_payment_tonic_debug
+    
     healthcheck:
-      test: "pg_isready -h db -p 5432 -U postgres"
-      interval: 5s
+      test: ["CMD-SHELL", "PGPASSWORD=postgres psql -h localhost -p 5432 -U postgres -d pgbouncer -c 'SHOW POOLS;' || exit 1"]
+      interval: 10s
       timeout: 5s
-      retries: 5
-
-
-  redis:
-    image: redis:7.4
-    container_name: redis_debug
-    command: [ "redis-server", "--requirepass", "dragon_knight" ]
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_payment_tonic-debug-data:/data
-    restart: unless-stopped
-    networks:
-      - app_payment_tonic_debug
+      retries: 3
+      start_period: 30s
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   jaeger:
     image: jaegertracing/all-in-one:latest
@@ -155,19 +262,263 @@ services:
     networks:
       - app_payment_tonic_debug
 
+  
+  redis-auth:
+    image: redis:7.4
+    container_name: redis_auth_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_auth_debug_data:/data 
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  redis-user:
+    image: redis:7.4
+    container_name: redis_user_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis_user_debug_data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  redis-card:
+    image: redis:7.4
+    container_name: redis_card_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6382:6379"
+    volumes:
+      - redis_card_debug_data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  redis-merchant:
+    image: redis:7.4
+    container_name: redis_merchant_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6383:6379"
+    volumes:
+      - redis_merchant_debug_data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  redis-role:
+    image: redis:7.4
+    container_name: redis_role_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6384:6379"
+    volumes:
+      - redis_role_debug_data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  redis-saldo:
+    image: redis:7.4
+    container_name: redis_saldo_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6385:6379"
+    volumes:
+      - redis_saldo_debug_data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  redis-transaction:
+    image: redis:7.4
+    container_name: redis_transaction_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6386:6379"
+    volumes:
+      - redis_transaction_debug_data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  redis-topup:
+    image: redis:7.4
+    container_name: redis_topup_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6387:6379"
+    volumes:
+      - redis_topup_debug_data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  redis-transfer:
+    image: redis:7.4
+    container_name: redis_transfer_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6388:6379"
+    volumes:
+      - redis_transfer_debug_data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  redis-withdraw:
+    image: redis:7.4
+    container_name: redis_withdraw_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6389:6379"
+    volumes:
+      - redis_withdraw_debug_data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
+  redis-apigateway:
+    image: redis:7.4
+    container_name: redis_apigateway_debug
+    command: >
+      redis-server
+      --requirepass dragon_knight
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --maxclients 10000
+    ports:
+      - "6379:6379" 
+    
+    volumes:
+      - redis_apigateway_debug_data:/data
+    restart: unless-stopped
+    networks:
+      - app_payment_tonic_debug
+
   auth:
     image: payment-gateway-sqlx/auth:latest
     container_name: auth_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/auth/.env
     ports:
       - 50051:50051
       - 8081:8081
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-auth:
         condition: service_started
       otel-collector:
         condition: service_started
@@ -183,14 +534,14 @@ services:
     container_name: user_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/user/.env
     ports:
       - 50059:50059
       - 8089:8089
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-user:
         condition: service_started
       otel-collector:
         condition: service_started
@@ -206,14 +557,14 @@ services:
     container_name: card_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/card/.env
     ports:
       - 50052:50052
       - 8082:8082
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-card:
         condition: service_started
       otel-collector:
         condition: service_started
@@ -229,14 +580,14 @@ services:
     container_name: merchant_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/merchant/.env
     ports:
       - 50053:50053
       - 8083:8083
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-merchant:
         condition: service_started
       otel-collector:
         condition: service_started
@@ -252,14 +603,14 @@ services:
     container_name: role_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/role/.env
     ports:
       - 50054:50054
       - 8084:8084
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-role:
         condition: service_started
       otel-collector:
         condition: service_started
@@ -275,14 +626,14 @@ services:
     container_name: saldo_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/saldo/.env
     ports:
       - 50055:50055
       - 8085:8085
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-saldo:
         condition: service_started
       otel-collector:
         condition: service_started
@@ -298,14 +649,14 @@ services:
     container_name: transaction_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/transaction/.env
     ports:
       - 50057:50057
       - 8087:8087
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-transaction:
         condition: service_started
       otel-collector:
         condition: service_started
@@ -321,14 +672,14 @@ services:
     container_name: topup_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/topup/.env
     ports:
       - 50056:50056
       - 8086:8086
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-topup:
         condition: service_started
       otel-collector:
         condition: service_started
@@ -344,14 +695,14 @@ services:
     container_name: transfer_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/transfer/.env
     ports:
       - 50058:50058
       - 8088:8088
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-transfer:
         condition: service_started
       otel-collector:
         condition: service_started
@@ -367,14 +718,14 @@ services:
     container_name: withdraw_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/withdraw/.env
     ports:
       - 50060:50060
       - 8090:8090
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-withdraw:
         condition: service_started
       otel-collector:
         condition: service_started
@@ -385,31 +736,17 @@ services:
     networks:
       - app_payment_tonic_debug
 
-  nginx:
-    image: nginx:alpine
-    container_name: nginx_debug
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-    depends_on:
-      apigateway:
-        condition: service_started
-    networks:
-      - app_payment_tonic_debug
-
   apigateway:
     image: payment-gateway-sqlx/apigateway:latest
     container_name: apigateway_debug
     restart: unless-stopped
     env_file:
-      - .env
+      - ./crates/apigateway/.env
     ports:
       - "5000:5000"
     depends_on:
+      redis-apigateway:
+        condition: service_started
       otel-collector:
         condition: service_started
       auth:
@@ -441,12 +778,39 @@ services:
     networks:
       - app_payment_tonic_debug
 
+  nginx:
+    image: nginx:alpine
+    container_name: nginx_debug
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      apigateway:
+        condition: service_started
+    networks:
+      - app_payment_tonic_debug
+
+  
 networks:
   app_payment_tonic_debug:
     driver: bridge
 
 volumes:
+  redis_apigateway_debug_data:
+  redis_auth_debug_data:
+  redis_user_debug_data:
+  redis_card_debug_data:
+  redis_merchant_debug_data:
+  redis_role_debug_data:
+  redis_saldo_debug_data:
+  redis_transaction_debug_data:
+  redis_topup_debug_data:
+  redis_transfer_debug_data:
+  redis_withdraw_debug_data:
   grafana-payment-tonic-debug-data:
   postgres_payment_tonic-debug-data:
-  redis_payment_tonic-debug-data:
   loki_payment_tonic_debug_data:

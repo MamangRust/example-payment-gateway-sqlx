@@ -4,6 +4,7 @@ use crate::{
         service::stats::status::TopupStatsStatusServiceTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::topup::MonthTopupStatus,
         responses::{
@@ -12,126 +13,30 @@ use crate::{
         },
     },
     errors::{ServiceError, format_validation_errors},
-    utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
+    observability::{Method, TracingMetrics},
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Duration;
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::Request;
 use tracing::{error, info};
 use validator::Validate;
 
 pub struct TopupStatsStatusService {
     pub status: DynTopupStatsStatusRepository,
-    pub metrics: Metrics,
+    pub tracing_metrics_core: TracingMetrics,
     pub cache_store: Arc<CacheStore>,
 }
 
 impl TopupStatsStatusService {
-    pub fn new(
-        status: DynTopupStatsStatusRepository,
-        cache_store: Arc<CacheStore>,
-    ) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(status: DynTopupStatsStatusRepository, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             status,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("topup-stats-status-service")
-    }
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("✅ Operation completed successfully: {message}");
-        } else {
-            error!("❌ Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -153,7 +58,7 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
         }
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "get_month_status_success",
             vec![
                 KeyValue::new("component", "topup"),
@@ -164,7 +69,8 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!(
             "topup:monthly_status_success:month:{}:year:{}",
@@ -180,12 +86,13 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
                 "✅ Found successful top-ups in cache for month: {}, year: {}",
                 req.month, req.year
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Successful top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Successful top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -197,12 +104,13 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
                     req.year,
                     req.month
                 );
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successful top-ups retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successful top-ups retrieved successfully",
+                    )
+                    .await;
                 results
             }
             Err(e) => {
@@ -210,12 +118,13 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
                     "❌ Failed to fetch successful top-ups for {}-{}: {e:?}",
                     req.year, req.month
                 );
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to fetch successful top-ups: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to fetch successful top-ups: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Repo(e));
             }
         };
@@ -261,7 +170,7 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
         }
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "get_yearly_status_success",
             vec![
                 KeyValue::new("component", "topup"),
@@ -271,7 +180,8 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
         );
 
         let mut request = Request::new(year);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("topup:yearly_status_success:year:{year}");
 
@@ -281,12 +191,13 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
             .await
         {
             info!("✅ Found yearly successful top-ups in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly successful top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly successful top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -296,22 +207,24 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
                     "✅ Successfully fetched {} yearly successful top-up records for {year}",
                     results.len()
                 );
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Yearly successful top-ups retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Yearly successful top-ups retrieved successfully",
+                    )
+                    .await;
                 results
             }
             Err(e) => {
                 error!("❌ Failed to fetch yearly successful top-ups for {year}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to fetch yearly successful top-ups: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to fetch yearly successful top-ups: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Repo(e));
             }
         };
@@ -355,7 +268,7 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
         }
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "get_month_status_failed",
             vec![
                 KeyValue::new("component", "topup"),
@@ -366,7 +279,8 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!(
             "topup:monthly_status_failed:month:{}:year:{}",
@@ -382,12 +296,13 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
                 "✅ Found failed top-ups in cache for month: {}, year: {}",
                 req.month, req.year
             );
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Failed top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Failed top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -399,12 +314,13 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
                     req.year,
                     req.month
                 );
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Failed top-ups retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Failed top-ups retrieved successfully",
+                    )
+                    .await;
                 results
             }
             Err(e) => {
@@ -412,12 +328,13 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
                     "❌ Failed to fetch failed top-ups for {}-{}: {e:?}",
                     req.year, req.month
                 );
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to fetch failed top-ups: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to fetch failed top-ups: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Repo(e));
             }
         };
@@ -463,7 +380,7 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
         }
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "get_yearly_status_failed",
             vec![
                 KeyValue::new("component", "topup"),
@@ -473,7 +390,8 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
         );
 
         let mut request = Request::new(year);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("topup:yearly_status_failed:year:{year}");
 
@@ -483,12 +401,13 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
             .await
         {
             info!("✅ Found yearly failed top-ups in cache for year: {year}");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Yearly failed top-ups retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Yearly failed top-ups retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
@@ -498,22 +417,24 @@ impl TopupStatsStatusServiceTrait for TopupStatsStatusService {
                     "✅ Successfully fetched {} yearly failed top-up records for {year}",
                     results.len()
                 );
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Yearly failed top-ups retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Yearly failed top-ups retrieved successfully",
+                    )
+                    .await;
                 results
             }
             Err(e) => {
                 error!("❌ Failed to fetch yearly failed top-ups for {year}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to fetch yearly failed top-ups: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to fetch yearly failed top-ups: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Repo(e));
             }
         };

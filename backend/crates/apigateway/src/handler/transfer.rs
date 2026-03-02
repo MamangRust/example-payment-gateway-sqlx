@@ -1,13 +1,14 @@
 use crate::{
     middleware::{
-        jwt, rate_limit::rate_limit_middleware, session::session_middleware,
+        circuit_breaker::circuit_breaker_middleware, jwt, rate_limit::rate_limit_middleware,
+        request_limiter::request_limiter_middleware, session::session_middleware,
         validate::SimpleValidatedJson,
     },
     state::AppState,
 };
 use axum::{
     Json,
-    extract::{Extension, Path, Query},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
@@ -15,7 +16,6 @@ use axum::{
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::{session::DynSessionMiddleware, transfer::http::DynTransferGrpcClientService},
     domain::{
         requests::{
             transfer::{
@@ -50,10 +50,12 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_transfers(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTransfers>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all(&params).await {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    match transfer_client.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -72,10 +74,12 @@ pub async fn get_transfers(
     )
 )]
 pub async fn get_transfer(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_id(id).await {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    match transfer_client.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -94,10 +98,12 @@ pub async fn get_transfer(
     )
 )]
 pub async fn get_active_transfers(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTransfers>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_active(&params).await {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    match transfer_client.find_by_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -116,10 +122,12 @@ pub async fn get_active_transfers(
     )
 )]
 pub async fn get_trashed_transfers(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllTransfers>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_trashed(&params).await {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    match transfer_client.find_by_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -138,10 +146,12 @@ pub async fn get_trashed_transfers(
     )
 )]
 pub async fn get_transfers_by_transfer_from(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(transfer_from): Path<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_transfer_from(&transfer_from).await {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    match transfer_client.find_by_transfer_from(&transfer_from).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -160,10 +170,12 @@ pub async fn get_transfers_by_transfer_from(
     )
 )]
 pub async fn get_transfers_by_transfer_to(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(transfer_to): Path<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_transfer_to(&transfer_to).await {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    match transfer_client.find_by_transfer_to(&transfer_to).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -183,10 +195,12 @@ pub async fn get_transfers_by_transfer_to(
     )
 )]
 pub async fn create_transfer(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateTransferRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.create(&body).await {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    match transfer_client.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
     }
@@ -207,12 +221,14 @@ pub async fn create_transfer(
     )
 )]
 pub async fn update_transfer(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateTransferRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
     body.transfer_id = Some(id);
-    match service.update(&body).await {
+    match transfer_client.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -231,11 +247,14 @@ pub async fn update_transfer(
     )
 )]
 pub async fn trash_transfer_handler(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -253,7 +272,7 @@ pub async fn trash_transfer_handler(
         ));
     }
 
-    match service.trashed(id).await {
+    match transfer_client.trashed(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -272,11 +291,14 @@ pub async fn trash_transfer_handler(
     )
 )]
 pub async fn restore_transfer_handler(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -294,7 +316,7 @@ pub async fn restore_transfer_handler(
         ));
     }
 
-    match service.restore(id).await {
+    match transfer_client.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -313,11 +335,14 @@ pub async fn restore_transfer_handler(
     )
 )]
 pub async fn delete_transfer(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -335,7 +360,7 @@ pub async fn delete_transfer(
         ));
     }
 
-    match service.delete_permanent(id).await {
+    match transfer_client.delete_permanent(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -358,10 +383,13 @@ pub async fn delete_transfer(
     )
 )]
 pub async fn restore_all_transfer_handler(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -379,7 +407,7 @@ pub async fn restore_all_transfer_handler(
         ));
     }
 
-    match service.restore_all().await {
+    match transfer_client.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -402,10 +430,13 @@ pub async fn restore_all_transfer_handler(
     )
 )]
 pub async fn delete_all_transfer_handler(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -423,7 +454,7 @@ pub async fn delete_all_transfer_handler(
         ));
     }
 
-    match service.delete_all().await {
+    match transfer_client.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -448,11 +479,14 @@ pub async fn delete_all_transfer_handler(
     )
 )]
 pub async fn get_monthly_amounts(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -470,7 +504,7 @@ pub async fn get_monthly_amounts(
         ));
     }
 
-    match service.get_monthly_amounts(req.year).await {
+    match transfer_client.get_monthly_amounts(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -489,11 +523,14 @@ pub async fn get_monthly_amounts(
     )
 )]
 pub async fn get_yearly_amounts(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -511,7 +548,7 @@ pub async fn get_yearly_amounts(
         ));
     }
 
-    match service.get_yearly_amounts(req.year).await {
+    match transfer_client.get_yearly_amounts(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -530,11 +567,14 @@ pub async fn get_yearly_amounts(
     )
 )]
 pub async fn get_month_status_success(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusTransfer>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -552,7 +592,7 @@ pub async fn get_month_status_success(
         ));
     }
 
-    match service.get_month_status_success(&params).await {
+    match transfer_client.get_month_status_success(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -571,11 +611,14 @@ pub async fn get_month_status_success(
     )
 )]
 pub async fn get_yearly_status_success(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -593,7 +636,7 @@ pub async fn get_yearly_status_success(
         ));
     }
 
-    match service.get_yearly_status_success(req.year).await {
+    match transfer_client.get_yearly_status_success(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -612,11 +655,14 @@ pub async fn get_yearly_status_success(
     )
 )]
 pub async fn get_month_status_failed(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusTransfer>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -634,7 +680,7 @@ pub async fn get_month_status_failed(
         ));
     }
 
-    match service.get_month_status_failed(&params).await {
+    match transfer_client.get_month_status_failed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -653,11 +699,14 @@ pub async fn get_month_status_failed(
     )
 )]
 pub async fn get_yearly_status_failed(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -675,7 +724,7 @@ pub async fn get_yearly_status_failed(
         ));
     }
 
-    match service.get_yearly_status_failed(req.year).await {
+    match transfer_client.get_yearly_status_failed(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -694,11 +743,14 @@ pub async fn get_yearly_status_failed(
     )
 )]
 pub async fn get_monthly_amounts_by_sender(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -716,7 +768,10 @@ pub async fn get_monthly_amounts_by_sender(
         ));
     }
 
-    match service.get_monthly_amounts_sender_bycard(&params).await {
+    match transfer_client
+        .get_monthly_amounts_sender_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -735,11 +790,14 @@ pub async fn get_monthly_amounts_by_sender(
     )
 )]
 pub async fn get_monthly_amounts_by_receiver(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -757,7 +815,10 @@ pub async fn get_monthly_amounts_by_receiver(
         ));
     }
 
-    match service.get_monthly_amounts_receiver_bycard(&params).await {
+    match transfer_client
+        .get_monthly_amounts_receiver_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -776,11 +837,14 @@ pub async fn get_monthly_amounts_by_receiver(
     )
 )]
 pub async fn get_yearly_amounts_by_sender(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -798,7 +862,10 @@ pub async fn get_yearly_amounts_by_sender(
         ));
     }
 
-    match service.get_yearly_amounts_sender_bycard(&params).await {
+    match transfer_client
+        .get_yearly_amounts_sender_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -817,11 +884,14 @@ pub async fn get_yearly_amounts_by_sender(
     )
 )]
 pub async fn get_yearly_amounts_by_receiver(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthYearCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -839,7 +909,10 @@ pub async fn get_yearly_amounts_by_receiver(
         ));
     }
 
-    match service.get_yearly_amounts_receiver_bycard(&params).await {
+    match transfer_client
+        .get_yearly_amounts_receiver_bycard(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -858,11 +931,14 @@ pub async fn get_yearly_amounts_by_receiver(
     )
 )]
 pub async fn get_month_status_success_by_card(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusTransferCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -880,7 +956,10 @@ pub async fn get_month_status_success_by_card(
         ));
     }
 
-    match service.get_month_status_success_by_card(&params).await {
+    match transfer_client
+        .get_month_status_success_by_card(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -899,11 +978,14 @@ pub async fn get_month_status_success_by_card(
     )
 )]
 pub async fn get_yearly_status_success_by_card(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearStatusTransferCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -921,7 +1003,10 @@ pub async fn get_yearly_status_success_by_card(
         ));
     }
 
-    match service.get_yearly_status_success_by_card(&params).await {
+    match transfer_client
+        .get_yearly_status_success_by_card(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -940,11 +1025,14 @@ pub async fn get_yearly_status_success_by_card(
     )
 )]
 pub async fn get_month_status_failed_by_card(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthStatusTransferCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -962,7 +1050,10 @@ pub async fn get_month_status_failed_by_card(
         ));
     }
 
-    match service.get_month_status_failed_by_card(&params).await {
+    match transfer_client
+        .get_month_status_failed_by_card(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -981,11 +1072,14 @@ pub async fn get_month_status_failed_by_card(
     )
 )]
 pub async fn get_yearly_status_failed_by_card(
-    Extension(service): Extension<DynTransferGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<YearStatusTransferCardNumber>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let transfer_client = &app_state.di_container.transfer_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -1003,12 +1097,15 @@ pub async fn get_yearly_status_failed_by_card(
         ));
     }
 
-    match service.get_yearly_status_failed_by_card(&params).await {
+    match transfer_client
+        .get_yearly_status_failed_by_card(&params)
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
 }
-pub fn transfer_routes(app_state: Arc<AppState>) -> OpenApiRouter {
+pub fn transfer_routes(state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/transfers", get(get_transfers))
         .route("/api/transfers/{id}", get(get_transfer))
@@ -1094,12 +1191,22 @@ pub fn transfer_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/transfers/stats/status/failed/yearly/by-card",
             get(get_yearly_status_failed_by_card),
         )
-        .route_layer(middleware::from_fn(session_middleware))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
-        .route_layer(middleware::from_fn(jwt::auth))
-        .layer(Extension(app_state.di_container.role_clients.clone()))
-        .layer(Extension(app_state.di_container.transfer_clients.clone()))
-        .layer(Extension(app_state.session.clone()))
-        .layer(Extension(app_state.rate_limit.clone()))
-        .layer(Extension(app_state.jwt_config.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            session_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(state.clone(), jwt::auth))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            circuit_breaker_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_limiter_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
+        .with_state(state)
 }

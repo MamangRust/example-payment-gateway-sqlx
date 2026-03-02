@@ -1,13 +1,14 @@
 use crate::{
     middleware::{
-        jwt, rate_limit::rate_limit_middleware, session::session_middleware,
+        circuit_breaker::circuit_breaker_middleware, jwt, rate_limit::rate_limit_middleware,
+        request_limiter::request_limiter_middleware, session::session_middleware,
         validate::SimpleValidatedJson,
     },
     state::AppState,
 };
 use axum::{
     Json,
-    extract::{Extension, Path, Query},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
@@ -15,7 +16,6 @@ use axum::{
 };
 use serde_json::json;
 use shared::{
-    abstract_trait::{saldo::http::DynSaldoGrpcClientService, session::DynSessionMiddleware},
     domain::{
         requests::{
             saldo::{
@@ -47,10 +47,12 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_saldos(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllSaldos>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all(&params).await {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    match saldo_client.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -69,10 +71,12 @@ pub async fn get_saldos(
     )
 )]
 pub async fn get_active_saldos(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllSaldos>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_active(&params).await {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    match saldo_client.find_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -91,10 +95,12 @@ pub async fn get_active_saldos(
     )
 )]
 pub async fn get_trashed_saldos(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllSaldos>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_trashed(&params).await {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    match saldo_client.find_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -113,10 +119,12 @@ pub async fn get_trashed_saldos(
     )
 )]
 pub async fn get_saldo(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_id(id).await {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    match saldo_client.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -135,10 +143,12 @@ pub async fn get_saldo(
     )
 )]
 pub async fn get_saldo_by_card(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(card_number): Path<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_card(&card_number).await {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    match saldo_client.find_by_card(&card_number).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -158,10 +168,12 @@ pub async fn get_saldo_by_card(
     )
 )]
 pub async fn create_saldo(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateSaldoRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.create(&body).await {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    match saldo_client.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
     }
@@ -182,12 +194,14 @@ pub async fn create_saldo(
     )
 )]
 pub async fn update_saldo(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateSaldoRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
     body.saldo_id = Some(id);
-    match service.update(&body).await {
+    match saldo_client.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -206,11 +220,14 @@ pub async fn update_saldo(
     )
 )]
 pub async fn trash_saldo_handler(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -228,7 +245,7 @@ pub async fn trash_saldo_handler(
         ));
     }
 
-    match service.trash(id).await {
+    match saldo_client.trash(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -247,11 +264,14 @@ pub async fn trash_saldo_handler(
     )
 )]
 pub async fn restore_saldo_handler(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -269,7 +289,7 @@ pub async fn restore_saldo_handler(
         ));
     }
 
-    match service.restore(id).await {
+    match saldo_client.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -288,11 +308,14 @@ pub async fn restore_saldo_handler(
     )
 )]
 pub async fn delete_saldo(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -310,7 +333,7 @@ pub async fn delete_saldo(
         ));
     }
 
-    match service.delete_permanent(id).await {
+    match saldo_client.delete_permanent(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -333,10 +356,13 @@ pub async fn delete_saldo(
     )
 )]
 pub async fn restore_all_saldo_handler(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -354,7 +380,7 @@ pub async fn restore_all_saldo_handler(
         ));
     }
 
-    match service.restore_all().await {
+    match saldo_client.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -377,10 +403,13 @@ pub async fn restore_all_saldo_handler(
     )
 )]
 pub async fn delete_all_saldo_handler(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -398,7 +427,7 @@ pub async fn delete_all_saldo_handler(
         ));
     }
 
-    match service.delete_all().await {
+    match saldo_client.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -423,11 +452,14 @@ pub async fn delete_all_saldo_handler(
     )
 )]
 pub async fn get_monthly_balance(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -445,7 +477,7 @@ pub async fn get_monthly_balance(
         ));
     }
 
-    match service.get_month_balance(req.year).await {
+    match saldo_client.get_month_balance(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -464,11 +496,14 @@ pub async fn get_monthly_balance(
     )
 )]
 pub async fn get_yearly_balance(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -486,7 +521,7 @@ pub async fn get_yearly_balance(
         ));
     }
 
-    match service.get_year_balance(req.year).await {
+    match saldo_client.get_year_balance(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -505,11 +540,14 @@ pub async fn get_yearly_balance(
     )
 )]
 pub async fn get_monthly_total_balance(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<MonthTotalSaldoBalance>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -527,7 +565,7 @@ pub async fn get_monthly_total_balance(
         ));
     }
 
-    match service.get_month_total_balance(&params).await {
+    match saldo_client.get_month_total_balance(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -546,11 +584,14 @@ pub async fn get_monthly_total_balance(
     )
 )]
 pub async fn get_yearly_total_balance(
-    Extension(service): Extension<DynSaldoGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(req): Query<YearQuery>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let saldo_client = &app_state.di_container.saldo_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -568,13 +609,13 @@ pub async fn get_yearly_total_balance(
         ));
     }
 
-    match service.get_year_total_balance(req.year).await {
+    match saldo_client.get_year_total_balance(req.year).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
 }
 
-pub fn saldo_routes(app_state: Arc<AppState>) -> OpenApiRouter {
+pub fn saldo_routes(state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/saldos", get(get_saldos))
         .route("/api/saldos/create", post(create_saldo))
@@ -601,12 +642,22 @@ pub fn saldo_routes(app_state: Arc<AppState>) -> OpenApiRouter {
             "/api/saldos/stats/total-balance/yearly",
             get(get_yearly_total_balance),
         )
-        .route_layer(middleware::from_fn(session_middleware))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
-        .route_layer(middleware::from_fn(jwt::auth))
-        .layer(Extension(app_state.di_container.saldo_clients.clone()))
-        .layer(Extension(app_state.di_container.role_clients.clone()))
-        .layer(Extension(app_state.session.clone()))
-        .layer(Extension(app_state.rate_limit.clone()))
-        .layer(Extension(app_state.jwt_config.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            session_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(state.clone(), jwt::auth))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            circuit_breaker_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_limiter_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
+        .with_state(state)
 }

@@ -1,30 +1,32 @@
+use crate::state::AppState;
 use axum::{
-    Extension, Json,
+    Json,
     body::Body,
+    extract::State,
     http::{Request, StatusCode},
     middleware::Next,
     response::IntoResponse,
 };
-
 use chrono::Duration;
-use shared::{
-    abstract_trait::{role::http::DynRoleGrpcClientService, session::DynSessionMiddleware},
-    domain::responses::Session,
-    errors::ErrorResponse,
-};
+use shared::{domain::responses::Session, errors::ErrorResponse, utils::get_trace_id};
+use std::sync::Arc;
 
 pub async fn session_middleware(
-    Extension(role_client): Extension<DynRoleGrpcClientService>,
-    Extension(session_service): Extension<DynSessionMiddleware>,
+    State(app_state): State<Arc<AppState>>,
     mut req: Request<Body>,
     next: Next,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let role_client = &app_state.di_container.role_clients;
+    let session_service = &app_state.session;
+    let trace_id = get_trace_id();
+
     let user_id = match req.extensions().get::<i32>() {
         Some(id) => *id,
         None => {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorResponse {
+                    trace_id: trace_id.clone(),
                     status: "fail".to_string(),
                     message: "Missing user_id in request context".to_string(),
                 }),
@@ -38,6 +40,7 @@ pub async fn session_middleware(
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
+                    trace_id: trace_id.clone(),
                     status: "fail".to_string(),
                     message: "Failed to fetch roles".to_string(),
                 }),

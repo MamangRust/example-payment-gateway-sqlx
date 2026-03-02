@@ -11,6 +11,7 @@ use crate::{
         },
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::requests::{
         saldo::UpdateSaldoBalance,
         transaction::{
@@ -19,17 +20,12 @@ use crate::{
     },
     domain::responses::{ApiResponse, TransactionResponse, TransactionResponseDeleteAt},
     errors::{ServiceError, format_validation_errors},
-    utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
+    observability::{Method, TracingMetrics},
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::Request;
 use tracing::{error, info};
 use validator::Validate;
@@ -41,7 +37,7 @@ pub struct TransactionCommandService {
     pub saldo_query: DynSaldoQueryRepository,
     pub saldo_command: DynSaldoCommandRepository,
     pub card_query: DynCardQueryRepository,
-    pub metrics: Metrics,
+    pub tracing_metrics_core: TracingMetrics,
     pub cache_store: Arc<CacheStore>,
 }
 
@@ -52,13 +48,10 @@ pub struct TransactionCommandServiceDeps {
     pub saldo_query: DynSaldoQueryRepository,
     pub saldo_command: DynSaldoCommandRepository,
     pub card_query: DynCardQueryRepository,
-    pub cache_store: Arc<CacheStore>,
 }
 
 impl TransactionCommandService {
-    pub fn new(deps: TransactionCommandServiceDeps) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(deps: TransactionCommandServiceDeps, shared: &SharedResources) -> Result<Self> {
         let TransactionCommandServiceDeps {
             query,
             command,
@@ -66,7 +59,6 @@ impl TransactionCommandService {
             saldo_query,
             saldo_command,
             card_query,
-            cache_store,
         } = deps;
 
         Ok(Self {
@@ -76,95 +68,9 @@ impl TransactionCommandService {
             saldo_query,
             saldo_command,
             card_query,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("transaction-command-service")
-    }
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("✅ Operation completed successfully: {message}");
-        } else {
-            error!("❌ Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -187,7 +93,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         }
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "create_transaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -198,27 +104,30 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         );
 
         let mut request_with_trace = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_with_trace);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_with_trace);
 
         let merchant = match self.merchant_query.find_by_apikey(api_key).await {
             Ok(merchant) => {
                 info!("merchant found with api_key: {}", api_key);
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method.clone(),
-                    "merchant retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method.clone(),
+                        "merchant retrieved successfully",
+                    )
+                    .await;
                 merchant
             }
             Err(e) => {
                 error!("error finding merchant with api_key {}: {:?}", api_key, e);
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("failed to find merchant: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("failed to find merchant: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom("failed to find merchant".into()));
             }
         };
@@ -226,22 +135,24 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         let card = match self.card_query.find_by_card(&req.card_number).await {
             Ok(card) => {
                 info!("card found: {}", req.card_number);
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method.clone(),
-                    "card retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method.clone(),
+                        "card retrieved successfully",
+                    )
+                    .await;
                 card
             }
             Err(e) => {
                 error!("error finding card {}: {:?}", req.card_number, e);
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("failed to find card: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("failed to find card: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom("failed to find card".into()));
             }
         };
@@ -249,22 +160,24 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         let mut saldo = match self.saldo_query.find_by_card(&req.card_number).await {
             Ok(saldo) => {
                 info!("saldo found for card {}", req.card_number);
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method.clone(),
-                    "saldo retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method.clone(),
+                        "saldo retrieved successfully",
+                    )
+                    .await;
                 saldo
             }
             Err(e) => {
                 error!("error finding saldo for card {}: {:?}", req.card_number, e);
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("failed to fetch saldo: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("failed to fetch saldo: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom("failed to fetch saldo".into()));
             }
         };
@@ -276,7 +189,8 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             );
             error!("{error_msg}");
 
-            self.complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
                 .await;
             return Err(ServiceError::Custom("insufficient balance".into()));
         }
@@ -293,12 +207,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             error!("failed to update saldo {e:?}");
 
             let error_msg = "failed to update saldo";
-            self.complete_tracing_error(
-                &tracing_ctx,
-                method.clone(),
-                &format!("{}: {:?}", error_msg, e),
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_error(
+                    &tracing_ctx,
+                    method.clone(),
+                    &format!("{}: {:?}", error_msg, e),
+                )
+                .await;
             return Err(ServiceError::Custom(error_msg.into()));
         }
 
@@ -311,7 +226,8 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                 let error_msg = format!("failed to create transaction {e:?}");
                 error!("{error_msg}");
 
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
                     .await;
 
                 saldo.total_balance += req.amount;
@@ -340,12 +256,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         {
             error!("failed to update transaction status {e:?}");
             let error_msg = "failed to update transaction status";
-            self.complete_tracing_error(
-                &tracing_ctx,
-                method.clone(),
-                &format!("{}: {:?}", error_msg, e),
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_error(
+                    &tracing_ctx,
+                    method.clone(),
+                    &format!("{}: {:?}", error_msg, e),
+                )
+                .await;
             return Err(ServiceError::Custom(error_msg.into()));
         }
 
@@ -354,12 +271,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             Err(e) => {
                 error!("error {e:?}");
                 let error_msg = "failed to fetch merchant card";
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("{}: {:?}", error_msg, e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("{}: {:?}", error_msg, e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(error_msg.into()));
             }
         };
@@ -373,12 +291,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             Err(e) => {
                 error!("error {e:?}");
                 let error_msg = "failed to fetch merchant saldo";
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("{}: {:?}", error_msg, e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("{}: {:?}", error_msg, e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(error_msg.into()));
             }
         };
@@ -396,12 +315,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             error!("failed to update merchant saldo {e:?}");
 
             let error_msg = "failed to update merchant saldo";
-            self.complete_tracing_error(
-                &tracing_ctx,
-                method.clone(),
-                &format!("{}: {:?}", error_msg, e),
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_error(
+                    &tracing_ctx,
+                    method.clone(),
+                    &format!("{}: {:?}", error_msg, e),
+                )
+                .await;
             return Err(ServiceError::Custom(error_msg.into()));
         }
 
@@ -426,7 +346,8 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             response.id
         );
 
-        self.complete_tracing_success(&tracing_ctx, method, "Transaction created successfully")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "Transaction created successfully")
             .await;
 
         Ok(ApiResponse {
@@ -449,7 +370,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         }
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "update_transaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -463,13 +384,15 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
 
         let mut request_with_trace = Request::new(req.clone());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request_with_trace);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request_with_trace);
 
         let transaction_id = match req.transaction_id {
             Some(id) => id,
             None => {
                 let msg = "transaction_id is required";
-                self.complete_tracing_error(&tracing_ctx, method.clone(), msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), msg)
                     .await;
                 return Err(ServiceError::Custom(msg.into()));
             }
@@ -480,7 +403,8 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             Err(e) => {
                 let msg = format!("transaction {} not found", transaction_id);
                 error!("failed to find transaction: {e:?}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), &msg)
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), &msg)
                     .await;
                 return Err(ServiceError::Custom(msg));
             }
@@ -491,12 +415,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
             Err(e) => {
                 let msg = "failed to fetch merchant";
                 error!("{msg}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("{}: {:?}", msg, e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("{}: {:?}", msg, e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(msg.into()));
             }
         };
@@ -513,7 +438,8 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                 .await;
 
             let error_msg = "unauthorized access";
-            self.complete_tracing_error(&tracing_ctx, method.clone(), error_msg)
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), error_msg)
                 .await;
 
             return Err(ServiceError::Custom(error_msg.into()));
@@ -525,12 +451,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                 error!("failed to find card: {e:?}");
 
                 let error_msg = "card not found";
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("{}: {:?}", error_msg, e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("{}: {:?}", error_msg, e),
+                    )
+                    .await;
 
                 return Err(ServiceError::Custom(error_msg.into()));
             }
@@ -542,12 +469,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                 error!("failed to find saldo: {e:?}");
 
                 let error_msg = "saldo not found";
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("{}: {:?}", error_msg, e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("{}: {:?}", error_msg, e),
+                    )
+                    .await;
 
                 return Err(ServiceError::Custom(error_msg.into()));
             }
@@ -572,12 +500,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                 .await;
 
             let error_msg = "failed to restore saldo";
-            self.complete_tracing_error(
-                &tracing_ctx,
-                method.clone(),
-                &format!("{}: {:?}", error_msg, e),
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_error(
+                    &tracing_ctx,
+                    method.clone(),
+                    &format!("{}: {:?}", error_msg, e),
+                )
+                .await;
 
             return Err(ServiceError::Custom(error_msg.into()));
         }
@@ -596,7 +525,8 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                 })
                 .await;
 
-            self.complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), &error_msg)
                 .await;
 
             return Err(ServiceError::Custom("insufficient balance".into()));
@@ -618,12 +548,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
 
                 let error_msg = "failed to update saldo";
 
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("{}: {:?}", error_msg, e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("{}: {:?}", error_msg, e),
+                    )
+                    .await;
 
                 return Err(ServiceError::Custom(error_msg.into()));
             }
@@ -649,12 +580,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                 error!("failed to update transaction: {e:?}");
 
                 let error_msg = "failed to update transaction";
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("{}: {:?}", error_msg, e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("{}: {:?}", error_msg, e),
+                    )
+                    .await;
 
                 return Err(ServiceError::Custom(error_msg.into()));
             }
@@ -673,12 +605,13 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                 error!("failed to update transaction status: {e:?}");
 
                 let error_msg = "failed to update transaction status";
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("{}: {:?}", error_msg, e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("{}: {:?}", error_msg, e),
+                    )
+                    .await;
 
                 return Err(ServiceError::Custom(error_msg.into()));
             }
@@ -698,7 +631,8 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
 
         let response = TransactionResponse::from(updated);
 
-        self.complete_tracing_success(&tracing_ctx, method, "Transaction updated successfully")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "Transaction updated successfully")
             .await;
 
         Ok(ApiResponse {
@@ -714,7 +648,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         info!("🗑️ Trashing transaction id={transaction_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "trash_transaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -724,7 +658,8 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         );
 
         let mut request = Request::new(transaction_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let transaction = match self.command.trashed(transaction_id).await {
             Ok(transaction) => {
@@ -732,22 +667,24 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                     "✅ Transaction trashed successfully with id={}",
                     transaction.transaction_id
                 );
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Transaction trashed successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Transaction trashed successfully",
+                    )
+                    .await;
                 transaction
             }
             Err(e) => {
                 error!("💥 Failed to trash transaction id={transaction_id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to trash transaction: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to trash transaction: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(format!(
                     "Failed to trash transaction with id {}",
                     transaction_id
@@ -783,7 +720,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         info!("♻️ Restoring transaction id={transaction_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "restore_transaction",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -793,7 +730,8 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         );
 
         let mut request = Request::new(transaction_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let transaction = match self.command.restore(transaction_id).await {
             Ok(transaction) => {
@@ -801,22 +739,24 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
                     "✅ Transaction restored successfully with id={}",
                     transaction.transaction_id
                 );
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Transaction restored successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Transaction restored successfully",
+                    )
+                    .await;
                 transaction
             }
             Err(e) => {
                 error!("💥 Failed to restore transaction id={transaction_id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to restore transaction: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to restore transaction: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(format!(
                     "Failed to restore transaction with id {}",
                     transaction_id
@@ -852,7 +792,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         info!("🧨 Permanently deleting transaction id={transaction_id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "delete_permanent",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -862,26 +802,29 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         );
 
         let mut request = Request::new(transaction_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.delete_permanent(transaction_id).await {
             Ok(_) => {
                 info!("✅ Transaction permanently deleted: id={transaction_id}");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Transaction permanently deleted successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Transaction permanently deleted successfully",
+                    )
+                    .await;
             }
             Err(e) => {
                 error!("💥 Failed to permanently delete transaction id={transaction_id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to permanently delete transaction: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to permanently delete transaction: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(format!(
                     "Failed to permanently delete transaction with id {}",
                     transaction_id
@@ -911,7 +854,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         info!("🔄 Restoring ALL trashed transactions");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "restore_all_transactions",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -920,26 +863,29 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         );
 
         let mut request = Request::new(());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.restore_all().await {
             Ok(_) => {
                 info!("✅ All transactions restored successfully");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "All transactions restored successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "All transactions restored successfully",
+                    )
+                    .await;
             }
             Err(e) => {
                 error!("💥 Failed to restore all transactions: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to restore all transactions: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to restore all transactions: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(
                     "Failed to restore all trashed transactions".into(),
                 ));
@@ -967,7 +913,7 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         info!("💣 Permanently deleting ALL trashed transactions");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "delete_all_transactions",
             vec![
                 KeyValue::new("component", "transaction"),
@@ -976,26 +922,29 @@ impl TransactionCommandServiceTrait for TransactionCommandService {
         );
 
         let mut request = Request::new(());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.delete_all().await {
             Ok(_) => {
                 info!("✅ All transactions permanently deleted");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "All transactions permanently deleted successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "All transactions permanently deleted successfully",
+                    )
+                    .await;
             }
             Err(e) => {
                 error!("💥 Failed to delete all transactions: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to delete all transactions: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to delete all transactions: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(
                     "Failed to delete all trashed transactions".into(),
                 ));

@@ -8,25 +8,20 @@ use crate::{
         },
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::requests::{
         saldo::UpdateSaldoBalance,
         topup::{CreateTopupRequest, UpdateTopupAmount, UpdateTopupRequest, UpdateTopupStatus},
     },
     domain::responses::{ApiResponse, TopupResponse, TopupResponseDeleteAt},
     errors::{ServiceError, format_validation_errors},
-    utils::{
-        MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext, mask_card_number,
-    },
+    observability::{Method, TracingMetrics},
+    utils::mask_card_number,
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::Request;
 use tracing::{error, info};
 use validator::Validate;
@@ -37,7 +32,7 @@ pub struct TopupCommandService {
     pub saldo_command: DynSaldoCommandRepository,
     pub query: DynTopupQueryRepository,
     pub command: DynTopupCommandRepository,
-    pub metrics: Metrics,
+    pub tracing_metrics_core: TracingMetrics,
     pub cache_store: Arc<CacheStore>,
 }
 
@@ -47,20 +42,16 @@ pub struct TopupCommandServiceDeps {
     pub saldo_command: DynSaldoCommandRepository,
     pub query: DynTopupQueryRepository,
     pub command: DynTopupCommandRepository,
-    pub cache_store: Arc<CacheStore>,
 }
 
 impl TopupCommandService {
-    pub fn new(deps: TopupCommandServiceDeps) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(deps: TopupCommandServiceDeps, shared: &SharedResources) -> Result<Self> {
         let TopupCommandServiceDeps {
             card_query,
             saldo_query,
             saldo_command,
             query,
             command,
-            cache_store,
         } = deps;
 
         Ok(Self {
@@ -69,95 +60,9 @@ impl TopupCommandService {
             saldo_command,
             query,
             command,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("topup-command-service")
-    }
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("✅ Operation completed successfully: {message}");
-        } else {
-            error!("❌ Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -176,7 +81,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
         }
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "create_topup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -187,7 +92,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let masked_card = mask_card_number(&req.card_number);
 
@@ -195,12 +101,13 @@ impl TopupCommandServiceTrait for TopupCommandService {
             Ok(card) => card,
             Err(e) => {
                 error!("❌ Failed to find card by number: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    "Database error while finding card",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        "Database error while finding card",
+                    )
+                    .await;
                 return Err(ServiceError::Custom("card not found".into()));
             }
         };
@@ -209,7 +116,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
             Ok(t) => t,
             Err(e) => {
                 error!("❌ Failed to create topup: {e:?}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Failed to create topup")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Failed to create topup")
                     .await;
                 return Err(ServiceError::Custom("failed to create topup".into()));
             }
@@ -226,7 +134,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
                         status: "failed".to_string(),
                     })
                     .await;
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Saldo not found")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Saldo not found")
                     .await;
                 return Err(ServiceError::Custom("saldo not found".into()));
             }
@@ -251,7 +160,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
                     status: "failed".to_string(),
                 })
                 .await;
-            self.complete_tracing_error(&tracing_ctx, method.clone(), "Failed to update saldo")
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), "Failed to update saldo")
                 .await;
             return Err(ServiceError::Custom("failed to update saldo".into()));
         }
@@ -265,12 +175,13 @@ impl TopupCommandServiceTrait for TopupCommandService {
             .await
         {
             error!("❌ Failed to update topup status: {e:?}");
-            self.complete_tracing_error(
-                &tracing_ctx,
-                method.clone(),
-                "Failed to update topup status",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_error(
+                    &tracing_ctx,
+                    method.clone(),
+                    "Failed to update topup status",
+                )
+                .await;
             return Err(ServiceError::Custom("failed to update topup status".into()));
         }
 
@@ -281,7 +192,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
             masked_card, req.topup_amount
         );
 
-        self.complete_tracing_success(&tracing_ctx, method, "Topup created successfully")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "Topup created successfully")
             .await;
 
         let cache_keys = vec![
@@ -321,7 +233,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
             .ok_or_else(|| ServiceError::Custom("topup_id is required".into()))?;
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "update_topup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -333,7 +245,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
         );
 
         let mut request = Request::new(req.clone());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let masked_card = mask_card_number(&req.card_number);
 
@@ -346,7 +259,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
                     status: "failed".to_string(),
                 })
                 .await;
-            self.complete_tracing_error(&tracing_ctx, method.clone(), "Card not found")
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), "Card not found")
                 .await;
             return Err(ServiceError::Custom("card not found".into()));
         }
@@ -354,18 +268,20 @@ impl TopupCommandServiceTrait for TopupCommandService {
         let existing = match self.query.find_by_id(topup_id).await {
             Ok(topup) => {
                 info!("✅ Found topup with ID: {topup_id}");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method.clone(),
-                    "Topup retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method.clone(),
+                        "Topup retrieved successfully",
+                    )
+                    .await;
                 topup
             }
 
             Err(e) => {
                 error!("❌ Database error finding topup {topup_id}: {e:?}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
                     .await;
                 return Err(ServiceError::Custom("Database error".into()));
             }
@@ -382,7 +298,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
                     status: "failed".to_string(),
                 })
                 .await;
-            self.complete_tracing_error(&tracing_ctx, method.clone(), "Failed to update topup")
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), "Failed to update topup")
                 .await;
             return Err(ServiceError::Custom("failed to update topup".into()));
         }
@@ -398,7 +315,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
                         status: "failed".to_string(),
                     })
                     .await;
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Saldo not found")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Saldo not found")
                     .await;
                 return Err(ServiceError::Custom("saldo not found".into()));
             }
@@ -431,7 +349,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
                     status: "failed".to_string(),
                 })
                 .await;
-            self.complete_tracing_error(&tracing_ctx, method.clone(), "Failed to update saldo")
+            self.tracing_metrics_core
+                .complete_tracing_error(&tracing_ctx, method.clone(), "Failed to update saldo")
                 .await;
             return Err(ServiceError::Custom("failed to update saldo".into()));
         }
@@ -439,18 +358,20 @@ impl TopupCommandServiceTrait for TopupCommandService {
         let updated_topup = match self.query.find_by_id(topup_id).await {
             Ok(topup) => {
                 info!("✅ Found topup with ID: {topup_id}");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method.clone(),
-                    "Topup retrieved successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method.clone(),
+                        "Topup retrieved successfully",
+                    )
+                    .await;
                 topup
             }
 
             Err(e) => {
                 error!("❌ Failed to fetch updated topup {topup_id}: {e:?}");
-                self.complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method.clone(), "Database error")
                     .await;
                 return Err(ServiceError::Custom(e.to_string()));
             }
@@ -465,12 +386,13 @@ impl TopupCommandServiceTrait for TopupCommandService {
             .await
         {
             error!("❌ Failed to update topup status: {e:?}");
-            self.complete_tracing_error(
-                &tracing_ctx,
-                method.clone(),
-                "Failed to update topup status",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_error(
+                    &tracing_ctx,
+                    method.clone(),
+                    "Failed to update topup status",
+                )
+                .await;
             return Err(ServiceError::Custom("failed to update topup status".into()));
         }
 
@@ -481,7 +403,8 @@ impl TopupCommandServiceTrait for TopupCommandService {
             masked_card, topup_id, req.topup_amount
         );
 
-        self.complete_tracing_success(&tracing_ctx, method, "Topup updated successfully")
+        self.tracing_metrics_core
+            .complete_tracing_success(&tracing_ctx, method, "Topup updated successfully")
             .await;
 
         let cache_keys = vec![
@@ -513,7 +436,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
         info!("🗑️ Trashing topup id={topup_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "trash_topup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -523,23 +446,26 @@ impl TopupCommandServiceTrait for TopupCommandService {
         );
 
         let mut request = Request::new(topup_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let topup = match self.command.trashed(topup_id).await {
             Ok(topup) => {
                 info!("✅ Topup trashed successfully: id={}", topup.topup_id);
-                self.complete_tracing_success(&tracing_ctx, method, "Topup trashed successfully")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Topup trashed successfully")
                     .await;
                 topup
             }
             Err(e) => {
                 error!("💥 Failed to trash topup id={topup_id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to trash topup: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to trash topup: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(format!(
                     "Failed to trash topup with id {topup_id}"
                 )));
@@ -574,7 +500,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
         info!("♻️ Restoring topup id={topup_id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "restore_topup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -584,23 +510,26 @@ impl TopupCommandServiceTrait for TopupCommandService {
         );
 
         let mut request = Request::new(topup_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let topup = match self.command.restore(topup_id).await {
             Ok(topup) => {
                 info!("✅ Topup restored successfully: id={}", topup.topup_id);
-                self.complete_tracing_success(&tracing_ctx, method, "Topup restored successfully")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Topup restored successfully")
                     .await;
                 topup
             }
             Err(e) => {
                 error!("💥 Failed to restore topup id={topup_id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to restore topup: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to restore topup: {:?}", e),
+                    )
+                    .await;
                 return Err(ServiceError::Custom(format!(
                     "Failed to restore topup with id {topup_id}"
                 )));
@@ -632,7 +561,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
         info!("🧨 Permanently deleting topup id={topup_id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "delete_topup",
             vec![
                 KeyValue::new("component", "topup"),
@@ -642,17 +571,19 @@ impl TopupCommandServiceTrait for TopupCommandService {
         );
 
         let mut request = Request::new(topup_id);
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.delete_permanent(topup_id).await {
             Ok(_) => {
                 info!("✅ Topup permanently deleted: id={topup_id}");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Topup permanently deleted successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Topup permanently deleted successfully",
+                    )
+                    .await;
 
                 let cache_keys = vec![
                     format!("topup:find_by_id:id:{}", topup_id),
@@ -671,12 +602,13 @@ impl TopupCommandServiceTrait for TopupCommandService {
             }
             Err(e) => {
                 error!("💥 Failed to permanently delete topup id={topup_id}: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to permanently delete topup: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to permanently delete topup: {:?}", e),
+                    )
+                    .await;
                 Err(ServiceError::Custom(format!(
                     "Failed to permanently delete topup with id {topup_id}"
                 )))
@@ -688,7 +620,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
         info!("🔄 Restoring all trashed topups");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "restore_all_topups",
             vec![
                 KeyValue::new("component", "topup"),
@@ -697,17 +629,19 @@ impl TopupCommandServiceTrait for TopupCommandService {
         );
 
         let mut request = Request::new(());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.restore_all().await {
             Ok(_) => {
                 info!("✅ All topups restored successfully");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "All topups restored successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "All topups restored successfully",
+                    )
+                    .await;
 
                 let cache_keys = vec![
                     "topup:find_active:*".to_string(),
@@ -727,12 +661,13 @@ impl TopupCommandServiceTrait for TopupCommandService {
             }
             Err(e) => {
                 error!("💥 Failed to restore all topups: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to restore all topups: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to restore all topups: {:?}", e),
+                    )
+                    .await;
                 Err(ServiceError::Custom(
                     "Failed to restore all trashed topups".into(),
                 ))
@@ -744,7 +679,7 @@ impl TopupCommandServiceTrait for TopupCommandService {
         info!("💣 Permanently deleting all trashed topups");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "delete_all_topups",
             vec![
                 KeyValue::new("component", "topup"),
@@ -753,17 +688,19 @@ impl TopupCommandServiceTrait for TopupCommandService {
         );
 
         let mut request = Request::new(());
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         match self.command.delete_all().await {
             Ok(_) => {
                 info!("✅ All topups permanently deleted");
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "All topups permanently deleted successfully",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "All topups permanently deleted successfully",
+                    )
+                    .await;
 
                 let cache_keys = vec![
                     "topup:find_trashed:*",
@@ -783,12 +720,13 @@ impl TopupCommandServiceTrait for TopupCommandService {
             }
             Err(e) => {
                 error!("💥 Failed to delete all topups: {e:?}");
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method.clone(),
-                    &format!("Failed to delete all topups: {:?}", e),
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method.clone(),
+                        &format!("Failed to delete all topups: {:?}", e),
+                    )
+                    .await;
                 Err(ServiceError::Custom(
                     "Failed to permanently delete all trashed topups".into(),
                 ))

@@ -23,6 +23,7 @@ rand = "0.9.1"
 anyhow = "1.0.98"
 async-trait = "0.1.88"
 bcrypt = "0.17.0"
+mimalloc = { version = "*", features = ["secure"] }
 chrono = { version = "0.4.41", features = ["serde"] }
 dotenv = "0.15.0"
 jsonwebtoken = "9.3.1"
@@ -38,7 +39,7 @@ sqlx = { version = "0.8.6", features = [
 ] }
 regex = "1.11.2"
 redis = { version = "0.32.7", features = ["tokio-comp", "aio"] }
-deadpool-redis = { version = "0.22.0", features = ["tokio-comp"] }
+deadpool-redis = { version = "0.22.0", features = ["tokio-comp", "cluster"] }
 thiserror = "2.0.12"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = [
@@ -65,7 +66,8 @@ tokio = { version = "1.45.0", features = [
 ] }
 axum = { version = "0.8.4", features = ["multipart"] }
 axum-extra = { version = "0.10.1", features = ["cookie"] }
-tower-http = { version = "0.6.2", features = ["limit", "trace", "fs", "cors"] }
+tower-http = { version = "0.6.2", features = ["limit", "trace", "fs", "cors", "timeout"] }
+tower = { version = "0.5.1", features = ["limit"] }
 tonic = "0.14.0"
 utoipa = { version = "5.3.1", features = ["axum_extras", "chrono"] }
 utoipa-axum = "0.2.0"

@@ -1,20 +1,21 @@
 use crate::middleware::session::session_middleware;
 use crate::{
-    middleware::{jwt, rate_limit::rate_limit_middleware, validate::SimpleValidatedJson},
+    middleware::{
+        circuit_breaker::circuit_breaker_middleware, jwt,
+        request_limiter::request_limiter_middleware, validate::SimpleValidatedJson,
+    },
     state::AppState,
 };
 use axum::{
     Json,
-    extract::{Extension, Path, Query},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
     routing::{delete, get, post},
 };
 use serde_json::json;
-use shared::abstract_trait::session::DynSessionMiddleware;
 use shared::{
-    abstract_trait::role::http::DynRoleGrpcClientService,
     domain::{
         requests::role::{CreateRoleRequest, FindAllRoles, UpdateRoleRequest},
         responses::{ApiResponse, ApiResponsePagination, RoleResponse, RoleResponseDeleteAt},
@@ -37,10 +38,12 @@ use utoipa_axum::router::OpenApiRouter;
     )
 )]
 pub async fn get_roles(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllRoles>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_all(&params).await {
+    let role_client = &app_state.di_container.role_clients;
+
+    match role_client.find_all(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -59,10 +62,12 @@ pub async fn get_roles(
     )
 )]
 pub async fn get_active_roles(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllRoles>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_active(&params).await {
+    let role_client = &app_state.di_container.role_clients;
+
+    match role_client.find_active(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -81,10 +86,12 @@ pub async fn get_active_roles(
     )
 )]
 pub async fn get_trashed_roles(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Query(params): Query<FindAllRoles>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_trashed(&params).await {
+    let role_client = &app_state.di_container.role_clients;
+
+    match role_client.find_trashed(&params).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -103,10 +110,12 @@ pub async fn get_trashed_roles(
     )
 )]
 pub async fn get_role(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_id(id).await {
+    let role_client = &app_state.di_container.role_clients;
+
+    match role_client.find_by_id(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -125,10 +134,12 @@ pub async fn get_role(
     )
 )]
 pub async fn get_roles_by_user_id(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(user_id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    match service.find_by_user_id(user_id).await {
+    let role_client = &app_state.di_container.role_clients;
+
+    match role_client.find_by_user_id(user_id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -148,11 +159,14 @@ pub async fn get_roles_by_user_id(
     )
 )]
 pub async fn create_role(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
     SimpleValidatedJson(body): SimpleValidatedJson<CreateRoleRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let role_client = &app_state.di_container.role_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -170,7 +184,7 @@ pub async fn create_role(
         ));
     }
 
-    match service.create(&body).await {
+    match role_client.create(&body).await {
         Ok(response) => Ok((StatusCode::CREATED, Json(response))),
         Err(err) => Err(err),
     }
@@ -191,12 +205,16 @@ pub async fn create_role(
     )
 )]
 pub async fn update_role(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
+
     SimpleValidatedJson(mut body): SimpleValidatedJson<UpdateRoleRequest>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let role_client = &app_state.di_container.role_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -215,7 +233,7 @@ pub async fn update_role(
     }
 
     body.id = Some(id);
-    match service.update(&body).await {
+    match role_client.update(&body).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -234,11 +252,14 @@ pub async fn update_role(
     )
 )]
 pub async fn trash_role_handler(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let role_client = &app_state.di_container.role_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -256,7 +277,7 @@ pub async fn trash_role_handler(
         ));
     }
 
-    match service.trash(id).await {
+    match role_client.trash(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -275,11 +296,14 @@ pub async fn trash_role_handler(
     )
 )]
 pub async fn restore_role_handler(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let role_client = &app_state.di_container.role_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -297,7 +321,7 @@ pub async fn restore_role_handler(
         ));
     }
 
-    match service.restore(id).await {
+    match role_client.restore(id).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
     }
@@ -316,11 +340,14 @@ pub async fn restore_role_handler(
     )
 )]
 pub async fn delete_role(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Path(id): Path<i32>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let role_client = &app_state.di_container.role_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -338,7 +365,7 @@ pub async fn delete_role(
         ));
     }
 
-    match service.delete(id).await {
+    match role_client.delete(id).await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -361,10 +388,13 @@ pub async fn delete_role(
     )
 )]
 pub async fn restore_all_role_handler(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let role_client = &app_state.di_container.role_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -382,7 +412,7 @@ pub async fn restore_all_role_handler(
         ));
     }
 
-    match service.restore_all().await {
+    match role_client.restore_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -405,10 +435,13 @@ pub async fn restore_all_role_handler(
     )
 )]
 pub async fn delete_all_role_handler(
-    Extension(service): Extension<DynRoleGrpcClientService>,
+    State(app_state): State<Arc<AppState>>,
     Extension(user_id): Extension<i32>,
-    Extension(session): Extension<DynSessionMiddleware>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let role_client = &app_state.di_container.role_clients;
+
+    let session = &app_state.session;
+
     let key = format!("session:{user_id}");
 
     let current_session = session
@@ -426,7 +459,7 @@ pub async fn delete_all_role_handler(
         ));
     }
 
-    match service.delete_all().await {
+    match role_client.delete_all().await {
         Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({
@@ -438,7 +471,7 @@ pub async fn delete_all_role_handler(
     }
 }
 
-pub fn role_routes(app_state: Arc<AppState>) -> OpenApiRouter {
+pub fn role_routes(state: Arc<AppState>) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/api/roles", get(get_roles))
         .route("/api/roles/active", get(get_active_roles))
@@ -452,11 +485,18 @@ pub fn role_routes(app_state: Arc<AppState>) -> OpenApiRouter {
         .route("/api/roles/delete/{id}", delete(delete_role))
         .route("/api/roles/restore-all", post(restore_all_role_handler))
         .route("/api/roles/delete-all", post(delete_all_role_handler))
-        .route_layer(middleware::from_fn(session_middleware))
-        .route_layer(middleware::from_fn(jwt::auth))
-        .route_layer(middleware::from_fn(rate_limit_middleware))
-        .layer(Extension(app_state.di_container.role_clients.clone()))
-        .layer(Extension(app_state.session.clone()))
-        .layer(Extension(app_state.rate_limit.clone()))
-        .layer(Extension(app_state.jwt_config.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            session_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(state.clone(), jwt::auth))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            circuit_breaker_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_limiter_middleware,
+        ))
+        .with_state(state)
 }

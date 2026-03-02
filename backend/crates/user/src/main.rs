@@ -1,11 +1,17 @@
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 use anyhow::{Context, Result};
 use genproto::user::user_service_server::UserServiceServer;
 use shared::{
-    config::{Config, ConnectionManager},
+    config::{Config, ConnectionManager, GrpcServerConfig},
     utils::{Telemetry, init_logger},
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tower::limit::ConcurrencyLimitLayer;
 use tracing::{error, info, warn};
 use user::{config::ServerConfig, service::UserServiceImpl, state::AppState};
 
@@ -82,7 +88,6 @@ async fn run_servers(
     state: Arc<AppState>,
     shutdown_tx: broadcast::Sender<()>,
 ) -> Result<tokio::task::JoinHandle<()>> {
-    let service = UserServiceImpl::new(state.di_container.clone());
     let grpc_addr = server_config.grpc_addr;
 
     let shutdown_tx_for_server = shutdown_tx.clone();
@@ -91,10 +96,12 @@ async fn run_servers(
     let server_handle = tokio::spawn(async move {
         loop {
             info!("Attempting to start gRPC server on {grpc_addr}");
+            let state = Arc::clone(&state);
+            let service = UserServiceImpl::new(state);
 
             let shutdown_rx = shutdown_tx_for_server.subscribe();
 
-            match start_grpc_server(service.clone(), grpc_addr, shutdown_rx).await {
+            match start_grpc_server(service, grpc_addr, shutdown_rx).await {
                 Ok(()) => {
                     info!("gRPC server stopped gracefully.");
                     break;
@@ -151,7 +158,9 @@ async fn start_grpc_server(
     addr: std::net::SocketAddr,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<()> {
-    info!("Starting gRPC server on {addr}");
+    let config = GrpcServerConfig::from_env()?;
+
+    info!("Starting gRPC server on {addr} with config: {:?}", config);
 
     let shutdown_future = async move {
         let _ = shutdown_rx.recv().await;
@@ -159,6 +168,15 @@ async fn start_grpc_server(
     };
 
     tonic::transport::Server::builder()
+        .layer(ConcurrencyLimitLayer::new(config.concurrency_limit))
+        .tcp_keepalive(config.tcp_keepalive())
+        .tcp_nodelay(config.tcp_nodelay)
+        .timeout(config.timeout())
+        .http2_keepalive_interval(config.http2_keepalive_interval())
+        .http2_keepalive_timeout(config.http2_keepalive_timeout())
+        .initial_connection_window_size(config.initial_connection_window_size())
+        .initial_stream_window_size(config.initial_stream_window_size())
+        .max_concurrent_streams(Some(config.max_concurrent_streams))
         .add_service(UserServiceServer::new(service))
         .serve_with_shutdown(addr, shutdown_future)
         .await

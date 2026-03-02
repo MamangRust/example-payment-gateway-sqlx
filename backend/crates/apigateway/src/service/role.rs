@@ -5,16 +5,13 @@ use genproto::role::{
     CreateRoleRequest, FindAllRoleRequest, FindByIdRoleRequest, FindByIdUserRoleRequest,
     UpdateRoleRequest, role_service_client::RoleServiceClient,
 };
-use opentelemetry::{
-    Context, KeyValue,
-    global::{self, BoxedTracer},
-    trace::{Span, SpanKind, TraceContextExt, Tracer},
-};
+use opentelemetry::KeyValue;
 use shared::{
     abstract_trait::role::http::{
         RoleCommandGrpcClientTrait, RoleGrpcClientServiceTrait, RoleQueryGrpcClientTrait,
     },
     cache::CacheStore,
+    context::shared_resources::SharedResources,
     domain::{
         requests::role::{
             CreateRoleRequest as DomainCreateRoleRequest, FindAllRoles as DomainFindAllRoles,
@@ -23,115 +20,25 @@ use shared::{
         responses::{ApiResponse, ApiResponsePagination, RoleResponse, RoleResponseDeleteAt},
     },
     errors::{AppErrorGrpc, HttpError},
-    utils::{MetadataInjector, Method, Metrics, Status as StatusUtils, TracingContext},
+    observability::{Method, TracingMetrics},
 };
 use std::sync::Arc;
-use tokio::time::Instant;
 use tonic::{Request, transport::Channel};
-use tracing::{error, info, instrument};
+use tracing::{info, instrument};
 
 pub struct RoleGrpcClientService {
     client: RoleServiceClient<Channel>,
-    metrics: Metrics,
+    tracing_metrics_core: TracingMetrics,
     cache_store: Arc<CacheStore>,
 }
 
 impl RoleGrpcClientService {
-    pub fn new(client: RoleServiceClient<Channel>, cache_store: Arc<CacheStore>) -> Result<Self> {
-        let metrics = Metrics::new();
-
+    pub fn new(client: RoleServiceClient<Channel>, shared: &SharedResources) -> Result<Self> {
         Ok(Self {
             client,
-            metrics,
-            cache_store,
+            tracing_metrics_core: Arc::clone(&shared.tracing_metrics),
+            cache_store: Arc::clone(&shared.cache_store),
         })
-    }
-    fn get_tracer(&self) -> BoxedTracer {
-        global::tracer("role-client-service")
-    }
-
-    fn inject_trace_context<T>(&self, cx: &Context, request: &mut Request<T>) {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(cx, &mut MetadataInjector(request.metadata_mut()))
-        });
-    }
-
-    fn start_tracing(&self, operation_name: &str, attributes: Vec<KeyValue>) -> TracingContext {
-        let start_time = Instant::now();
-        let tracer = self.get_tracer();
-        let mut span = tracer
-            .span_builder(operation_name.to_string())
-            .with_kind(SpanKind::Server)
-            .with_attributes(attributes)
-            .start(&tracer);
-
-        info!("Starting operation: {operation_name}");
-
-        span.add_event(
-            "Operation started",
-            vec![
-                KeyValue::new("operation", operation_name.to_string()),
-                KeyValue::new("timestamp", start_time.elapsed().as_secs_f64().to_string()),
-            ],
-        );
-
-        let cx = Context::current_with_span(span);
-        TracingContext { cx, start_time }
-    }
-
-    async fn complete_tracing_success(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, true, message)
-            .await;
-    }
-
-    async fn complete_tracing_error(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        error_message: &str,
-    ) {
-        self.complete_tracing_internal(tracing_ctx, method, false, error_message)
-            .await;
-    }
-
-    async fn complete_tracing_internal(
-        &self,
-        tracing_ctx: &TracingContext,
-        method: Method,
-        is_success: bool,
-        message: &str,
-    ) {
-        let status_str = if is_success { "SUCCESS" } else { "ERROR" };
-        let status = if is_success {
-            StatusUtils::Success
-        } else {
-            StatusUtils::Error
-        };
-        let elapsed = tracing_ctx.start_time.elapsed().as_secs_f64();
-
-        tracing_ctx.cx.span().add_event(
-            "Operation completed",
-            vec![
-                KeyValue::new("status", status_str),
-                KeyValue::new("duration_secs", elapsed.to_string()),
-                KeyValue::new("message", message.to_string()),
-            ],
-        );
-
-        if is_success {
-            info!("Operation completed successfully: {message}");
-        } else {
-            error!("Operation failed: {message}");
-        }
-
-        self.metrics.record(method, status, elapsed);
-
-        tracing_ctx.cx.span().end();
     }
 }
 
@@ -154,7 +61,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindAllRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -171,7 +78,8 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!(
             "role:find_all:page:{page}:size:{page_size}:search:{}",
@@ -185,19 +93,22 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
         {
             let log_msg = format!("✅ Found {} roles in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         let response = match self.client.clone().find_all_role(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully fetched roles")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully fetched roles")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
                     .await;
 
                 return Err(AppErrorGrpc::from(status).into());
@@ -241,7 +152,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindActiveRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -258,7 +169,8 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!(
             "role:find_active:page:{page}:size:{page_size}:search:{}",
@@ -272,19 +184,22 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
         {
             let log_msg = format!("✅ Found {} active roles in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         let response = match self.client.clone().find_by_active(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully fetched roles")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully fetched roles")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
                     .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -326,7 +241,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
         );
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindTrashedRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -343,7 +258,8 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
             search: req.search.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!(
             "role:find_trashed:page:{page}:size:{page_size}:search:{:?}",
@@ -357,19 +273,22 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
         {
             let log_msg = format!("✅ Found {} trashed roles in cache", cache.data.len());
             info!("{log_msg}");
-            self.complete_tracing_success(&tracing_ctx, method, &log_msg)
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, &log_msg)
                 .await;
             return Ok(cache);
         }
 
         let response = match self.client.clone().find_by_trashed(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully fetched roles")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully fetched roles")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
                     .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -403,7 +322,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
         info!("Retrieving Role: {}", id);
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindByIdRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -414,7 +333,8 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
 
         let mut request = Request::new(FindByIdRoleRequest { role_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("role:find_by_id:id:{id}");
 
@@ -424,19 +344,22 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
             .await
         {
             info!("✅ Found role in cache");
-            self.complete_tracing_success(&tracing_ctx, method, "Role retrieved from cache")
+            self.tracing_metrics_core
+                .complete_tracing_success(&tracing_ctx, method, "Role retrieved from cache")
                 .await;
             return Ok(cache);
         }
 
         let response = match self.client.clone().find_by_id_role(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully fetched Role")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully fetched Role")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch Role")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch Role")
                     .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -473,7 +396,7 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
         info!("Fetching Roles by user_id: {}", user_id);
 
         let method = Method::Get;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "FindByIdUserRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -484,7 +407,8 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
 
         let mut request = Request::new(FindByIdUserRoleRequest { user_id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let cache_key = format!("role:find_by_user_id:user_id:{user_id}");
 
@@ -494,23 +418,26 @@ impl RoleQueryGrpcClientTrait for RoleGrpcClientService {
             .await
         {
             info!("✅ Found roles for user in cache");
-            self.complete_tracing_success(
-                &tracing_ctx,
-                method,
-                "Roles for user retrieved from cache",
-            )
-            .await;
+            self.tracing_metrics_core
+                .complete_tracing_success(
+                    &tracing_ctx,
+                    method,
+                    "Roles for user retrieved from cache",
+                )
+                .await;
             return Ok(cache);
         }
 
         let response = match self.client.clone().find_by_user_id(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully fetched roles")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully fetched roles")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to fetch roles")
                     .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -549,7 +476,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         info!("Creating new Role: {}", req.name.clone());
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "CreateRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -562,16 +489,19 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
             name: req.name.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let response = match self.client.clone().create_role(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully created Role")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully created Role")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to create Role")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to create Role")
                     .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -622,7 +552,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         info!("Updating Role: {id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "UpdateRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -637,16 +567,19 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
             name: req.name.clone(),
         });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let response = match self.client.clone().update_role(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully updated Role")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully updated Role")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to update Role")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to update Role")
                     .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -695,7 +628,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         info!("Soft deleting Role: {id}");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "TrashRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -706,20 +639,23 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
 
         let mut request = Request::new(FindByIdRoleRequest { role_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let response = match self.client.clone().trashed_role(request).await {
             Ok(response) => {
-                self.complete_tracing_success(
-                    &tracing_ctx,
-                    method,
-                    "Successfully soft deleted Role",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_success(
+                        &tracing_ctx,
+                        method,
+                        "Successfully soft deleted Role",
+                    )
+                    .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to soft delete Role")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to soft delete Role")
                     .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -759,7 +695,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         info!("Restoring Role: {}", id);
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -770,16 +706,19 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
 
         let mut request = Request::new(FindByIdRoleRequest { role_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let response = match self.client.clone().restore_role(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully restored Role")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully restored Role")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to restore Role")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to restore Role")
                     .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -820,7 +759,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         info!("Permanently deleting Role: {id}");
 
         let method = Method::Delete;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -831,16 +770,19 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
 
         let mut request = Request::new(FindByIdRoleRequest { role_id: id });
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let response = match self.client.clone().delete_role_permanent(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "Successfully deleted Role")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "Successfully deleted Role")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to delete Role")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to delete Role")
                     .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -862,7 +804,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         info!("Restoring all trashed Roles");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "RestoreAllRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -872,16 +814,19 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
 
         let mut request = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let response = match self.client.clone().restore_all_role(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "All Roles restored")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "All Roles restored")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(&tracing_ctx, method, "Failed to restore all Roles")
+                self.tracing_metrics_core
+                    .complete_tracing_error(&tracing_ctx, method, "Failed to restore all Roles")
                     .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
@@ -914,7 +859,7 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
         info!("Permanently deleting all trashed Roles");
 
         let method = Method::Post;
-        let tracing_ctx = self.start_tracing(
+        let tracing_ctx = self.tracing_metrics_core.start_tracing(
             "DeleteAllRole",
             vec![
                 KeyValue::new("component", "role"),
@@ -924,21 +869,24 @@ impl RoleCommandGrpcClientTrait for RoleGrpcClientService {
 
         let mut request = Request::new(());
 
-        self.inject_trace_context(&tracing_ctx.cx, &mut request);
+        self.tracing_metrics_core
+            .inject_trace_context(&tracing_ctx.cx, &mut request);
 
         let response = match self.client.clone().delete_all_role_permanent(request).await {
             Ok(response) => {
-                self.complete_tracing_success(&tracing_ctx, method, "All trashed Roles deleted")
+                self.tracing_metrics_core
+                    .complete_tracing_success(&tracing_ctx, method, "All trashed Roles deleted")
                     .await;
                 response
             }
             Err(status) => {
-                self.complete_tracing_error(
-                    &tracing_ctx,
-                    method,
-                    "Failed to delete all trashed Roles",
-                )
-                .await;
+                self.tracing_metrics_core
+                    .complete_tracing_error(
+                        &tracing_ctx,
+                        method,
+                        "Failed to delete all trashed Roles",
+                    )
+                    .await;
                 return Err(AppErrorGrpc::from(status).into());
             }
         };
