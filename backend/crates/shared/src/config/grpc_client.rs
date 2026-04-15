@@ -20,45 +20,41 @@ pub struct GrpcClientConfig {
 impl GrpcClientConfig {
     pub fn from_env() -> Result<Self> {
         let config = Self {
-            pool_size: Self::get_env("GRPC_CLIENT_POOL_SIZE").unwrap_or_else(|| 25),
+            pool_size: Self::get_env("GRPC_CLIENT_POOL_SIZE").unwrap_or(25),
 
             concurrency_per_connection: Self::get_env("GRPC_CLIENT_CONCURRENCY_PER_CONNECTION")
-                .unwrap_or_else(|| 500),
+                .unwrap_or(500),
 
-            rate_limit_per_sec: Self::get_env("GRPC_CLIENT_RATE_LIMIT_PER_SEC")
-                .unwrap_or_else(|| 2000),
+            rate_limit_per_sec: Self::get_env("GRPC_CLIENT_RATE_LIMIT_PER_SEC").unwrap_or(2000),
 
-            connect_timeout_secs: Self::get_env("GRPC_CLIENT_CONNECT_TIMEOUT_SECS")
-                .unwrap_or_else(|| 5),
+            connect_timeout_secs: Self::get_env("GRPC_CLIENT_CONNECT_TIMEOUT_SECS").unwrap_or(5),
 
-            request_timeout_secs: Self::get_env("GRPC_CLIENT_REQUEST_TIMEOUT_SECS")
-                .unwrap_or_else(|| 15),
+            request_timeout_secs: Self::get_env("GRPC_CLIENT_REQUEST_TIMEOUT_SECS").unwrap_or(15),
 
-            tcp_keepalive_secs: Self::get_env("GRPC_CLIENT_TCP_KEEPALIVE_SECS")
-                .unwrap_or_else(|| 60),
+            tcp_keepalive_secs: Self::get_env("GRPC_CLIENT_TCP_KEEPALIVE_SECS").unwrap_or(60),
 
             keepalive_timeout_secs: Self::get_env("GRPC_CLIENT_KEEPALIVE_TIMEOUT_SECS")
-                .unwrap_or_else(|| 20),
+                .unwrap_or(20),
 
             http2_keepalive_interval_secs: Self::get_env(
                 "GRPC_CLIENT_HTTP2_KEEPALIVE_INTERVAL_SECS",
             )
-            .unwrap_or_else(|| 30),
+            .unwrap_or(30),
 
             initial_connection_window_size_mb: Self::get_env(
                 "GRPC_CLIENT_INITIAL_CONNECTION_WINDOW_SIZE_MB",
             )
-            .unwrap_or_else(|| 4),
+            .unwrap_or(4),
 
             initial_stream_window_size_mb: Self::get_env(
                 "GRPC_CLIENT_INITIAL_STREAM_WINDOW_SIZE_MB",
             )
-            .unwrap_or_else(|| 2),
+            .unwrap_or(2),
 
-            tcp_nodelay: Self::get_env("GRPC_CLIENT_TCP_NODELAY").unwrap_or_else(|| true),
+            tcp_nodelay: Self::get_env("GRPC_CLIENT_TCP_NODELAY").unwrap_or(true),
 
             keep_alive_while_idle: Self::get_env("GRPC_CLIENT_KEEP_ALIVE_WHILE_IDLE")
-                .unwrap_or_else(|| true),
+                .unwrap_or(true),
         };
 
         tracing::info!("gRPC Client Config loaded: {:?}", config);

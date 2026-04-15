@@ -98,7 +98,7 @@ impl IntoResponse for HttpError {
         let body = Json(ErrorResponse {
             status: "error".into(),
             message: msg,
-            trace_id: trace_id,
+            trace_id,
         });
 
         (status, body).into_response()

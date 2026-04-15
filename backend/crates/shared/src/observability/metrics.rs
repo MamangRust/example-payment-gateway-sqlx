@@ -3,11 +3,10 @@ use opentelemetry::{
     metrics::{Counter, Gauge, Histogram, Meter},
 };
 use std::{
-    fmt::{Result,Display, Formatter},
+    fmt::{Display, Formatter, Result},
     time::{SystemTime, UNIX_EPOCH},
 };
 use sysinfo::{ProcessesToUpdate, System};
-
 
 #[derive(Debug)]
 pub struct SystemMetrics {
@@ -63,9 +62,7 @@ impl SystemMetrics {
                 .with_unit("%")
                 .build(),
 
-            thread_count: meter
-                .i64_gauge("process.threads.count")
-                .build(),
+            thread_count: meter.i64_gauge("process.threads.count").build(),
 
             process_uptime_seconds: meter
                 .u64_gauge("process.uptime_seconds")
@@ -77,26 +74,21 @@ impl SystemMetrics {
     }
 
     pub fn update_metrics(&mut self) {
-        self.system.refresh_processes(
-            ProcessesToUpdate::Some(&[self.pid]),
-true,
-        );
+        self.system
+            .refresh_processes(ProcessesToUpdate::Some(&[self.pid]), true);
         self.system.refresh_memory();
         self.system.refresh_cpu_usage();
 
         if let Some(process) = self.system.process(self.pid) {
-            let memory_used_mb =
-                process.memory() as f64 / 1_048_576.0;
+            let memory_used_mb = process.memory() as f64 / 1_048_576.0;
             self.memory_used_mb.record(memory_used_mb, &[]);
 
-            let available_mb =
-                self.system.available_memory() as f64 / 1_048_576.0;
+            let available_mb = self.system.available_memory() as f64 / 1_048_576.0;
             self.memory_available_mb.record(available_mb, &[]);
 
             let total_memory = self.system.total_memory();
             if total_memory > 0 {
-                let usage_percent =
-                    (process.memory() as f64 / total_memory as f64) * 100.0;
+                let usage_percent = (process.memory() as f64 / total_memory as f64) * 100.0;
                 self.memory_usage_percent.record(usage_percent, &[]);
             }
 
@@ -203,8 +195,7 @@ impl Default for Metrics {
 
 pub async fn run_metrics_collector() {
     let mut metrics = SystemMetrics::new();
-    let mut interval =
-        tokio::time::interval(std::time::Duration::from_secs(15));
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
 
     loop {
         interval.tick().await;

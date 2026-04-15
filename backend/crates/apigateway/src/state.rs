@@ -32,7 +32,7 @@ pub struct AppState {
 impl AppState {
     pub async fn new(jwt_secret: &str) -> Result<Self> {
         let jwt_config = Arc::new(JwtConfig::new(jwt_secret)) as DynJwtService;
-        
+
         let grpc_config = GrpcServiceEndpoints::init().context("failed config grpc")?;
 
         let redis_config = RedisConfig::new();

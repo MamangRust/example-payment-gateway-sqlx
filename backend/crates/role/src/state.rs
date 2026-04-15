@@ -47,7 +47,6 @@ impl AppState {
 
         tokio::spawn(run_metrics_collector());
 
-
         Ok(Self {
             di_container,
             circuit_breaker,

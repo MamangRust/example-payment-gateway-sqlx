@@ -2,7 +2,7 @@ use crate::di::DependenciesInject;
 use anyhow::{Context, Result};
 use shared::{
     config::{ConnectionPool, RedisConfig, RedisPool},
-    observability:: run_metrics_collector,
+    observability::run_metrics_collector,
     resilience::{CircuitBreaker, LoadMonitor},
 };
 use std::{fmt, sync::Arc, time::Duration};

@@ -41,10 +41,10 @@ impl From<AppErrorGrpc> for Status {
 
         let mut metadata = MetadataMap::new();
 
-        if trace_id != TraceId::INVALID {
-            if let Ok(trace_val) = trace_id.to_string().parse() {
-                metadata.insert("x-trace-id", trace_val);
-            }
+        if trace_id != TraceId::INVALID
+            && let Ok(trace_val) = trace_id.to_string().parse()
+        {
+            metadata.insert("x-trace-id", trace_val);
         }
 
         let (code, message) = match err {
