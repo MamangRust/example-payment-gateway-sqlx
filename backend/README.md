@@ -1,4 +1,4 @@
-# Example Payment Gateway (Modular Monolith)
+# Payment Gateway Backend Reference
 
 ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
 ![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
@@ -8,37 +8,64 @@
 ![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=Prometheus&logoColor=white)
 ![Grafana](https://img.shields.io/badge/grafana-%23F46800.svg?style=for-the-badge&logo=grafana&logoColor=white)
 
-This project is an example implementation of a **payment gateway system** built with Rust, featuring a **modular monolith** architecture. It simulates a complete digital financial transaction process, including user management, digital wallets, and various transaction types (top-up, transfer, withdrawal).
+This directory contains the primary backend implementation for the Payment Gateway System. Developed in Rust, the backend utilizes a modular monolith architecture with internal domain services orchestrated via gRPC. This implementation serves as a comprehensive reference for engineering scalable, type-safe, and observable financial systems.
 
-The primary goal is to provide a comprehensive, real-world reference for building robust, scalable, and observable systems using Rust's modern ecosystem.
+## Table of Contents
 
-## Features
+- [Overview](#overview)
+- [Core Features](#core-features)
+- [Service Architecture](#service-architecture)
+- [Technology Stack](#technology-stack)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Option 1: Docker Compose Deployment](#option-1-docker-compose-deployment)
+  - [Option 2: Kubernetes Deployment](#option-2-kubernetes-deployment)
+  - [Option 3: Manual Development Configuration](#option-3-manual-development-configuration)
+- [Observability Suite](#observability-suite)
+- [API Documentation](#api-documentation)
+- [Project Layout](#project-layout)
+- [Development Guide](#development-guide)
+- [Service Reference](#service-reference)
+- [Monitoring and Visualizations](#monitoring-and-visualizations)
 
--   ✅ **JWT Authentication** with refresh tokens
--   ✅ **Role-Based Access Control (RBAC)**
--   ✅ **Digital Wallet Management**
--   ✅ **Complete Transaction Lifecycle** (Top-up, Transfer, Withdraw, Payment)
--   ✅ **Payment Card Management**
--   ✅ **Merchant API Key Management**
--   ✅ **Type-Safe gRPC Communication** between internal modules
--   ✅ **Comprehensive Observability** with metrics, logging, and distributed tracing
--   ✅ **Containerized Deployment** with Docker and Kubernetes
--   ✅ **API Documentation** with Swagger UI
+---
 
-## Architecture
+## Overview
 
-The system uses a modular monolith architecture where an **API Gateway** serves as the single entry point. Each business domain is separated into an independent Rust crate (module), and all inter-module communication is handled via gRPC for high performance and type safety.
+The backend architecture is engineered for high-integrity financial processing. It encompasses user authentication, digital wallet management, payment card processing abstractions, merchant lifecycle management, and a comprehensive suite of transaction services.
+
+By leveraging a modular monolith design, the system enforces strict domain boundaries through encapsulated Rust crates. This methodology provides several architectural advantages:
+
+- **Type Safety:** Strong interface contracts across all service boundaries.
+- **Performance:** High-efficiency inter-service communication via gRPC.
+- **Maintainability:** Clear separation of concerns and business logic.
+- **Scalability:** Simplified development lifecycle with a transparent path to microservice decomposition.
+
+## Core Features
+
+- **Formal Identity Management:** JWT-based authentication with secure refresh token rotation.
+- **Access Governance:** Role-Based Access Control (RBAC) featuring fine-grained permissioning.
+- **Financial Core:** Digital wallet management with high-precision balance tracking.
+- **Transaction Orchestration:** Support for Top-ups, Transfers, Withdrawals, and Payments.
+- **Secure Instrument Vault:** Abstractions for payment card metadata storage and validation logic.
+- **Merchant Gateway:** Lifecycle management and secure API key authentication for external entities.
+- **In-Depth Observability:** Unified telemetry across metrics, distributed tracing, and logging.
+- **Container Orchestration:** Optimized deployment manifests for Docker and Kubernetes.
+
+## Service Architecture
+
+The backend consists of domain-isolated modules orchestrated by a centralized API Gateway. This gateway serves as the ingress for external RESTful traffic, delegating operations to internal gRPC services.
 
 ```mermaid
 graph TD
-    subgraph "Clients (Web/Mobile/CLI)"
-        A[End User or API Client]
+    subgraph "Clients"
+        A[External Ingress]
     end
 
-    subgraph "Payment Gateway System"
+    subgraph "Payment Backend Infrastructure"
         B(API Gateway <br> HTTP/REST)
 
-        subgraph "Internal gRPC Services (Modules)"
+        subgraph "Internal Domain Modules"
             C[Auth Service]
             D[User Service]
             E[Card Service]
@@ -51,8 +78,8 @@ graph TD
             L[Withdraw Service]
         end
 
-        M[(Database <br> PostgreSQL)]
-        N[(Cache <br> Redis)]
+        M[(Relational Store <br> PostgreSQL)]
+        N[(Key-Value Store <br> Redis)]
     end
 
     A --> B
@@ -80,239 +107,148 @@ graph TD
     L --> M
 ```
 
+### Domain Component Responsibilities
+
+| Component | Responsibility Profile |
+|-----------|------------------------|
+| **API Gateway** | Unified entry point; manages HTTP/REST ingress, authentication, and internal request routing. |
+| **Auth Service** | Identity lifecycle management; generates JWTs and handles secure token rotation. |
+| **User Service** | User profile orchestration and account administration. |
+| **Card Service** | Secure payment card metadata storage and validation logic. |
+| **Saldo Service** | Primary ledger for wallet balances and atomic transaction history. |
+| **Merchant Service** | Merchant onboarding and secure API key authentication. |
+| **Role Service** | Permission definitions and RBAC enforcement. |
+| **Transaction Services** | Specialized orchestrators for diverse financial transaction flows. |
+
+---
+
 ## Technology Stack
 
-| Category              | Technology                                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Language**          | Rust (Stable)                                                                                           |
-| **Async Runtime**     | `tokio`                                                                                                 |
-| **Web Framework**     | `axum` (for API Gateway)                                                                                |
-| **Inter-service**     | `tonic` (gRPC), `prost` (Protobuf)                                                                      |
-| **Database**          | PostgreSQL                                                                                              |
-| **ORM / DB Driver**   | `sqlx`                                                                                                  |
-| **Cache**             | Redis                                                                                                   |
-| **Containerization**  | Docker, Docker Compose                                                                                  |
-| **Orchestration**     | Kubernetes (Minikube for local setup)                                                                   |
-| **Observability**     | **OpenTelemetry**, **Prometheus** (metrics), **Grafana** (dashboards), **Jaeger** (tracing), **Loki** (logs) |                                                                        
+| Domain | Technology | Implementation Role |
+|----------|------------|---------------------|
+| **Language** | Rust (Stable) | Core system logic |
+| **Asynchronous Runtime** | `tokio` | Task scheduling and I/O management |
+| **Ingress Framework** | `axum` | RESTful API Gateway |
+| **Inter-Service Mesh** | `tonic`, `prost` | gRPC implementation and Protobuf compilation |
+| **Primary Store** | PostgreSQL | Relational data persistence |
+| **Data Interface** | `sqlx` | Type-safe SQL query orchestration |
+| **Caching Tier** | Redis | Session state and performance caching |
+| **Telemetry** | `opentelemetry`, `tracing` | Distributed trace propagation and logging |
+| **Metrics** | `prometheus`, `metrics` | Aggregation and export of system metrics |
+
+---
 
 ## Getting Started
 
 ### Prerequisites
 
--   [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
--   [`sqlx-cli`](https://github.com/launchbadge/sqlx/tree/main/sqlx-cli) for database migrations.
--   (Optional, for K8s) [Minikube](https://minikube.sigs.k8s.io/docs/start/) and [kubectl](https://kubernetes.io/docs/tasks/tools/).
+The following operational tools are required for system deployment:
+
+- [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/install/)
+- [`sqlx-cli`](https://github.com/launchbadge/sqlx/tree/main/sqlx-cli) for database lifecycle management.
+- (Optional) [Minikube](https://minikube.sigs.k8s.io/docs/start/) for local Kubernetes testing.
+
+### Option 1: Docker Compose Deployment
+
+1. **Direct Path:**
+   ```bash
+   cd backend
+   ```
+2. **Schema Integration:**
+   ```bash
+   docker-compose up -d db
+   # Allow database to initialize before proceeding
+   sqlx migrate run
+   ```
+3. **Full Stack Orchestration:**
+   ```bash
+   docker-compose up -d
+   ```
+4. **Verification:** Access the Swagger UI documentation at `http://localhost:5000/swagger-ui/`.
+
+### Option 2: Kubernetes Deployment
+
+1. **Image Preparation:**
+   ```bash
+   ./build-docker-images.sh
+   ```
+2. **Environment Setup:**
+   ```bash
+   ./k8s/scripts/setup-minikube.sh
+   ```
 
 ---
 
-### Option 1: Run with Docker Compose (Recommended)
+## Observability Suite
 
-This is the fastest way to get the entire system running on your local machine.
+The backend provides integrated telemetry accessible via the following components:
 
-1.  **Clone the Repository**
-
-    ```bash
-    git clone https://github.com/MamangRust/example-payment-gateway-sqlx.git
-    cd example-payment-gateway-sqlx/backend
-    ```
-
-2.  **Configure Environment**
-
-    Review the `.env` file and ensure the settings (especially `DATABASE_URL`) match the configuration in `docker-compose.yml`. The defaults should work out of the box.
-
-3.  **Run the Database Migration**
-
-    Before starting the services, you need to set up the database schema.
-    
-    First, start the database container:
-    ```bash
-    docker-compose up -d db
-    ```
-    
-    Wait a few seconds for it to initialize, then run the migrations:
-    ```bash
-    # Ensure your .env file is present in the current directory
-    sqlx migrate run
-    ```
-
-4.  **Start All Services**
-
-    Now, bring up the entire stack, including all application services and the observability suite.
-
-    ```bash
-    docker-compose up -d
-    ```
-
-    The application services use pre-built images from `ghcr.io`. If you want to use your local code changes, you must first build the images using the `./build-docker-images.sh` script.
-
-5.  **Access the System**
-    -   **API Gateway / Swagger UI**: `http://localhost:5000/swagger-ui/`
-    -   See the **Observability** section below for more URLs.
+| Component | Endpoint | Responsibility |
+|---------|-----|-------------|
+| **Grafana** | `http://localhost:3000` | Centralized Operational Dashboards |
+| **Prometheus** | `http://localhost:9090` | In-memory Metrics Storage |
+| **Jaeger** | `http://localhost:16686` | End-to-end Trace Visualization |
+| **Loki** | `http://localhost:3100` | Log Aggregation Framework |
 
 ---
-
-### Option 2: Deploy to Kubernetes (Minikube)
-
-This method simulates a production-like deployment on a local Kubernetes cluster.
-
-1.  **Clone the Repository**
-
-    ```bash
-    git clone https://github.com/MamangRust/example-payment-gateway-sqlx.git
-    cd example-payment-gateway-sqlx/backend
-    ```
-
-2.  **Build Local Docker Images**
-
-    The Kubernetes manifests are configured to use local images. Run the build script to create them.
-
-    ```bash
-    ./build-docker-images.sh
-    ```
-
-3.  **Run the Minikube Setup Script**
-
-    This script will:
-    -   Start Minikube (if not already running).
-    -   Load the necessary Docker images into Minikube's context.
-    -   Apply all Kubernetes manifests for databases, observability, and application services.
-
-    ```bash
-    ./k8s/scripts/setup-minikube.sh
-    ```
-
-4.  **Access the System**
-
-    The script will output all the access URLs. The application will be available via a NodePort on your Minikube IP. Example:
-
-    -   **Main Application**: `http://<MINIKUBE_IP>:30080`
-    -   **Grafana**: `http://<MINIKUBE_IP>:30030`
-    -   **Jaeger**: `http://<MINIKUBE_IP>:31686`
-
-## Observability Stack
-
-The `docker-compose` and `minikube` setups include a full observability stack. Here’s how to access the different tools when running with **Docker Compose**:
-
-| Service        | URL                             | Description                                            |
-| -------------- | ------------------------------- | ------------------------------------------------------ |
-| **Grafana**    | `http://localhost:3000`         | Dashboards for metrics and logs. (Login: admin/admin)  |
-| **Prometheus** | `http://localhost:9090`         | Time-series database for metrics.                      |
-| **Jaeger**     | `http://localhost:16686`        | Distributed tracing UI.                                |
-| **Loki**       | `http://localhost:3100`         | Log aggregation system.                                |
-| **Alertmanager**| `http://localhost:9093`        | Manages alerts sent by Prometheus.                     |
-
-![Example Dashboard](./images/example-dashboard.png)
 
 ## API Documentation
 
-The API Gateway provides OpenAPI documentation via Swagger UI. Once the system is running, you can access it at:
+Formalized API specifications are available through an interactive Swagger UI:
+`http://localhost:5000/swagger-ui/`
 
--   `http://localhost:5000/swagger-ui/`
+![Swagger UI Specification](./images/swagger-ui.png)
 
-![Swagger UI](./images/swagger-ui.png)
+## Project Layout
 
-## Project Structure
-
--   `crates/`: Contains all the independent Rust modules (services).
-    -   `apigateway`: The public-facing REST API gateway.
-    -   `auth`, `user`, `card`, etc.: Internal services, each representing a business domain.
-    -   `genproto`: Crate for compiling `.proto` files into Rust code for gRPC.
--   `proto/`: Protobuf definition files.
--   `migrations/`: SQLx database migrations.
--   `docker-compose.yml`: Defines the local development environment.
--   `k8s/`: Contains all Kubernetes manifests for deployment.
--   `observability/`: Configuration files for Prometheus, Grafana, Loki, etc.
-
-<details>
-<summary><b>Manual Installation (Without Containers)</b></summary>
-
-### Prerequisites
-
--   [Rust & Cargo](https://www.rust-lang.org/tools/install)
--   [`sqlx-cli`](https://github.com/launchbadge/sqlx/tree/main/sqlx-cli)
--   [`protoc`](https://grpc.io/docs/protoc-installation/)
--   A running PostgreSQL instance.
-
-### Installation Steps
-
-1.  **Clone Repository**
-
-    ```bash
-    git clone https://github.com/MamangRust/example-payment-gateway-sqlx.git
-    cd example-payment-gateway-sqlx/backend
-    ```
-
-2.  **Setup Environment**
-    Create and edit an `.env` file with your database configuration.
-
-3.  **Database Migration**
-
-    ```bash
-    sqlx migrate run
-    ```
-
-4.  **Build Protobuf**
-
-    ```bash
-    cargo build -p genproto
-    ```
-
-5.  **Build All Services**
-    ```bash
-    cargo build --workspace
-    ```
-
-### Running the Application
-
-You need to run each service in a separate terminal.
-
-```bash
-# Terminal 1: API Gateway
-cargo run -p apigateway
-
-# Terminal 2: Auth Service
-cargo run -p auth
-
-# ... and so on for every other service in the `crates` directory.
+```text
+backend/
+├── crates/             # Domain-isolated Rust crates
+├── proto/              # Shared gRPC interface contracts
+├── migrations/         # Database lifecycle scripts
+├── observability/      # Operational configurations
+└── k8s/               # Deployment manifests
 ```
 
-</details>
+## Development Guide
 
+### Interface Compilation
+When updating interface definitions (`.proto`), synchronize the generated code:
+```bash
+cargo build -p genproto
+```
 
-## Preview
+### Testing Framework
+Execute the comprehensive test suite across the workspace:
+```bash
+cargo test --workspace
+```
 
-**Jaeger UI**
-![Jaeger UI](./images/jaeger.png)
+### Database Lifecycle
+```bash
+# Add new migration
+sqlx migrate add <description>
 
-**Node Exporter**
-![Node Exporter](./images/node-exporter.png)
+# Execute pending migrations
+sqlx migrate run
+```
 
-**Monitoring Memory**
-![Monitoring Memotry](./images/memory_allocation.png)
+---
 
-**Monitoring Card Service**
-![Card-Service](./images/CardService.png)
+## Monitoring and Visualizations
 
-**Monitoring Merchant Service**
-![Merchant-Service](./images/MerchantServic.png)
+### Distributed Tracing Correlation
+![Jaeger Tracing Flow](./images/jaeger.png)
 
-**Monitoring User Service**
-![User-Service](./images/UserService.png)
+### Infrastructure Telemetry
+![System Telemetry Overflow](./images/node-exporter.png)
 
-**Monitoring Role Service**
-![Role-Service](./images/RoleService.png)
+### Service-Specific Telemetry
+**Memory Utilization**
+![Memory Profile](./images/memory_allocation.png)
 
-**Monitoring Saldo Service**
-![Saldo-Service](./images/SaldoService.png)
+**Digital Wallet Analytics**
+![Wallet Metrics](./images/SaldoService.png)
 
-**Monitoring Topup Service**
-![Topup-Service](./images/TopupService.png)
-
-**Monitoring Transaction Service**
-![Transaction-Service](./images/TransactionService.png)
-
-**Monitoring Transfer Service**
-![Transfer-Service](./images/TransferService.png)
-
-**Monitoring Withdraw Service**
-![Withdraw-Service](./images/TransferService.png)
+**Transaction Engine Performance**
+![Transaction Orchestration](./images/TransactionService.png)

@@ -177,7 +177,7 @@ services:
 
   jaeger:
     image: jaegertracing/all-in-one:latest
-    container_name: jaeger-payment-tonic_debug
+    container_name: jaeger-piero_loka
     ports:
       - "16686:16686"
       - "14250:14250"
@@ -200,7 +200,7 @@ services:
 
   prometheus:
     image: prom/prometheus
-    container_name: prometheus-payment-tonic_debug
+    container_name: prometheus-piero_loka
     ports:
       - "9090:9090"
     volumes:
@@ -211,7 +211,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    container_name: grafana-payment-tonic_debug
+    container_name: grafana-piero_loka
     ports:
       - "3000:3000"
     environment:
